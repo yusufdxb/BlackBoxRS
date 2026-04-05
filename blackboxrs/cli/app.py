@@ -1,0 +1,526 @@
+"""Click-based CLI for BlackBoxRS.
+
+Provides commands for starting/stopping the daemon, viewing status,
+dumping and replaying logs, inspecting configuration, and initialising
+the configuration directory.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+from dataclasses import asdict
+from pathlib import Path
+from typing import TextIO
+
+import click
+import yaml
+
+from blackboxrs import __version__
+from blackboxrs.core.config import BlackBoxConfig
+from blackboxrs.core.schemas import BlackBoxEvent
+from blackboxrs.cli.daemon import BlackBoxDaemon
+from blackboxrs.cli.formatters import (
+    SEVERITY_COLORS,
+    format_banner,
+    format_event,
+    format_status,
+)
+
+# ---------------------------------------------------------------------------
+# Root group
+# ---------------------------------------------------------------------------
+
+
+@click.group()
+@click.version_option(version=__version__, prog_name="BlackBoxRS")
+def cli() -> None:
+    """BlackBoxRS -- Flight recorder for ROS 2 robots."""
+
+
+# ---------------------------------------------------------------------------
+# start
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    type=click.Path(exists=False),
+    default=None,
+    help="Path to a YAML configuration file.",
+)
+@click.option(
+    "--foreground",
+    "-f",
+    is_flag=True,
+    default=False,
+    help="Run in the foreground instead of daemonising.",
+)
+def start(config_path: str | None, foreground: bool) -> None:
+    """Start the BlackBoxRS daemon."""
+    cfg = _load_config(config_path)
+
+    running, pid = BlackBoxDaemon.is_running()
+    if running:
+        click.echo(
+            click.style(
+                f"BlackBoxRS is already running (PID {pid}). "
+                "Use 'blackboxrs stop' first.",
+                fg="yellow",
+            )
+        )
+        raise SystemExit(1)
+
+    if foreground:
+        _start_foreground(cfg)
+    else:
+        _start_background(config_path)
+
+
+def _start_foreground(cfg: BlackBoxConfig) -> None:
+    """Launch the daemon in the current process."""
+    daemon = BlackBoxDaemon(cfg)
+    click.echo(format_banner(daemon.session.session_id, cfg))
+    try:
+        daemon.start()
+        daemon.wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        daemon.stop()
+        click.echo(click.style("BlackBoxRS stopped.", fg="bright_black"))
+
+
+def _start_background(config_path: str | None) -> None:
+    """Spawn the daemon as a detached background process."""
+    cmd = [sys.executable, "-m", "src", "start", "--foreground"]
+    if config_path:
+        cmd.extend(["--config", config_path])
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        click.echo(click.style(f"Failed to spawn daemon: {exc}", fg="red"))
+        raise SystemExit(1)
+
+    # Give the child a moment to write its PID file
+    time.sleep(0.5)
+
+    running, pid = BlackBoxDaemon.is_running()
+    if running:
+        click.echo(
+            click.style(f"BlackBoxRS started in background (PID {pid}).", fg="green")
+        )
+    else:
+        click.echo(
+            click.style(
+                "BlackBoxRS daemon was spawned but does not appear to be running. "
+                "Try starting with --foreground to see errors.",
+                fg="yellow",
+            )
+        )
+        raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# stop
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+def stop() -> None:
+    """Stop the running BlackBoxRS daemon."""
+    running, pid = BlackBoxDaemon.is_running()
+    if not running:
+        click.echo(click.style("BlackBoxRS is not running.", fg="yellow"))
+        raise SystemExit(1)
+
+    try:
+        BlackBoxDaemon.stop_running()
+    except (RuntimeError, OSError) as exc:
+        click.echo(click.style(f"Failed to stop daemon: {exc}", fg="red"))
+        raise SystemExit(1)
+
+    click.echo(click.style(f"Sent stop signal to BlackBoxRS (PID {pid}).", fg="green"))
+
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+def status() -> None:
+    """Show current daemon status and recent event summary."""
+    running, pid = BlackBoxDaemon.is_running()
+
+    # Attempt to read recent events from the log directory
+    events = _read_recent_events(count=100)
+
+    click.echo()
+    click.echo(click.style("  BlackBoxRS Status", bold=True))
+    click.echo(click.style("  " + "-" * 40, fg="bright_black"))
+    click.echo(format_status(running, pid, events))
+
+    # Anomaly count
+    anomaly_count = sum(1 for e in events if e.source == "anomaly_engine")
+    if anomaly_count:
+        click.echo(
+            click.style(f"  Anomalies: {anomaly_count} detected", fg="yellow", bold=True)
+        )
+
+    click.echo()
+
+
+# ---------------------------------------------------------------------------
+# dump-log
+# ---------------------------------------------------------------------------
+
+
+@cli.command("dump-log")
+@click.option(
+    "--source",
+    "-s",
+    type=click.Choice(["ros", "system", "anomaly", "all"]),
+    default="all",
+    help="Filter events by source module.",
+)
+@click.option(
+    "--severity",
+    type=click.Choice(["debug", "info", "warning", "error", "critical"]),
+    default=None,
+    help="Show only events at this severity level.",
+)
+@click.option(
+    "--last",
+    "-n",
+    type=int,
+    default=50,
+    show_default=True,
+    help="Number of events to display.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    default=False,
+    help="Output events as raw JSON lines.",
+)
+@click.option(
+    "--follow",
+    "-f",
+    is_flag=True,
+    default=False,
+    help="Follow the log in real time (like tail -f).",
+)
+def dump_log(
+    source: str,
+    severity: str | None,
+    last: int,
+    as_json: bool,
+    follow: bool,
+) -> None:
+    """Display recorded events from the BlackBoxRS log files."""
+    source_map = {
+        "ros": "ros_monitor",
+        "system": "system_monitor",
+        "anomaly": "anomaly_engine",
+        "all": None,
+    }
+    source_filter = source_map[source]
+
+    if follow:
+        _follow_log(source_filter, severity, as_json)
+        return
+
+    events = _read_recent_events(count=last)
+    events = _apply_filters(events, source_filter, severity)
+
+    if not events:
+        click.echo(click.style("No matching events found.", fg="yellow"))
+        return
+
+    # Show only the last N after filtering
+    events = events[-last:]
+
+    for ev in events:
+        if as_json:
+            click.echo(ev.to_jsonl())
+        else:
+            click.echo(format_event(ev))
+
+
+def _follow_log(
+    source_filter: str | None,
+    severity: str | None,
+    as_json: bool,
+) -> None:
+    """Tail the log directory, printing new events as they appear."""
+    cfg = BlackBoxConfig.load()
+    log_dir = Path(os.path.expanduser(cfg.log_dir))
+    if not log_dir.is_dir():
+        click.echo(click.style(f"Log directory not found: {log_dir}", fg="red"))
+        raise SystemExit(1)
+
+    # Find the most recent log file
+    log_files = sorted(log_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    if not log_files:
+        click.echo(click.style("No log files found.", fg="yellow"))
+        raise SystemExit(1)
+
+    target = log_files[-1]
+    click.echo(click.style(f"Following {target.name} (Ctrl+C to stop)", fg="bright_black"))
+
+    try:
+        with open(target, "r", encoding="utf-8") as fh:
+            # Seek to end
+            fh.seek(0, 2)
+            while True:
+                line = fh.readline()
+                if not line:
+                    time.sleep(0.2)
+                    continue
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = BlackBoxEvent.from_jsonl(line)
+                except Exception:
+                    continue
+                if source_filter and ev.source != source_filter:
+                    continue
+                if severity and ev.severity != severity:
+                    continue
+                if as_json:
+                    click.echo(ev.to_jsonl())
+                else:
+                    click.echo(format_event(ev))
+    except KeyboardInterrupt:
+        click.echo()
+
+
+# ---------------------------------------------------------------------------
+# replay
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("log_file", type=click.Path(exists=True), required=False)
+def replay(log_file: str | None) -> None:
+    """Replay a log file for debugging.
+
+    If no LOG_FILE is given, the most recent log in the default log
+    directory is used.
+    """
+    if log_file:
+        path = Path(log_file)
+    else:
+        path = _latest_log_file()
+        if path is None:
+            click.echo(click.style("No log files found.", fg="yellow"))
+            raise SystemExit(1)
+        click.echo(click.style(f"Replaying {path.name}", fg="bright_black"))
+
+    events: list[BlackBoxEvent] = []
+    with open(path, "r", encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(BlackBoxEvent.from_jsonl(line))
+            except Exception as exc:
+                click.echo(
+                    click.style(f"Skipped line {lineno}: {exc}", fg="bright_black")
+                )
+
+    if not events:
+        click.echo(click.style("Log file is empty.", fg="yellow"))
+        return
+
+    click.echo(
+        click.style(
+            f"Replaying {len(events)} events "
+            f"({events[0].timestamp.isoformat()} -> {events[-1].timestamp.isoformat()})",
+            fg="cyan",
+        )
+    )
+    click.echo()
+
+    for ev in events:
+        click.echo(format_event(ev))
+
+
+# ---------------------------------------------------------------------------
+# config
+# ---------------------------------------------------------------------------
+
+
+@cli.command("config")
+def show_config() -> None:
+    """Show the effective configuration as YAML."""
+    cfg = BlackBoxConfig.load()
+    click.echo(
+        yaml.dump(
+            asdict(cfg),
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# init
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_CONFIG_YAML = """\
+# BlackBoxRS configuration
+# See documentation for all available options.
+
+log_dir: "~/.blackboxrs/logs"
+log_rotation_mb: 50
+log_max_files: 20
+
+ros_monitor:
+  enabled: true
+  poll_interval_sec: 1.0
+  track_latency: true
+  topic_filters: []
+
+system_monitor:
+  enabled: true
+  interval_sec: 1.0
+  gpu_backend: "auto"
+
+anomaly_engine:
+  enabled: true
+  thresholds:
+    cpu_percent: 90.0
+    memory_percent: 85.0
+    gpu_temp_c: 80.0
+  frequency:
+    tolerance_percent: 20.0
+  dead_topic:
+    timeout_sec: 5.0
+"""
+
+
+@cli.command()
+def init() -> None:
+    """Initialise the BlackBoxRS configuration directory.
+
+    Creates ``~/.blackboxrs/`` with a default ``config.yaml`` and a
+    ``logs/`` subdirectory.  Existing files are not overwritten.
+    """
+    base = Path("~/.blackboxrs").expanduser()
+    config_file = base / "config.yaml"
+    logs_dir = base / "logs"
+
+    base.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    if config_file.exists():
+        click.echo(
+            click.style(f"Config already exists: {config_file}", fg="yellow")
+        )
+    else:
+        config_file.write_text(_DEFAULT_CONFIG_YAML, encoding="utf-8")
+        click.echo(
+            click.style(f"Created config: {config_file}", fg="green")
+        )
+
+    click.echo(click.style(f"Log directory:  {logs_dir}", fg="green"))
+    click.echo(
+        click.style(
+            "BlackBoxRS initialised. Edit config.yaml to customise, "
+            "then run 'blackboxrs start'.",
+            fg="bright_black",
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_config(config_path: str | None) -> BlackBoxConfig:
+    """Load configuration, printing an error and exiting on failure."""
+    try:
+        if config_path:
+            return BlackBoxConfig.load(Path(config_path))
+        return BlackBoxConfig.load()
+    except Exception as exc:
+        click.echo(click.style(f"Failed to load configuration: {exc}", fg="red"))
+        raise SystemExit(1)
+
+
+def _read_recent_events(count: int = 100) -> list[BlackBoxEvent]:
+    """Read the most recent events from the default log directory."""
+    cfg = BlackBoxConfig.load()
+    log_dir = Path(os.path.expanduser(cfg.log_dir))
+    if not log_dir.is_dir():
+        return []
+
+    # Collect events from all log files, newest files first
+    log_files = sorted(log_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    events: list[BlackBoxEvent] = []
+
+    for log_file in log_files:
+        if len(events) >= count:
+            break
+        try:
+            lines = log_file.read_text(encoding="utf-8").strip().splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            if len(events) >= count:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(BlackBoxEvent.from_jsonl(line))
+            except Exception:
+                continue
+
+    # Return in chronological order
+    events.reverse()
+    return events
+
+
+def _apply_filters(
+    events: list[BlackBoxEvent],
+    source: str | None,
+    severity: str | None,
+) -> list[BlackBoxEvent]:
+    """Filter events by source and/or severity."""
+    filtered = events
+    if source:
+        filtered = [e for e in filtered if e.source == source]
+    if severity:
+        filtered = [e for e in filtered if e.severity == severity]
+    return filtered
+
+
+def _latest_log_file() -> Path | None:
+    """Return the path to the most recent log file, or ``None``."""
+    cfg = BlackBoxConfig.load()
+    log_dir = Path(os.path.expanduser(cfg.log_dir))
+    if not log_dir.is_dir():
+        return None
+    log_files = sorted(log_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    return log_files[-1] if log_files else None
