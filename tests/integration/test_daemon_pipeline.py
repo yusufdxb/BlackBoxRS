@@ -21,7 +21,7 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from blackboxrs.cli.daemon import BlackBoxDaemon
 from blackboxrs.core.config import (
@@ -61,6 +61,25 @@ def _read_all(log_dir: Path) -> list[BlackBoxEvent]:
 
 def _types_in(events: Iterable[BlackBoxEvent]) -> set[str]:
     return {(e.source, e.event_type) for e in events}
+
+
+def _wait_for(
+    predicate: Callable[[], bool], *, timeout: float = 5.0, interval: float = 0.05
+) -> bool:
+    """Poll *predicate* until it returns True or *timeout* elapses.
+
+    Integration tests have an end-to-end path of
+    ``system_monitor tick -> event_bus -> anomaly_engine (250ms drain) ->
+    event_bus -> logging pipeline -> disk``.  Fixed ``time.sleep()``
+    windows race this path on contended CI runners even when the code
+    under test is correct, so we poll instead.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +173,16 @@ class TestRealMonitorToLog:
         daemon = BlackBoxDaemon(_make_config(log_dir, cpu_threshold=0.0))
         try:
             daemon.start()
-            time.sleep(0.7)
+            # Poll rather than sleep a fixed window — the full path
+            # through the 250ms anomaly-engine drain is slow enough on
+            # contended runners to race a blind sleep.
+            _wait_for(
+                lambda: any(
+                    e.source == "anomaly_engine"
+                    for e in _read_all(log_dir)
+                ),
+                timeout=5.0,
+            )
         finally:
             daemon.stop()
 
@@ -205,8 +233,22 @@ class TestAnomalyEngineSeesEveryEvent:
         daemon = BlackBoxDaemon(_make_config(log_dir, cpu_threshold=0.0))
         try:
             daemon.start()
-            # Just enough time for one or two collector ticks.
-            time.sleep(0.25)
+            # Poll for both a cpu event and an anomaly, rather than
+            # sleeping a single drain-cycle window.  The regression this
+            # test catches (engine subscribed after first publish) would
+            # still show up as "cpu events present, anomalies empty"
+            # below, even with an unbounded wait — timing slack does
+            # not hide it.
+            _wait_for(
+                lambda: (
+                    any(e.event_type == "system.cpu" for e in _read_all(log_dir))
+                    and any(
+                        e.event_type == "anomaly.threshold"
+                        for e in _read_all(log_dir)
+                    )
+                ),
+                timeout=5.0,
+            )
         finally:
             daemon.stop()
 
