@@ -221,13 +221,55 @@ class RosMonitor:
         self._emit_qos_events(snapshot)
 
         # Subscribe to any newly-discovered topics
+        live_topics: set[str] = set()
         for topic_info in snapshot.topics:
             topic = topic_info.name
+            live_topics.add(topic)
             if topic in self._subscriptions:
                 continue
             if not self._topic_allowed(topic):
                 continue
             self._subscribe_topic(topic, topic_info.msg_type)
+
+        # Drop subscriptions for topics that have left the graph.  Without
+        # this step the monitor would keep leaked rclpy subscription
+        # objects plus stale frequency windows for publishers that no
+        # longer exist — bad for long-running recorders that outlive
+        # many nodes.
+        self._prune_stale_subscriptions(live_topics)
+
+    def _prune_stale_subscriptions(self, live_topics: set[str]) -> None:
+        """Drop subscriptions whose topics are no longer on the graph.
+
+        Args:
+            live_topics: Set of topic names observed in the latest
+                graph snapshot.  Any subscription we hold for a topic
+                outside this set is considered stale.
+
+        The rclpy ``destroy_subscription`` call is wrapped in a guard
+        so a single destruction failure cannot leave the monitor in an
+        inconsistent state: even if destruction raises, the subscription
+        is still removed from our bookkeeping and the frequency tracker
+        forgets the topic.
+        """
+        with self._lock:
+            stale = [t for t in self._subscriptions if t not in live_topics]
+            if not stale:
+                return
+
+            for topic in stale:
+                sub = self._subscriptions.pop(topic, None)
+                if sub is not None and self._node is not None:
+                    try:
+                        self._node.destroy_subscription(sub)
+                    except Exception:  # noqa: BLE001
+                        logger.debug(
+                            "Failed to destroy subscription for %s during prune",
+                            topic,
+                            exc_info=True,
+                        )
+                self._freq_tracker.forget(topic)
+                logger.debug("Pruned stale subscription for %s", topic)
 
     # -- subscriptions ------------------------------------------------------
 

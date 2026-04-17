@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from blackboxrs.core.config import (
     AnomalyEngineConfig,
     AnomalyThresholds,
     BlackBoxConfig,
+    ConfigError,
     DeadTopicConfig,
     FrequencyConfig,
     RosMonitorConfig,
@@ -124,3 +128,107 @@ class TestConfigFieldAccess:
     def test_frequency_config_fields(self):
         f = FrequencyConfig(tolerance_percent=30.0)
         assert f.tolerance_percent == 30.0
+
+
+class TestUnknownKeys:
+    """Unknown keys used to be silently dropped. They must now produce
+    a warning in lenient mode and a ConfigError in strict mode so
+    operators see typos during deployment instead of at 3am."""
+
+    def _write(self, path: Path, body: str) -> Path:
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_unknown_top_level_key_warns_by_default(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ):
+        cfg_path = self._write(
+            tmp_path / "cfg.yaml",
+            "log_dir: /tmp/x\nunknown_top: true\n",
+        )
+        with caplog.at_level(logging.WARNING, logger="blackboxrs.core.config"):
+            cfg = BlackBoxConfig.load(cfg_path)
+        assert cfg.log_dir == "/tmp/x"
+        assert any(
+            "unknown_top" in rec.message and "top-level" in rec.message
+            for rec in caplog.records
+        ), f"Expected a warning mentioning unknown_top; got {caplog.records!r}"
+
+    def test_unknown_nested_key_warns_by_default(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ):
+        cfg_path = self._write(
+            tmp_path / "cfg.yaml",
+            "ros_monitor:\n  enabled: true\n  bogus_key: 5\n",
+        )
+        with caplog.at_level(logging.WARNING, logger="blackboxrs.core.config"):
+            cfg = BlackBoxConfig.load(cfg_path)
+        # The valid field still loads correctly.
+        assert cfg.ros_monitor.enabled is True
+        assert any(
+            "bogus_key" in rec.message and "ros_monitor" in rec.message
+            for rec in caplog.records
+        )
+
+    def test_unknown_anomaly_inner_key_warns_with_scoped_context(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ):
+        cfg_path = self._write(
+            tmp_path / "cfg.yaml",
+            "anomaly_engine:\n"
+            "  thresholds:\n"
+            "    cpu_percent: 50\n"
+            "    made_up: 1\n",
+        )
+        with caplog.at_level(logging.WARNING, logger="blackboxrs.core.config"):
+            cfg = BlackBoxConfig.load(cfg_path)
+        assert cfg.anomaly_engine.thresholds.cpu_percent == 50
+        assert any(
+            "made_up" in rec.message
+            and "anomaly_engine.thresholds" in rec.message
+            for rec in caplog.records
+        ), (
+            "Inner unknown keys must be reported under their nested "
+            "context, not just 'top-level'."
+        )
+
+    def test_strict_mode_raises_on_unknown_key(self, tmp_path: Path):
+        cfg_path = self._write(
+            tmp_path / "cfg.yaml",
+            "log_dir: /tmp/y\nbogus: true\n",
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            BlackBoxConfig.load(cfg_path, strict=True)
+        assert "bogus" in str(excinfo.value)
+        # Source path is included so operators can find the offender.
+        assert str(cfg_path) in str(excinfo.value)
+
+    def test_strict_mode_raises_on_nested_unknown_key(self, tmp_path: Path):
+        cfg_path = self._write(
+            tmp_path / "cfg.yaml",
+            "system_monitor:\n  enabled: true\n  weird: 42\n",
+        )
+        with pytest.raises(ConfigError):
+            BlackBoxConfig.load(cfg_path, strict=True)
+
+    def test_known_keys_do_not_emit_warnings(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ):
+        """A well-formed config must not log any unknown-key warnings —
+        otherwise the signal gets drowned out by false positives."""
+        cfg = BlackBoxConfig(
+            log_dir="/tmp/ok",
+            anomaly_engine=AnomalyEngineConfig(
+                thresholds=AnomalyThresholds(cpu_percent=77.0),
+                dead_topic=DeadTopicConfig(timeout_sec=3.0),
+            ),
+        )
+        cfg_path = tmp_path / "cfg.yaml"
+        cfg.save(cfg_path)
+
+        with caplog.at_level(logging.WARNING, logger="blackboxrs.core.config"):
+            loaded = BlackBoxConfig.load(cfg_path)
+        assert loaded.log_dir == "/tmp/ok"
+        assert not [
+            rec for rec in caplog.records if "Unknown config key" in rec.message
+        ], "Round-tripped config produced spurious unknown-key warnings"

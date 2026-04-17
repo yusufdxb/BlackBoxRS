@@ -33,7 +33,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ros = []
+# NOTE: there is deliberately no `ros` extra.  `rclpy` is installed
+# from the system apt package (e.g. `ros-humble-rclpy`), not from
+# PyPI, because the ROS 2 Python client library is tightly coupled to
+# the ROS 2 distro that ships with it.  See docker/Dockerfile.humble
+# for the verified install path.
 dev = [
     "pytest>=7.0",
     "pytest-cov",

@@ -103,6 +103,16 @@ class FrequencyTracker:
             return None
         return (1.0 / freq) * 1000.0
 
+    def forget(self, topic: str) -> None:
+        """Drop all tracking state for *topic*.
+
+        Called when a topic disappears from the ROS graph so stale
+        frequency windows do not keep emitting rate events for a
+        publisher that no longer exists.  Silently ignores unknown
+        topics so callers don't have to bookkeep twice.
+        """
+        self._windows.pop(topic, None)
+
     # -- internals ----------------------------------------------------------
 
     def _prune(self, window: deque[float]) -> None:

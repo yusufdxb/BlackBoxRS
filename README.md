@@ -3,7 +3,7 @@
 **Flight recorder for ROS 2 robots** — early-stage / single-host
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![ROS 2 Humble | Iron | Jazzy](https://img.shields.io/badge/ROS%202-Humble%20%7C%20Iron%20%7C%20Jazzy-brightgreen)
+![ROS 2 Humble (verified)](https://img.shields.io/badge/ROS%202-Humble%20(verified)-brightgreen)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 
 > Status: **alpha (v0.1.0)**. Single-host, in-process. Useful as a
@@ -106,6 +106,8 @@ These are listed so docs do not overstate what the code does:
 
 ## Quick Start
 
+### System-only (no ROS 2)
+
 ```bash
 git clone https://github.com/yusufdxb/BlackBoxRS.git
 cd BlackBoxRS
@@ -127,6 +129,31 @@ robot-blackbox dump-log --last 100
 robot-blackbox dump-log --source anomaly --severity warning
 robot-blackbox dump-log --follow             # tail -f the active log
 ```
+
+### With ROS 2
+
+`rclpy` is installed via apt from the ROS 2 distro (not from PyPI —
+see `pyproject.toml` for why).  There are two supported install paths:
+
+1. **Host install (Humble only, verified):**
+   ```bash
+   source /opt/ros/humble/setup.bash
+   ./setup.sh            # creates .venv/ on top of the sourced env
+   source .venv/bin/activate
+   robot-blackbox start --foreground
+   ```
+   The venv inherits `rclpy` / `std_msgs` / etc. from `/opt/ros/humble`
+   via the sourced shell's `PYTHONPATH`. If you skip `source
+   /opt/ros/humble/setup.bash` the ROS monitor logs a warning and
+   stays inactive (system-only mode).
+
+2. **Container (Humble, reproducible):**
+   ```bash
+   docker build -f docker/Dockerfile.humble -t blackboxrs:humble .
+   docker run --rm --network host -e ROS_DOMAIN_ID=42 blackboxrs:humble
+   ```
+   See `docker/README.md` for the full flow, including how to
+   reproduce the live-ROS integration tests inside the image.
 
 ---
 
@@ -180,8 +207,12 @@ round-trip check runs.
 
 Config lives at `~/.blackboxrs/config.yaml` (or pass `-c PATH` to
 `start`). The schema is the dataclass tree in
-`blackboxrs.core.config.BlackBoxConfig`; any unknown key is ignored,
-any missing key falls back to the dataclass default.
+`blackboxrs.core.config.BlackBoxConfig`. Missing keys fall back to the
+dataclass default. Unknown keys are **not silently ignored** — by
+default they produce a `logging.WARNING` naming both the key and the
+scope it was found in, and `BlackBoxConfig.load(path, strict=True)`
+promotes those to a `ConfigError` so deployment validation / CI can
+catch typos before the daemon boots.
 
 The exact defaults written by `robot-blackbox init` are:
 
@@ -223,8 +254,17 @@ There is no `general:` block, no `log_format` field, no
 `log_retention_days`, no `detectors:` list, and no per-detector custom
 registration — all anomaly settings live under the three nested blocks
 (`thresholds`, `frequency`, `dead_topic`) shown above. If you write
-something else in your YAML, it will be silently ignored rather than
-applied.
+something else in your YAML, it will not be applied, and you'll see
+a warning like:
+
+```
+WARNING  blackboxrs.core.config:
+  Unknown config key(s) under anomaly_engine.thresholds in
+  /home/me/.blackboxrs/config.yaml: made_up_key.
+```
+
+In strict mode (`BlackBoxConfig.load(path, strict=True)`) the same
+condition raises `blackboxrs.core.config.ConfigError` instead.
 
 ---
 
@@ -327,6 +367,13 @@ BlackBoxRS/
 tests are skipped on hosted runners (no ROS 2 install); everything
 else runs.
 
+**Performance envelope** — `scripts/benchmark.py` measures EventBus
+publish throughput, `RotatingJsonlWriter` per-call latency, and the
+full producer → bus → consumer → writer pipeline.  See
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for reproducible reference
+numbers on x86_64 and explicit statements about what the benchmark
+does NOT measure (ROS 2 latency, fsync under contention, Jetson).
+
 **Still inferred**
 
 - Jetson-specific paths (`tegrastats`, sysfs GPU load). The desktop
@@ -334,8 +381,14 @@ else runs.
   implemented but not run here.
 - Multi-host ROS 2 scenarios (`ROS_LOCALHOST_ONLY=0`, DDS on a
   physical network).
-- ROS distros other than Humble (live-ROS tests are Humble on this
-  host).
+- ROS distros other than Humble. The live-ROS tests run against
+  ROS 2 Humble on Ubuntu 22.04 / Python 3.10 only. Iron and Jazzy are
+  expected to work (the monitor uses only stable rclpy primitives) but
+  are explicitly **unverified in this repo** until CI runs them.
+- Long-run recorder state under heavy graph churn. The synthetic
+  churn tests (`tests/unit/test_ros_monitor_lifecycle.py`) cover the
+  prune logic, but a multi-hour run with nodes coming and going has
+  not been measured end-to-end.
 
 **Not yet built** — see _Not yet implemented_ above.
 
@@ -345,8 +398,14 @@ else runs.
 
 - Python 3.10+
 - `psutil`, `pydantic>=2`, `click`, `pyyaml`
-- `rclpy` (Humble / Iron / Jazzy) — optional; system monitoring runs
-  without it.
+- `rclpy` — optional; system monitoring runs without it.
+  **Live-verified distro:** ROS 2 Humble (Ubuntu 22.04, Python 3.10).
+  Iron and Jazzy should work because the monitor only uses stable
+  `rclpy` primitives (`create_node`, `create_subscription`,
+  `get_topic_names_and_types`, `get_publishers_info_by_topic`), but
+  those distros have not been booted against this code in CI or on the
+  author's workstation — treat as **inferred**, not verified, until you
+  see a live-ROS run in this repo's CI for them.
 
 ---
 

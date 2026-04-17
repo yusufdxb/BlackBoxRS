@@ -4,16 +4,29 @@ All tunables are expressed as plain dataclasses with sensible defaults.
 Configuration is loaded from ``~/.blackboxrs/config.yaml`` (or a
 user-specified path) and merged on top of the defaults so that any
 missing keys simply fall back.
+
+Unknown keys in the YAML file are not silently ignored.  By default
+they produce a ``logging.WARNING`` so operators see typos instead of
+the config quietly doing nothing.  Strict mode promotes unknown keys
+to a :class:`ConfigError` instead, which is the recommended setting
+for CI / deployment validation.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field, fields, asdict
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
+
+
+class ConfigError(ValueError):
+    """Raised in strict mode when a config file contains unknown keys."""
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +127,9 @@ class BlackBoxConfig:
         return cls()
 
     @classmethod
-    def load(cls, path: Path | None = None) -> BlackBoxConfig:
+    def load(
+        cls, path: Path | None = None, *, strict: bool = False
+    ) -> BlackBoxConfig:
         """Load configuration from a YAML file.
 
         Missing keys in the file are filled with defaults.  If the file
@@ -123,9 +138,17 @@ class BlackBoxConfig:
         Args:
             path: Path to the YAML configuration file.  Defaults to
                 ``~/.blackboxrs/config.yaml``.
+            strict: If ``True``, raise :class:`ConfigError` when the YAML
+                contains keys that are not part of the schema.  In
+                non-strict mode (default) unknown keys are logged as
+                warnings and otherwise ignored.
 
         Returns:
             A populated :class:`BlackBoxConfig`.
+
+        Raises:
+            ConfigError: Only when ``strict=True`` and unknown keys are
+                present in the YAML file.
         """
         path = Path(os.path.expanduser(path or _DEFAULT_CONFIG_PATH))
         if not path.is_file():
@@ -134,7 +157,8 @@ class BlackBoxConfig:
         with open(path, "r", encoding="utf-8") as fh:
             raw: dict[str, Any] = yaml.safe_load(fh) or {}
 
-        return _dict_to_config(raw)
+        return _dict_to_config(raw, strict=strict, source=str(path))
+
 
     # -- Persistence --------------------------------------------------------
 
@@ -174,34 +198,117 @@ _ANOMALY_NESTED_MAP: dict[str, type] = {
 }
 
 
-def _merge_dataclass(dc_cls: type, data: dict[str, Any]) -> Any:
-    """Instantiate a dataclass from a dict, ignoring unknown keys."""
+def _report_unknown_keys(
+    unknown: list[str], *, context: str, strict: bool, source: str | None
+) -> None:
+    """Warn or raise when unknown keys are encountered in config input.
+
+    The caller provides a human-readable ``context`` describing where
+    in the YAML tree the unknown keys were found (e.g. ``"top-level"``,
+    ``"ros_monitor"``, ``"anomaly_engine.thresholds"``).  In non-strict
+    mode we log a WARNING per context; in strict mode we raise a
+    :class:`ConfigError` so CI / deployment validation surfaces typos.
+    """
+    if not unknown:
+        return
+
+    loc = f" in {source}" if source else ""
+    joined = ", ".join(sorted(unknown))
+    msg = (
+        f"Unknown config key(s) under {context}{loc}: {joined}. "
+        "Valid keys come from the BlackBoxConfig dataclass schema; "
+        "unknown keys have no effect."
+    )
+    if strict:
+        raise ConfigError(msg)
+    logger.warning(msg)
+
+
+def _merge_dataclass(
+    dc_cls: type,
+    data: dict[str, Any],
+    *,
+    context: str,
+    strict: bool,
+    source: str | None,
+) -> Any:
+    """Instantiate a dataclass from a dict; warn/raise on unknown keys."""
     valid_keys = {f.name for f in fields(dc_cls)}
+    unknown = [k for k in data if k not in valid_keys]
+    _report_unknown_keys(
+        unknown, context=context, strict=strict, source=source
+    )
     return dc_cls(**{k: v for k, v in data.items() if k in valid_keys})
 
 
-def _dict_to_config(raw: dict[str, Any]) -> BlackBoxConfig:
-    """Convert a raw YAML dict into a fully typed :class:`BlackBoxConfig`."""
+def _dict_to_config(
+    raw: dict[str, Any],
+    *,
+    strict: bool = False,
+    source: str | None = None,
+) -> BlackBoxConfig:
+    """Convert a raw YAML dict into a fully typed :class:`BlackBoxConfig`.
+
+    ``strict`` controls how unknown keys are handled:
+
+    - ``False`` (default): log a WARNING per scope and ignore the key.
+    - ``True``: raise :class:`ConfigError` on the first scope containing
+      unknown keys.
+
+    The ``source`` parameter is purely diagnostic — it's woven into the
+    warning / error message so operators can trace which file caused
+    the complaint.
+    """
+    top_valid = {f.name for f in fields(BlackBoxConfig)}
+    top_unknown = [k for k in raw if k not in top_valid]
+    _report_unknown_keys(
+        top_unknown, context="top-level", strict=strict, source=source
+    )
+
     kwargs: dict[str, Any] = {}
 
     for key, value in raw.items():
+        if key not in top_valid:
+            continue  # already reported above
         if key in _NESTED_MAP and isinstance(value, dict):
             nested_cls = _NESTED_MAP[key]
             if key == "anomaly_engine":
-                # Handle double-nested dataclasses inside AnomalyEngineConfig
+                # Handle double-nested dataclasses inside AnomalyEngineConfig.
+                # Validate inner and outer keys separately so messages
+                # point at the right scope.
+                engine_valid = {f.name for f in fields(nested_cls)}
+                engine_unknown = [k for k in value if k not in engine_valid]
+                _report_unknown_keys(
+                    engine_unknown,
+                    context="anomaly_engine",
+                    strict=strict,
+                    source=source,
+                )
+
                 inner: dict[str, Any] = {}
                 for k, v in value.items():
+                    if k not in engine_valid:
+                        continue
                     if k in _ANOMALY_NESTED_MAP and isinstance(v, dict):
-                        inner[k] = _merge_dataclass(_ANOMALY_NESTED_MAP[k], v)
+                        inner[k] = _merge_dataclass(
+                            _ANOMALY_NESTED_MAP[k],
+                            v,
+                            context=f"anomaly_engine.{k}",
+                            strict=strict,
+                            source=source,
+                        )
                     else:
                         inner[k] = v
-                valid_keys = {f.name for f in fields(nested_cls)}
-                kwargs[key] = nested_cls(
-                    **{k: v for k, v in inner.items() if k in valid_keys}
-                )
+                kwargs[key] = nested_cls(**inner)
             else:
-                kwargs[key] = _merge_dataclass(nested_cls, value)
-        elif key in {f.name for f in fields(BlackBoxConfig)}:
+                kwargs[key] = _merge_dataclass(
+                    nested_cls,
+                    value,
+                    context=key,
+                    strict=strict,
+                    source=source,
+                )
+        else:
             kwargs[key] = value
 
     return BlackBoxConfig(**kwargs)
