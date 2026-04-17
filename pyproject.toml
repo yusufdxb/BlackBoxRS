@@ -55,5 +55,7 @@ include = ["blackboxrs*"]
 target-version = "py310"
 line-length = 100
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+# Pytest configuration lives in pytest.ini so the test path stays
+# robust when /opt/ros/<distro>/setup.bash has been sourced (we have to
+# disable the launch_ros pytest11 entry point there, and pytest.ini is
+# the place pytest reads addopts from before any other config).

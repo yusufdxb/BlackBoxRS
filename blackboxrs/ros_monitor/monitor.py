@@ -15,9 +15,9 @@ from __future__ import annotations
 import fnmatch
 import logging
 import threading
+from threading import Thread
 from typing import Any
 
-from blackboxrs.core.clock import Clock
 from blackboxrs.core.schemas import BlackBoxEvent
 from blackboxrs.core.event_bus import EventBus
 from blackboxrs.core.config import RosMonitorConfig
@@ -96,6 +96,7 @@ class RosMonitor:
         self._poll_timer: Any = None
         self._freq_timer: Any = None
         self._running = False
+        self._thread: Thread | None = None
         self._lock = threading.Lock()
 
     # -- lifecycle ----------------------------------------------------------
@@ -145,6 +146,12 @@ class RosMonitor:
         )
 
         self._running = True
+        self._thread = Thread(
+            target=self._spin_loop,
+            name="blackbox-ros-monitor",
+            daemon=True,
+        )
+        self._thread.start()
         logger.info(
             "ROS monitor started (poll=%.1fs, node=%s%s)",
             poll_sec,
@@ -154,7 +161,14 @@ class RosMonitor:
 
     def stop(self) -> None:
         """Cleanly shut down the node and release resources."""
+        if not self._running and self._thread is None:
+            return
+
         self._running = False
+
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
 
         if self._poll_timer is not None:
             self._poll_timer.cancel()
@@ -178,12 +192,9 @@ class RosMonitor:
         self._introspector = None
         logger.info("ROS monitor stopped")
 
-    def run(self) -> None:
-        """Blocking run loop -- call from a dedicated thread.
-
-        Spins the rclpy executor until :meth:`stop` is called.
-        """
-        if not self._running or self._executor is None:
+    def _spin_loop(self) -> None:
+        """Background loop: spin the rclpy executor until stopped."""
+        if self._executor is None:
             return
 
         try:
@@ -191,8 +202,6 @@ class RosMonitor:
                 self._executor.spin_once(timeout_sec=0.5)
         except Exception:  # noqa: BLE001
             logger.exception("ROS monitor run loop exited with an error")
-        finally:
-            self.stop()
 
     # -- graph polling ------------------------------------------------------
 
@@ -330,9 +339,14 @@ class RosMonitor:
             self._event_bus.publish(event)
 
     def _emit_qos_events(self, snapshot: GraphSnapshot) -> None:
-        """Emit ``ros.qos`` events carrying QoS profiles per topic."""
+        """Emit ``ros.qos`` events carrying QoS profiles per topic.
+
+        Each event contains separate ``publisher_qos_profiles`` and
+        ``subscriber_qos_profiles`` lists so downstream consumers (e.g.
+        the QoS-mismatch detector) can compare each pub/sub pair.
+        """
         for topic_info in snapshot.topics:
-            if not topic_info.qos_profiles:
+            if not (topic_info.publisher_qos_profiles or topic_info.subscriber_qos_profiles):
                 continue
 
             event = BlackBoxEvent.ros_event(
@@ -342,7 +356,8 @@ class RosMonitor:
                     "msg_type": topic_info.msg_type,
                     "publisher_count": topic_info.publisher_count,
                     "subscriber_count": topic_info.subscriber_count,
-                    "qos_profiles": topic_info.qos_profiles,
+                    "publisher_qos_profiles": topic_info.publisher_qos_profiles,
+                    "subscriber_qos_profiles": topic_info.subscriber_qos_profiles,
                 },
                 severity="debug",
                 **self._session.metadata(),

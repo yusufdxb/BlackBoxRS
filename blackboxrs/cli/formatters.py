@@ -6,7 +6,6 @@ information, and startup banners.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import click
@@ -37,7 +36,7 @@ def format_event(event: BlackBoxEvent, colorize: bool = True) -> str:
 
     Output layout::
 
-        [2026-04-05T12:30:00+00:00] [INFO] [ros_monitor] topic_frequency: topic=/cmd_vel frequency_hz=10.0
+        [2026-04-05T12:30:00+00:00] [INFO] [ros_monitor] ros.frequency: topic=/cmd_vel frequency_hz=10.0
 
     Args:
         event: The event to format.

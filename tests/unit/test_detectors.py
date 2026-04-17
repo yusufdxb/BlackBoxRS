@@ -1,4 +1,12 @@
-"""Tests for blackboxrs.anomaly_engine.detectors."""
+"""Unit tests for blackboxrs.anomaly_engine.detectors.
+
+Every event constructed here matches the *real* event_type strings and
+data payloads emitted by ``SystemMonitor`` and ``RosMonitor``.  Earlier
+versions of these tests fabricated event types (``cpu_usage``,
+``topic_frequency``) that no monitor actually emits, so the detectors
+passed in isolation while being dead code in production.  Synchronising
+the fixtures with monitor output is what makes these tests load-bearing.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +17,7 @@ from blackboxrs.core.schemas import BlackBoxEvent
 from blackboxrs.anomaly_engine.detectors.threshold import ThresholdDetector
 from blackboxrs.anomaly_engine.detectors.frequency import FrequencyDetector
 from blackboxrs.anomaly_engine.detectors.dead_topic import DeadTopicDetector
+from blackboxrs.anomaly_engine.detectors.qos_mismatch import QoSMismatchDetector
 
 
 # ---------------------------------------------------------------------------
@@ -17,15 +26,41 @@ from blackboxrs.anomaly_engine.detectors.dead_topic import DeadTopicDetector
 
 
 class TestThresholdDetector:
-    """Test threshold-based anomaly detection."""
+    """Test threshold-based anomaly detection.
+
+    Events constructed here mirror SystemMonitor output: ``system.cpu``
+    with a ``cpu_percent`` field, ``system.memory`` with
+    ``memory_percent``, ``system.gpu`` with ``gpu_temp_c``.
+    """
 
     def _make_cpu_event(self, value: float) -> BlackBoxEvent:
-        return BlackBoxEvent(
-            timestamp=datetime.now(timezone.utc),
-            source="system_monitor",
-            event_type="cpu_usage",
-            severity="info",
-            data={"value": value, "unit": "%"},
+        return BlackBoxEvent.system_event(
+            event_type="system.cpu",
+            data={"cpu_percent": value, "cpu_count": 4, "per_cpu_percent": [value]},
+        )
+
+    def _make_memory_event(self, value: float) -> BlackBoxEvent:
+        return BlackBoxEvent.system_event(
+            event_type="system.memory",
+            data={
+                "memory_percent": value,
+                "memory_used_mb": 1.0,
+                "memory_total_mb": 2.0,
+                "swap_percent": 0.0,
+                "swap_used_mb": 0.0,
+            },
+        )
+
+    def _make_gpu_event(self, temp_c: float) -> BlackBoxEvent:
+        return BlackBoxEvent.system_event(
+            event_type="system.gpu",
+            data={
+                "gpu_util_percent": 10.0,
+                "gpu_temp_c": temp_c,
+                "gpu_memory_used_mb": None,
+                "gpu_memory_total_mb": None,
+                "power_w": None,
+            },
         )
 
     def test_fires_on_high_cpu(self):
@@ -33,58 +68,59 @@ class TestThresholdDetector:
         result = detector.check(self._make_cpu_event(95.0))
         assert result is not None
         assert result.source == "anomaly_engine"
-        assert result.event_type == "anomaly_threshold"
+        assert result.event_type == "anomaly.threshold"
         assert result.data["value"] == 95.0
         assert result.data["threshold"] == 90.0
+        assert result.data["metric"] == "cpu_percent"
 
     def test_does_not_fire_on_normal_cpu(self):
         detector = ThresholdDetector(AnomalyThresholds(cpu_percent=90.0))
-        result = detector.check(self._make_cpu_event(50.0))
-        assert result is None
+        assert detector.check(self._make_cpu_event(50.0)) is None
 
     def test_does_not_fire_at_exact_threshold(self):
         detector = ThresholdDetector(AnomalyThresholds(cpu_percent=90.0))
-        result = detector.check(self._make_cpu_event(90.0))
-        assert result is None
+        assert detector.check(self._make_cpu_event(90.0)) is None
 
     def test_fires_on_high_memory(self):
         detector = ThresholdDetector(AnomalyThresholds(memory_percent=85.0))
-        event = BlackBoxEvent(
-            timestamp=datetime.now(timezone.utc),
-            source="system_monitor",
-            event_type="memory_usage",
-            severity="info",
-            data={"value": 90.0, "unit": "%"},
-        )
-        result = detector.check(event)
+        result = detector.check(self._make_memory_event(90.0))
         assert result is not None
-        assert result.data["metric"] == "memory_usage"
+        assert result.data["metric"] == "memory_percent"
+
+    def test_fires_on_high_gpu_temp(self):
+        detector = ThresholdDetector(AnomalyThresholds(gpu_temp_c=80.0))
+        result = detector.check(self._make_gpu_event(95.0))
+        assert result is not None
+        assert result.data["metric"] == "gpu_temp_c"
+        assert result.data["value"] == 95.0
 
     def test_ignores_non_system_events(self):
         detector = ThresholdDetector(AnomalyThresholds())
-        event = BlackBoxEvent(
-            timestamp=datetime.now(timezone.utc),
-            source="ros_monitor",
-            event_type="topic_frequency",
-            severity="info",
-            data={"value": 100.0},
+        event = BlackBoxEvent.ros_event(
+            event_type="ros.frequency",
+            data={"topic": "/cmd_vel", "frequency_hz": 100.0},
         )
         assert detector.check(event) is None
 
     def test_ignores_unknown_event_type(self):
         detector = ThresholdDetector(AnomalyThresholds())
-        event = BlackBoxEvent(
-            timestamp=datetime.now(timezone.utc),
-            source="system_monitor",
-            event_type="unknown_metric",
-            severity="info",
+        event = BlackBoxEvent.system_event(
+            event_type="system.unknown",
             data={"value": 100.0},
         )
         assert detector.check(event) is None
 
+    def test_ignores_missing_metric_key(self):
+        detector = ThresholdDetector(AnomalyThresholds(cpu_percent=10.0))
+        # Event has the right type but no cpu_percent field.
+        event = BlackBoxEvent.system_event(
+            event_type="system.cpu",
+            data={"cpu_count": 4},
+        )
+        assert detector.check(event) is None
+
     def test_name_property(self):
-        detector = ThresholdDetector(AnomalyThresholds())
-        assert detector.name == "threshold"
+        assert ThresholdDetector(AnomalyThresholds()).name == "threshold"
 
 
 # ---------------------------------------------------------------------------
@@ -93,71 +129,63 @@ class TestThresholdDetector:
 
 
 class TestFrequencyDetector:
-    """Test frequency-drop anomaly detection."""
+    """Test frequency-drop anomaly detection against ros.frequency events."""
 
     def _make_freq_event(self, topic: str, hz: float) -> BlackBoxEvent:
-        return BlackBoxEvent(
-            timestamp=datetime.now(timezone.utc),
-            source="ros_monitor",
-            event_type="topic_frequency",
-            severity="info",
+        return BlackBoxEvent.ros_event(
+            event_type="ros.frequency",
             data={"topic": topic, "frequency_hz": hz},
         )
 
     def test_learning_phase_returns_none(self):
-        """During the first 10 samples, no anomaly should fire."""
         detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
         for _ in range(10):
-            result = detector.check(self._make_freq_event("/cmd_vel", 10.0))
-            assert result is None
+            assert detector.check(self._make_freq_event("/cmd_vel", 10.0)) is None
 
     def test_fires_on_frequency_drop_after_learning(self):
-        """After 10 baseline samples at 10Hz, a drop to 5Hz should fire."""
         detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
-        # Learning phase: 10 samples at 10 Hz
         for _ in range(10):
             detector.check(self._make_freq_event("/cmd_vel", 10.0))
-        # Now drop to 5 Hz -- well below 80% of 10Hz = 8Hz floor
         result = detector.check(self._make_freq_event("/cmd_vel", 5.0))
         assert result is not None
         assert result.source == "anomaly_engine"
-        assert result.event_type == "anomaly_frequency"
+        assert result.event_type == "anomaly.frequency"
 
     def test_does_not_fire_within_tolerance(self):
-        """A frequency within tolerance should not trigger."""
         detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
         for _ in range(10):
             detector.check(self._make_freq_event("/cmd_vel", 10.0))
-        # 9 Hz is above 8 Hz floor (80% of 10)
-        result = detector.check(self._make_freq_event("/cmd_vel", 9.0))
-        assert result is None
+        assert detector.check(self._make_freq_event("/cmd_vel", 9.0)) is None
 
     def test_ignores_non_frequency_events(self):
         detector = FrequencyDetector(FrequencyConfig())
-        event = BlackBoxEvent(
-            timestamp=datetime.now(timezone.utc),
-            source="system_monitor",
-            event_type="cpu_usage",
-            data={"value": 50.0},
+        event = BlackBoxEvent.system_event(
+            event_type="system.cpu",
+            data={"cpu_percent": 50.0},
+        )
+        assert detector.check(event) is None
+
+    def test_ignores_old_event_type_string(self):
+        """Guard against regression to the old fabricated 'topic_frequency' name."""
+        detector = FrequencyDetector(FrequencyConfig())
+        event = BlackBoxEvent.ros_event(
+            event_type="topic_frequency",  # legacy / wrong
+            data={"topic": "/cmd_vel", "frequency_hz": 1.0},
         )
         assert detector.check(event) is None
 
     def test_independent_baselines_per_topic(self):
         detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
-        # Learn /cmd_vel at 10 Hz
         for _ in range(10):
             detector.check(self._make_freq_event("/cmd_vel", 10.0))
-        # Learn /scan at 20 Hz
         for _ in range(10):
             detector.check(self._make_freq_event("/scan", 20.0))
-        # /cmd_vel at 9 Hz is fine, /scan at 9 Hz should trigger
         assert detector.check(self._make_freq_event("/cmd_vel", 9.0)) is None
         result = detector.check(self._make_freq_event("/scan", 9.0))
         assert result is not None
 
     def test_name_property(self):
-        detector = FrequencyDetector(FrequencyConfig())
-        assert detector.name == "frequency"
+        assert FrequencyDetector(FrequencyConfig()).name == "frequency"
 
 
 # ---------------------------------------------------------------------------
@@ -166,65 +194,136 @@ class TestFrequencyDetector:
 
 
 class TestDeadTopicDetector:
-    """Test dead-topic anomaly detection."""
+    """Test dead-topic detection against real ros.frequency events."""
 
     def _make_topic_event(self, topic: str, ts: datetime | None = None) -> BlackBoxEvent:
-        return BlackBoxEvent(
-            timestamp=ts or datetime.now(timezone.utc),
-            source="ros_monitor",
-            event_type="topic_frequency",
-            severity="info",
+        ev = BlackBoxEvent.ros_event(
+            event_type="ros.frequency",
             data={"topic": topic, "frequency_hz": 10.0},
         )
+        if ts is not None:
+            ev.timestamp = ts
+        return ev
 
     def test_no_anomaly_while_active(self):
         detector = DeadTopicDetector(DeadTopicConfig(timeout_sec=5.0))
-        result = detector.check(self._make_topic_event("/cmd_vel"))
-        assert result is None
+        assert detector.check(self._make_topic_event("/cmd_vel")) is None
 
     def test_fires_after_timeout(self):
-        """Simulate a dead topic by manipulating the detector's internal state."""
-        detector = DeadTopicDetector(DeadTopicConfig(timeout_sec=1.0))
-        # Register the topic
-        detector.check(self._make_topic_event("/cmd_vel"))
-        # Manually backdate the last-seen timestamp to simulate timeout
-        old_time = datetime.now(timezone.utc) - timedelta(seconds=5)
-        detector._last_seen["/cmd_vel"] = old_time
-        # Next check with a different topic event should detect /cmd_vel as dead
-        trigger_event = self._make_topic_event("/scan")
-        result = detector.check(trigger_event)
-        assert result is not None
-        assert result.source == "anomaly_engine"
-        assert result.event_type == "anomaly_dead_topic"
-        assert "cmd_vel" in result.data["message"]
-
-    def test_does_not_re_alert_same_topic(self):
-        """Once a dead topic is alerted, it should not fire again."""
         detector = DeadTopicDetector(DeadTopicConfig(timeout_sec=1.0))
         detector.check(self._make_topic_event("/cmd_vel"))
         detector._last_seen["/cmd_vel"] = datetime.now(timezone.utc) - timedelta(seconds=5)
-        # First check fires
-        trigger = self._make_topic_event("/scan")
-        assert detector.check(trigger) is not None
-        # Second check for same dead topic should not fire
-        trigger2 = self._make_topic_event("/scan")
-        result = detector.check(trigger2)
-        # Could be None (no new dead topics) or alert for /scan going dead,
-        # but /cmd_vel should not alert again
+        result = detector.check(self._make_topic_event("/scan"))
+        assert result is not None
+        assert result.source == "anomaly_engine"
+        assert result.event_type == "anomaly.dead_topic"
+        assert "cmd_vel" in result.data["message"]
+
+    def test_does_not_re_alert_same_topic(self):
+        detector = DeadTopicDetector(DeadTopicConfig(timeout_sec=1.0))
+        detector.check(self._make_topic_event("/cmd_vel"))
+        detector._last_seen["/cmd_vel"] = datetime.now(timezone.utc) - timedelta(seconds=5)
+        assert detector.check(self._make_topic_event("/scan")) is not None
+        result = detector.check(self._make_topic_event("/scan"))
         if result is not None:
             assert "cmd_vel" not in result.data.get("metric", "")
 
     def test_topic_revival_clears_alert(self):
-        """When a dead topic publishes again, the alert state is cleared."""
         detector = DeadTopicDetector(DeadTopicConfig(timeout_sec=1.0))
         detector.check(self._make_topic_event("/cmd_vel"))
         detector._last_seen["/cmd_vel"] = datetime.now(timezone.utc) - timedelta(seconds=5)
-        trigger = self._make_topic_event("/scan")
-        detector.check(trigger)  # fires for /cmd_vel
-        # /cmd_vel comes back alive
+        detector.check(self._make_topic_event("/scan"))
         detector.check(self._make_topic_event("/cmd_vel"))
         assert "/cmd_vel" not in detector._alerted
 
     def test_name_property(self):
-        detector = DeadTopicDetector(DeadTopicConfig())
-        assert detector.name == "dead_topic"
+        assert DeadTopicDetector(DeadTopicConfig()).name == "dead_topic"
+
+
+# ---------------------------------------------------------------------------
+# QoSMismatchDetector
+# ---------------------------------------------------------------------------
+
+
+class TestQoSMismatchDetector:
+    """Test QoS-mismatch detection against ros.qos events.
+
+    Event payloads here mirror what RosMonitor + RosIntrospector now
+    emit: separate publisher_qos_profiles and subscriber_qos_profiles
+    lists, each entry shaped like ``introspection._serialise_qos`` output.
+    """
+
+    def _make_qos_event(self, pub_qos: list[dict], sub_qos: list[dict]) -> BlackBoxEvent:
+        return BlackBoxEvent.ros_event(
+            event_type="ros.qos",
+            data={
+                "topic": "/test_topic",
+                "msg_type": "std_msgs/msg/String",
+                "publisher_count": len(pub_qos),
+                "subscriber_count": len(sub_qos),
+                "publisher_qos_profiles": pub_qos,
+                "subscriber_qos_profiles": sub_qos,
+            },
+        )
+
+    def test_fires_on_reliability_mismatch(self):
+        detector = QoSMismatchDetector()
+        # Publisher BEST_EFFORT but subscriber demands RELIABLE -> incompatible
+        result = detector.check(
+            self._make_qos_event(
+                pub_qos=[{"reliability": "ReliabilityPolicy.BEST_EFFORT",
+                          "durability": "DurabilityPolicy.VOLATILE"}],
+                sub_qos=[{"reliability": "ReliabilityPolicy.RELIABLE",
+                          "durability": "DurabilityPolicy.VOLATILE"}],
+            )
+        )
+        assert result is not None
+        assert result.event_type == "anomaly.qos_mismatch"
+        assert "reliability" in result.data["message"].lower()
+
+    def test_fires_on_durability_mismatch(self):
+        detector = QoSMismatchDetector()
+        result = detector.check(
+            self._make_qos_event(
+                pub_qos=[{"reliability": "ReliabilityPolicy.RELIABLE",
+                          "durability": "DurabilityPolicy.VOLATILE"}],
+                sub_qos=[{"reliability": "ReliabilityPolicy.RELIABLE",
+                          "durability": "DurabilityPolicy.TRANSIENT_LOCAL"}],
+            )
+        )
+        assert result is not None
+        assert "durability" in result.data["message"].lower()
+
+    def test_silent_when_compatible(self):
+        detector = QoSMismatchDetector()
+        result = detector.check(
+            self._make_qos_event(
+                pub_qos=[{"reliability": "ReliabilityPolicy.RELIABLE",
+                          "durability": "DurabilityPolicy.TRANSIENT_LOCAL"}],
+                sub_qos=[{"reliability": "ReliabilityPolicy.BEST_EFFORT",
+                          "durability": "DurabilityPolicy.VOLATILE"}],
+            )
+        )
+        assert result is None
+
+    def test_silent_when_no_subscribers(self):
+        detector = QoSMismatchDetector()
+        result = detector.check(
+            self._make_qos_event(
+                pub_qos=[{"reliability": "ReliabilityPolicy.RELIABLE",
+                          "durability": "DurabilityPolicy.VOLATILE"}],
+                sub_qos=[],
+            )
+        )
+        assert result is None
+
+    def test_ignores_other_event_types(self):
+        detector = QoSMismatchDetector()
+        event = BlackBoxEvent.ros_event(
+            event_type="ros.frequency",
+            data={"topic": "/x", "frequency_hz": 10.0},
+        )
+        assert detector.check(event) is None
+
+    def test_name_property(self):
+        assert QoSMismatchDetector().name == "qos_mismatch"

@@ -17,19 +17,25 @@ from blackboxrs.core.schemas import (
 
 
 class TestBlackBoxEventCreation:
-    """Test direct construction of BlackBoxEvent."""
+    """Test direct construction of BlackBoxEvent.
+
+    Event-type strings follow the ``<subsystem>.<specific>`` convention
+    emitted by the runtime producers (see ``blackboxrs.ros_monitor`` and
+    ``blackboxrs.system_monitor``).  These tests pin the runtime contract
+    so drift in either direction shows up immediately.
+    """
 
     def test_create_with_all_fields(self):
         event = BlackBoxEvent(
             timestamp=datetime(2026, 4, 5, 12, 0, 0, tzinfo=timezone.utc),
             source="ros_monitor",
-            event_type="topic_frequency",
+            event_type="ros.frequency",
             severity="info",
             data={"topic": "/cmd_vel", "frequency_hz": 10.0},
             metadata={"session_id": "abc123"},
         )
         assert event.source == "ros_monitor"
-        assert event.event_type == "topic_frequency"
+        assert event.event_type == "ros.frequency"
         assert event.severity == "info"
         assert event.data["topic"] == "/cmd_vel"
         assert event.metadata["session_id"] == "abc123"
@@ -38,7 +44,7 @@ class TestBlackBoxEventCreation:
         event = BlackBoxEvent(
             timestamp=datetime(2026, 4, 5, tzinfo=timezone.utc),
             source="system_monitor",
-            event_type="cpu_usage",
+            event_type="system.cpu",
         )
         assert event.severity == "info"
 
@@ -46,7 +52,7 @@ class TestBlackBoxEventCreation:
         event = BlackBoxEvent(
             timestamp=datetime(2026, 4, 5, tzinfo=timezone.utc),
             source="system_monitor",
-            event_type="cpu_usage",
+            event_type="system.cpu",
         )
         assert event.data == {}
         assert event.metadata == {}
@@ -74,12 +80,12 @@ class TestBlackBoxEventConstructors:
 
     def test_ros_event(self):
         event = BlackBoxEvent.ros_event(
-            event_type="topic_frequency",
+            event_type="ros.frequency",
             data={"topic": "/scan", "frequency_hz": 20.0},
             node="/lidar_driver",
         )
         assert event.source == "ros_monitor"
-        assert event.event_type == "topic_frequency"
+        assert event.event_type == "ros.frequency"
         assert event.severity == "info"
         assert event.data["topic"] == "/scan"
         assert event.metadata["node"] == "/lidar_driver"
@@ -87,17 +93,17 @@ class TestBlackBoxEventConstructors:
 
     def test_system_event(self):
         event = BlackBoxEvent.system_event(
-            event_type="cpu_usage",
-            data={"value": 55.0, "unit": "%"},
+            event_type="system.cpu",
+            data={"cpu_percent": 55.0, "cpu_count": 8},
         )
         assert event.source == "system_monitor"
-        assert event.event_type == "cpu_usage"
+        assert event.event_type == "system.cpu"
         assert event.severity == "info"
 
     def test_anomaly_event_default_severity_is_warning(self):
         event = BlackBoxEvent.anomaly_event(
-            event_type="anomaly_threshold",
-            data={"detector": "threshold", "metric": "cpu", "value": 95.0,
+            event_type="anomaly.threshold",
+            data={"detector": "threshold", "metric": "cpu_percent", "value": 95.0,
                   "threshold": 90.0, "message": "test"},
         )
         assert event.source == "anomaly_engine"
@@ -105,7 +111,7 @@ class TestBlackBoxEventConstructors:
 
     def test_ros_event_custom_severity(self):
         event = BlackBoxEvent.ros_event(
-            event_type="qos_mismatch",
+            event_type="ros.qos",
             data={},
             severity="error",
         )
@@ -147,14 +153,14 @@ class TestTypedDataModels:
         assert data.frequency_hz == 10.0
 
     def test_system_metric_data(self):
-        data = SystemMetricData(metric="cpu_usage", value=55.0, unit="%")
-        assert data.metric == "cpu_usage"
+        data = SystemMetricData(metric="cpu_percent", value=55.0, unit="%")
+        assert data.metric == "cpu_percent"
         assert data.value == 55.0
 
     def test_anomaly_data(self):
         data = AnomalyData(
             detector="threshold",
-            metric="cpu_usage",
+            metric="cpu_percent",
             value=95.0,
             threshold=90.0,
             message="CPU too high",

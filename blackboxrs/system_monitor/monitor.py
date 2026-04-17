@@ -15,7 +15,6 @@ from typing import Any
 from blackboxrs.core.clock import Clock
 from blackboxrs.core.schemas import BlackBoxEvent
 from blackboxrs.core.event_bus import EventBus
-from blackboxrs.core.config import BlackBoxConfig
 from blackboxrs.core.session import Session
 
 from blackboxrs.system_monitor.collectors.cpu import CpuCollector
@@ -141,8 +140,12 @@ class SystemMonitor:
     def _collect_once(self) -> list[BlackBoxEvent]:
         """Run all collectors and return a list of BlackBoxEvents.
 
-        Each collector produces one event.  Collectors that fail or return
-        empty data are skipped silently (the error is logged).
+        Each collector produces one event.  Collectors that fail or
+        return empty data are skipped silently (the error is logged).
+        Collectors that return a list (e.g. the thermal-zone collector)
+        are wrapped under a single ``"items"`` key so the resulting
+        ``data`` payload always satisfies the ``dict[str, Any]`` schema
+        contract on :class:`BlackBoxEvent`.
 
         Returns:
             A list of ``BlackBoxEvent`` instances ready for publishing.
@@ -152,12 +155,27 @@ class SystemMonitor:
 
         for name, collector in self._collectors:
             try:
-                data = collector.collect()
+                raw = collector.collect()
             except Exception:
                 logger.exception("Collector %r raised an exception", name)
                 continue
 
-            if data is None or data == {} or data == []:
+            if raw is None:
+                continue
+            if isinstance(raw, dict):
+                if not raw:
+                    continue
+                data: dict[str, Any] = raw
+            elif isinstance(raw, list):
+                if not raw:
+                    continue
+                data = {"items": raw}
+            else:
+                logger.warning(
+                    "Collector %r returned unsupported type %s; skipping",
+                    name,
+                    type(raw).__name__,
+                )
                 continue
 
             event = BlackBoxEvent.system_event(

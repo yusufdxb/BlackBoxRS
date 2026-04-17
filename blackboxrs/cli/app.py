@@ -7,14 +7,14 @@ the configuration directory.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import TextIO
+from typing import Iterator, TextIO
 
 import click
 import yaml
@@ -24,11 +24,15 @@ from blackboxrs.core.config import BlackBoxConfig
 from blackboxrs.core.schemas import BlackBoxEvent
 from blackboxrs.cli.daemon import BlackBoxDaemon
 from blackboxrs.cli.formatters import (
-    SEVERITY_COLORS,
     format_banner,
     format_event,
     format_status,
 )
+from blackboxrs.logging.reader import LogReader
+
+# Glob pattern used by the writer.  Keeping it in one place so the
+# read-side and write-side never drift apart.
+_LOG_GLOB = "blackboxrs_*.jsonl"
 
 # ---------------------------------------------------------------------------
 # Root group
@@ -71,7 +75,7 @@ def start(config_path: str | None, foreground: bool) -> None:
         click.echo(
             click.style(
                 f"BlackBoxRS is already running (PID {pid}). "
-                "Use 'blackboxrs stop' first.",
+                "Use 'robot-blackbox stop' first.",
                 fg="yellow",
             )
         )
@@ -99,12 +103,12 @@ def _start_foreground(cfg: BlackBoxConfig) -> None:
 
 def _start_background(config_path: str | None) -> None:
     """Spawn the daemon as a detached background process."""
-    cmd = [sys.executable, "-m", "src", "start", "--foreground"]
+    cmd = [sys.executable, "-m", "blackboxrs", "start", "--foreground"]
     if config_path:
         cmd.extend(["--config", config_path])
 
     try:
-        proc = subprocess.Popen(
+        subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -267,46 +271,39 @@ def _follow_log(
     severity: str | None,
     as_json: bool,
 ) -> None:
-    """Tail the log directory, printing new events as they appear."""
+    """Tail the log directory, printing new events as they appear.
+
+    Delegates to :func:`_iter_tail_events` for the rotation-aware read
+    path so this function stays a thin presentation shell.
+    """
     cfg = BlackBoxConfig.load()
     log_dir = Path(os.path.expanduser(cfg.log_dir))
     if not log_dir.is_dir():
         click.echo(click.style(f"Log directory not found: {log_dir}", fg="red"))
         raise SystemExit(1)
 
-    # Find the most recent log file
-    log_files = sorted(log_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
-    if not log_files:
+    target = _latest_log_file_in(log_dir)
+    if target is None:
         click.echo(click.style("No log files found.", fg="yellow"))
         raise SystemExit(1)
 
-    target = log_files[-1]
-    click.echo(click.style(f"Following {target.name} (Ctrl+C to stop)", fg="bright_black"))
+    click.echo(
+        click.style(
+            f"Following {log_dir} (current file: {target.name}, Ctrl+C to stop)",
+            fg="bright_black",
+        )
+    )
 
     try:
-        with open(target, "r", encoding="utf-8") as fh:
-            # Seek to end
-            fh.seek(0, 2)
-            while True:
-                line = fh.readline()
-                if not line:
-                    time.sleep(0.2)
-                    continue
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    ev = BlackBoxEvent.from_jsonl(line)
-                except Exception:
-                    continue
-                if source_filter and ev.source != source_filter:
-                    continue
-                if severity and ev.severity != severity:
-                    continue
-                if as_json:
-                    click.echo(ev.to_jsonl())
-                else:
-                    click.echo(format_event(ev))
+        for ev in _iter_tail_events(log_dir):
+            if source_filter and ev.source != source_filter:
+                continue
+            if severity and ev.severity != severity:
+                continue
+            if as_json:
+                click.echo(ev.to_jsonl())
+            else:
+                click.echo(format_event(ev))
     except KeyboardInterrupt:
         click.echo()
 
@@ -394,6 +391,10 @@ log_dir: "~/.blackboxrs/logs"
 log_rotation_mb: 50
 log_max_files: 20
 
+# Bounded capacity (in events) of every subscriber queue on the event
+# bus.  Full queues drop events instead of back-pressuring producers.
+event_bus_queue_maxsize: 1024
+
 ros_monitor:
   enabled: true
   poll_interval_sec: 1.0
@@ -446,7 +447,7 @@ def init() -> None:
     click.echo(
         click.style(
             "BlackBoxRS initialised. Edit config.yaml to customise, "
-            "then run 'blackboxrs start'.",
+            "then run 'robot-blackbox start'.",
             fg="bright_black",
         )
     )
@@ -469,37 +470,18 @@ def _load_config(config_path: str | None) -> BlackBoxConfig:
 
 
 def _read_recent_events(count: int = 100) -> list[BlackBoxEvent]:
-    """Read the most recent events from the default log directory."""
+    """Return the last *count* events from the configured log directory.
+
+    Streams each log file line-by-line through a bounded ``deque``
+    (via :class:`LogReader.tail`) so very large logs do not balloon
+    memory -- a previous implementation called ``read_text()`` on each
+    file, which pulled the entire file into a string before splitting.
+    """
     cfg = BlackBoxConfig.load()
     log_dir = Path(os.path.expanduser(cfg.log_dir))
     if not log_dir.is_dir():
         return []
-
-    # Collect events from all log files, newest files first
-    log_files = sorted(log_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-    events: list[BlackBoxEvent] = []
-
-    for log_file in log_files:
-        if len(events) >= count:
-            break
-        try:
-            lines = log_file.read_text(encoding="utf-8").strip().splitlines()
-        except OSError:
-            continue
-        for line in reversed(lines):
-            if len(events) >= count:
-                break
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                events.append(BlackBoxEvent.from_jsonl(line))
-            except Exception:
-                continue
-
-    # Return in chronological order
-    events.reverse()
-    return events
+    return LogReader(log_dir).tail(n=count)
 
 
 def _apply_filters(
@@ -516,11 +498,90 @@ def _apply_filters(
     return filtered
 
 
+def _latest_log_file_in(log_dir: Path) -> Path | None:
+    """Return the most recent BlackBoxRS log file in *log_dir*, or ``None``.
+
+    Uses the exact glob that :class:`RotatingJsonlWriter` writes to, so
+    stray ``.jsonl`` files dropped in the directory by other tools are
+    ignored.  Filename ordering matches chronological ordering because
+    every name embeds a sortable UTC timestamp.
+    """
+    if not log_dir.is_dir():
+        return None
+    log_files = sorted(log_dir.glob(_LOG_GLOB))
+    return log_files[-1] if log_files else None
+
+
 def _latest_log_file() -> Path | None:
     """Return the path to the most recent log file, or ``None``."""
     cfg = BlackBoxConfig.load()
     log_dir = Path(os.path.expanduser(cfg.log_dir))
-    if not log_dir.is_dir():
-        return None
-    log_files = sorted(log_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
-    return log_files[-1] if log_files else None
+    return _latest_log_file_in(log_dir)
+
+
+def _iter_tail_events(
+    log_dir: Path,
+    *,
+    idle_sleep: float = 0.2,
+    stop_event: threading.Event | None = None,
+) -> Iterator[BlackBoxEvent]:
+    """Tail the most recent log file in *log_dir*, following rotations.
+
+    Opens the newest ``blackboxrs_*.jsonl`` file, seeks to EOF, and
+    yields every new :class:`BlackBoxEvent` that is appended.  When the
+    writer rotates (i.e. a lexicographically newer file appears in the
+    directory), the generator transparently switches to the new file
+    starting from its beginning — events written to the new file before
+    we caught up would otherwise be lost.
+
+    Args:
+        log_dir: Directory holding BlackBoxRS log files.
+        idle_sleep: Seconds to sleep between poll attempts when the
+            current file has reached EOF and no rotation has occurred.
+        stop_event: Optional event used to cleanly interrupt the loop
+            from another thread.  When set, the generator returns.
+
+    Yields:
+        :class:`BlackBoxEvent` instances in file order.  Malformed lines
+        are silently skipped.
+    """
+    current = _latest_log_file_in(log_dir)
+    if current is None:
+        return
+
+    fh: TextIO = open(current, "r", encoding="utf-8")
+    try:
+        fh.seek(0, 2)  # seek to EOF
+
+        while stop_event is None or not stop_event.is_set():
+            line = fh.readline()
+            if line:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    yield BlackBoxEvent.from_jsonl(stripped)
+                except Exception:
+                    continue
+                continue
+
+            # EOF reached.  Check for rotation before sleeping.
+            newest = _latest_log_file_in(log_dir)
+            if newest is not None and newest != current:
+                try:
+                    fh.close()
+                except OSError:
+                    pass
+                current = newest
+                fh = open(current, "r", encoding="utf-8")
+                # Read from the start of the new file — we don't want
+                # to miss events that were written between rotation and
+                # the moment we noticed.
+                continue
+
+            time.sleep(idle_sleep)
+    finally:
+        try:
+            fh.close()
+        except OSError:
+            pass

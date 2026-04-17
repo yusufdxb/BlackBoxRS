@@ -20,44 +20,44 @@ def event_bus() -> EventBus:
 
 @pytest.fixture
 def sample_ros_event() -> BlackBoxEvent:
-    """A typical ROS topic-frequency event."""
+    """A ROS frequency event matching what RosMonitor actually emits."""
     return BlackBoxEvent(
         timestamp=datetime(2026, 4, 5, 12, 0, 0, tzinfo=timezone.utc),
         source="ros_monitor",
-        event_type="topic_frequency",
+        event_type="ros.frequency",
         severity="info",
-        data={"topic": "/cmd_vel", "frequency_hz": 10.0, "expected_hz": 10.0},
+        data={"topic": "/cmd_vel", "frequency_hz": 10.0},
         metadata={"session_id": "test123"},
     )
 
 
 @pytest.fixture
 def sample_system_event() -> BlackBoxEvent:
-    """A typical system-monitor CPU event."""
+    """A system CPU event matching what SystemMonitor actually emits."""
     return BlackBoxEvent(
         timestamp=datetime(2026, 4, 5, 12, 0, 1, tzinfo=timezone.utc),
         source="system_monitor",
-        event_type="cpu_usage",
+        event_type="system.cpu",
         severity="info",
-        data={"value": 45.0, "unit": "%"},
+        data={"cpu_percent": 45.0, "cpu_count": 8, "per_cpu_percent": [40.0]},
         metadata={"session_id": "test123"},
     )
 
 
 @pytest.fixture
 def sample_anomaly_event() -> BlackBoxEvent:
-    """A typical anomaly event."""
+    """An anomaly event matching what ThresholdDetector now emits."""
     return BlackBoxEvent(
         timestamp=datetime(2026, 4, 5, 12, 0, 2, tzinfo=timezone.utc),
         source="anomaly_engine",
-        event_type="anomaly_threshold",
+        event_type="anomaly.threshold",
         severity="warning",
         data={
             "detector": "threshold",
-            "metric": "cpu_usage",
+            "metric": "cpu_percent",
             "value": 95.0,
             "threshold": 90.0,
-            "message": "cpu_usage is 95.0%, exceeding threshold of 90.0%",
+            "message": "cpu_percent is 95.0%, exceeding threshold of 90.0%",
         },
         metadata={"session_id": "test123"},
     )

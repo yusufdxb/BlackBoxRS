@@ -1,4 +1,4 @@
-"""Allow ``python -m src`` to launch the BlackBoxRS CLI."""
+"""Allow ``python -m blackboxrs`` to launch the BlackBoxRS CLI."""
 
 from blackboxrs.cli.app import cli
 

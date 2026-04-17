@@ -31,7 +31,7 @@ class FrequencyDetector(BaseDetector):
        ``baseline * (1 - tolerance_percent / 100)``.  If the observed
        frequency falls below the floor, an anomaly event is emitted.
 
-    Only ``ros_monitor`` events with ``event_type == "topic_frequency"``
+    Only ``ros_monitor`` events with ``event_type == "ros.frequency"``
     are inspected.
 
     Args:
@@ -51,6 +51,9 @@ class FrequencyDetector(BaseDetector):
     def check(self, event: BlackBoxEvent) -> BlackBoxEvent | None:
         """Evaluate a topic-frequency event.
 
+        Consumes events produced by :class:`RosMonitor` with
+        ``event_type == "ros.frequency"``.
+
         Args:
             event: The incoming pipeline event.
 
@@ -58,7 +61,7 @@ class FrequencyDetector(BaseDetector):
             An anomaly event if the frequency dropped below the
             tolerance floor, else ``None``.
         """
-        if event.source != "ros_monitor" or event.event_type != "topic_frequency":
+        if event.source != "ros_monitor" or event.event_type != "ros.frequency":
             return None
 
         topic: str | None = event.data.get("topic")
@@ -109,7 +112,7 @@ class FrequencyDetector(BaseDetector):
         )
 
         return BlackBoxEvent.anomaly_event(
-            event_type="anomaly_frequency",
+            event_type="anomaly.frequency",
             data=anomaly.model_dump(),
             severity="warning",
             **event.metadata,

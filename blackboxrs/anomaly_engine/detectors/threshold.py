@@ -2,11 +2,18 @@
 
 Fires when system-level metrics (CPU usage, memory usage, GPU temperature)
 exceed their configured static thresholds.
+
+The detector consumes ``BlackBoxEvent`` instances produced by
+:class:`blackboxrs.system_monitor.SystemMonitor`, which emit one event per
+collector with ``event_type`` of the form ``system.<collector>`` (e.g.
+``system.cpu``).  Multiple metrics are checked from each event using the
+data-key mapping defined in ``_METRIC_RULES``.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import NamedTuple
 
 from blackboxrs.core.config import AnomalyThresholds
 from blackboxrs.core.schemas import AnomalyData, BlackBoxEvent
@@ -15,20 +22,34 @@ from .base import BaseDetector
 
 logger = logging.getLogger(__name__)
 
-# Maps event_type -> (data key for the metric value, threshold attr, unit)
-_METRIC_MAP: dict[str, tuple[str, str, str]] = {
-    "cpu_usage": ("value", "cpu_percent", "%"),
-    "memory_usage": ("value", "memory_percent", "%"),
-    "gpu_temperature": ("value", "gpu_temp_c", "C"),
-}
+
+class _Rule(NamedTuple):
+    """A single threshold rule applied to a system-monitor event."""
+
+    event_type: str         # event_type emitted by SystemMonitor
+    data_key: str           # key into event.data carrying the metric value
+    threshold_attr: str     # attribute on AnomalyThresholds for the limit
+    unit: str               # human-readable unit for messages
+
+
+# Each rule maps one (event_type, data_key) pair to a configured limit.
+# This is the single source of truth for the threshold detector contract.
+_METRIC_RULES: tuple[_Rule, ...] = (
+    _Rule("system.cpu", "cpu_percent", "cpu_percent", "%"),
+    _Rule("system.memory", "memory_percent", "memory_percent", "%"),
+    _Rule("system.gpu", "gpu_temp_c", "gpu_temp_c", "C"),
+)
 
 
 class ThresholdDetector(BaseDetector):
     """Fires when system metrics exceed configured thresholds.
 
-    Only inspects events whose ``source`` is ``"system_monitor"`` and
-    whose ``event_type`` matches one of the known metric types
-    (``cpu_usage``, ``memory_usage``, ``gpu_temperature``).
+    Inspects events produced by :class:`SystemMonitor`
+    (``source == "system_monitor"``) whose ``event_type`` matches a
+    configured rule.  A single event may carry multiple metrics
+    (e.g. ``system.cpu`` includes ``cpu_percent`` plus per-core values);
+    the detector emits at most one anomaly per ``check()`` call (the
+    first rule whose value exceeds its limit).
 
     Args:
         thresholds: An :class:`AnomalyThresholds` dataclass holding the
@@ -50,48 +71,46 @@ class ThresholdDetector(BaseDetector):
             event: The incoming pipeline event.
 
         Returns:
-            An anomaly event if the metric exceeds its threshold, else
-            ``None``.
+            An anomaly event if any rule is violated, else ``None``.
         """
         if event.source != "system_monitor":
             return None
 
-        mapping = _METRIC_MAP.get(event.event_type)
-        if mapping is None:
-            return None
+        for rule in _METRIC_RULES:
+            if rule.event_type != event.event_type:
+                continue
+            value = event.data.get(rule.data_key)
+            if value is None:
+                continue
+            threshold = getattr(self._thresholds, rule.threshold_attr)
+            if not isinstance(value, (int, float)) or value <= threshold:
+                continue
 
-        value_key, threshold_attr, unit = mapping
-        value = event.data.get(value_key)
-        if value is None:
-            return None
+            anomaly = AnomalyData(
+                detector=self.name,
+                metric=rule.data_key,
+                value=float(value),
+                threshold=float(threshold),
+                message=(
+                    f"{rule.data_key} is {value}{rule.unit}, "
+                    f"exceeding threshold of {threshold}{rule.unit}"
+                ),
+            )
 
-        threshold = getattr(self._thresholds, threshold_attr)
-        if value <= threshold:
-            return None
+            logger.warning(
+                "Threshold exceeded: %s = %s%s (limit %s%s)",
+                rule.data_key,
+                value,
+                rule.unit,
+                threshold,
+                rule.unit,
+            )
 
-        anomaly = AnomalyData(
-            detector=self.name,
-            metric=event.event_type,
-            value=value,
-            threshold=threshold,
-            message=(
-                f"{event.event_type} is {value}{unit}, "
-                f"exceeding threshold of {threshold}{unit}"
-            ),
-        )
+            return BlackBoxEvent.anomaly_event(
+                event_type="anomaly.threshold",
+                data=anomaly.model_dump(),
+                severity="warning",
+                **event.metadata,
+            )
 
-        logger.warning(
-            "Threshold exceeded: %s = %s%s (limit %s%s)",
-            event.event_type,
-            value,
-            unit,
-            threshold,
-            unit,
-        )
-
-        return BlackBoxEvent.anomaly_event(
-            event_type="anomaly_threshold",
-            data=anomaly.model_dump(),
-            severity="warning",
-            **event.metadata,
-        )
+        return None

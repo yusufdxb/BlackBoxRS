@@ -8,8 +8,7 @@ contract without passing raw dicts around.
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -33,7 +32,7 @@ class TopicFrequencyData(BaseModel):
 class SystemMetricData(BaseModel):
     """Payload for system-level metric readings."""
 
-    metric: str = Field(..., description="Metric identifier, e.g. 'cpu_usage'.")
+    metric: str = Field(..., description="Metric identifier, e.g. 'cpu_percent'.")
     value: float = Field(..., description="Measured value.")
     unit: str = Field(..., description="Unit of measurement, e.g. '%', 'C', 'MB'.")
 
@@ -87,7 +86,7 @@ class BlackBoxEvent(BaseModel):
     )
     event_type: str = Field(
         ...,
-        description="Specific event kind, e.g. 'topic_frequency', 'cpu_usage'.",
+        description="Specific event kind, e.g. 'ros.frequency', 'system.cpu'.",
     )
     severity: _SEVERITY_TYPE = Field(
         default="info", description="Log-style severity level."
@@ -113,7 +112,7 @@ class BlackBoxEvent(BaseModel):
         """Create an event originating from the ROS monitor.
 
         Args:
-            event_type: Specific event kind (e.g. ``"topic_frequency"``).
+            event_type: Specific event kind (e.g. ``"ros.frequency"``).
             data: Metric payload dictionary.
             severity: Severity level.
             **meta: Additional metadata key-value pairs.
@@ -141,7 +140,7 @@ class BlackBoxEvent(BaseModel):
         """Create an event originating from the system monitor.
 
         Args:
-            event_type: Specific event kind (e.g. ``"cpu_usage"``).
+            event_type: Specific event kind (e.g. ``"system.cpu"``).
             data: Metric payload dictionary.
             severity: Severity level.
             **meta: Additional metadata key-value pairs.
@@ -169,7 +168,7 @@ class BlackBoxEvent(BaseModel):
         """Create an event originating from the anomaly engine.
 
         Args:
-            event_type: Specific event kind (e.g. ``"anomaly_threshold"``).
+            event_type: Specific event kind (e.g. ``"anomaly.threshold"``).
             data: Anomaly payload dictionary.
             severity: Severity level.
             **meta: Additional metadata key-value pairs.

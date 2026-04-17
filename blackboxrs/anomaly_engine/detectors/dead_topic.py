@@ -99,7 +99,7 @@ class DeadTopicDetector(BaseDetector):
             )
 
             return BlackBoxEvent.anomaly_event(
-                event_type="anomaly_dead_topic",
+                event_type="anomaly.dead_topic",
                 data=anomaly.model_dump(),
                 severity="warning",
                 **event.metadata,

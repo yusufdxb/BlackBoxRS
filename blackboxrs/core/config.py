@@ -86,11 +86,18 @@ class BlackBoxConfig:
 
     Provides :meth:`load` to read from YAML, :meth:`default` to get
     all-defaults, and :meth:`save` to persist the current state.
+
+    The ``event_bus_queue_maxsize`` field controls the bounded capacity
+    applied to every subscriber queue on the in-process event bus.  A
+    larger value trades memory for tolerance of bursty producers; a
+    smaller value bounds worst-case memory use at the cost of dropping
+    events sooner when consumers fall behind.
     """
 
     log_dir: str = "~/.blackboxrs/logs"
     log_rotation_mb: int = 50
     log_max_files: int = 20
+    event_bus_queue_maxsize: int = 1024
     ros_monitor: RosMonitorConfig = field(default_factory=RosMonitorConfig)
     system_monitor: SystemMonitorConfig = field(default_factory=SystemMonitorConfig)
     anomaly_engine: AnomalyEngineConfig = field(default_factory=AnomalyEngineConfig)

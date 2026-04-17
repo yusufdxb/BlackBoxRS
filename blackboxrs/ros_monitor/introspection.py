@@ -34,13 +34,18 @@ except ImportError:  # pragma: no cover
 
 @dataclass(frozen=True)
 class TopicInfo:
-    """Immutable snapshot of a single ROS 2 topic."""
+    """Immutable snapshot of a single ROS 2 topic.
+
+    QoS profiles are captured separately for publishers and subscribers
+    so consumers can compare each pub/sub pair for compatibility.
+    """
 
     name: str
     msg_type: str
     publisher_count: int = 0
     subscriber_count: int = 0
-    qos_profiles: list[dict] = field(default_factory=list)
+    publisher_qos_profiles: list[dict] = field(default_factory=list)
+    subscriber_qos_profiles: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -132,7 +137,8 @@ class RosIntrospector:
                 pub_info = []
                 sub_info = []
 
-            qos_profiles = [_serialise_qos(p) for p in pub_info]
+            pub_qos = [_serialise_qos(p) for p in pub_info]
+            sub_qos = [_serialise_qos(s) for s in sub_info]
 
             topics.append(
                 TopicInfo(
@@ -140,7 +146,8 @@ class RosIntrospector:
                     msg_type=msg_type,
                     publisher_count=len(pub_info),
                     subscriber_count=len(sub_info),
-                    qos_profiles=qos_profiles,
+                    publisher_qos_profiles=pub_qos,
+                    subscriber_qos_profiles=sub_qos,
                 )
             )
 

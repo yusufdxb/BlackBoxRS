@@ -21,11 +21,20 @@ logger = logging.getLogger(__name__)
 def _log_filename() -> str:
     """Generate a log filename using the current UTC time.
 
+    Microsecond precision is included in the name so that rotations
+    which occur multiple times within the same wall-clock second do not
+    collide with each other.  Lexicographic order still matches
+    chronological order because the timestamp components are
+    left-to-right most-significant-first.
+
     Returns:
-        A filename in the format ``blackboxrs_YYYYMMDD_HHMMSS.jsonl``.
+        A filename in the format ``blackboxrs_YYYYMMDD_HHMMSS_uuuuuu.jsonl``.
     """
     now = datetime.now(timezone.utc)
-    return f"blackboxrs_{now.strftime('%Y%m%d_%H%M%S')}.jsonl"
+    return f"blackboxrs_{now.strftime('%Y%m%d_%H%M%S_%f')}.jsonl"
+
+
+_MAX_COLLISION_SUFFIX_ATTEMPTS = 1000
 
 
 class RotatingJsonlWriter:
@@ -102,10 +111,32 @@ class RotatingJsonlWriter:
     # -- Rotation internals ---------------------------------------------------
 
     def _open_new_file(self) -> None:
-        """Open a fresh log file and reset the byte counter."""
-        path = self._log_dir / _log_filename()
-        self._current_file = open(path, "a", encoding="utf-8")  # noqa: SIM115
-        self._current_size = path.stat().st_size
+        """Open a fresh, empty log file and reset the byte counter.
+
+        Uses exclusive-create (``"x"`` mode) so we never reopen an
+        existing file in append mode.  In the extremely rare case that
+        two calls land in the same microsecond, a numeric ``_N`` suffix
+        is appended to the stem until an unused filename is found.
+        """
+        base_name = _log_filename()
+        base_path = self._log_dir / base_name
+
+        path = base_path
+        attempts = 0
+        while True:
+            try:
+                self._current_file = open(path, "x", encoding="utf-8")  # noqa: SIM115
+                break
+            except FileExistsError:
+                attempts += 1
+                if attempts > _MAX_COLLISION_SUFFIX_ATTEMPTS:
+                    raise RuntimeError(
+                        "Unable to find an unused log filename near "
+                        f"{base_path} after {attempts} attempts"
+                    )
+                path = self._log_dir / f"{base_path.stem}_{attempts}{base_path.suffix}"
+
+        self._current_size = 0
         logger.info("Opened new log file: %s", path)
 
     def _rotate(self) -> None:

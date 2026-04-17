@@ -13,14 +13,14 @@ from blackboxrs.logging.reader import LogReader
 def _make_event(
     ts: datetime | None = None,
     source: str = "system_monitor",
-    event_type: str = "cpu_usage",
+    event_type: str = "system.cpu",
 ) -> BlackBoxEvent:
     return BlackBoxEvent(
         timestamp=ts or datetime.now(timezone.utc),
         source=source,
         event_type=event_type,
         severity="info",
-        data={"value": 42.0, "unit": "%"},
+        data={"cpu_percent": 42.0, "cpu_count": 8},
     )
 
 
@@ -59,6 +59,62 @@ class TestRotatingJsonlWriter:
         writer.write(_make_event())
         writer.close()
         writer.close()  # should not raise
+
+    def test_rotations_within_same_second_do_not_collide(
+        self, tmp_log_dir: Path
+    ):
+        """Regression: earlier filenames only had second resolution, so
+        two or more rotations occurring in the same wall-clock second
+        produced identical file paths and the second rotation silently
+        appended to the first file.  The bug was reproducible locally
+        by forcing repeated rotations in a tight loop.
+
+        After the fix, every rotation must land in a distinct file."""
+        writer = RotatingJsonlWriter(
+            tmp_log_dir, max_file_mb=1, max_files=100
+        )
+        try:
+            writer.write(_make_event())  # opens file #1
+            for _ in range(4):
+                writer._rotate()
+                writer.write(_make_event())
+        finally:
+            writer.close()
+
+        logs = sorted(tmp_log_dir.glob("blackboxrs_*.jsonl"))
+        assert len(logs) == 5, (
+            f"expected 5 distinct log files after 5 rotations, got {len(logs)}: "
+            f"{[p.name for p in logs]}"
+        )
+        # Each file contains exactly one event line — if two rotations
+        # had collided and appended to the same file we would see
+        # multiples stacked up in one of them.
+        for path in logs:
+            lines = [
+                ln for ln in path.read_text(encoding="utf-8").splitlines()
+                if ln.strip()
+            ]
+            assert len(lines) == 1, (
+                f"{path.name} has {len(lines)} lines, expected 1 "
+                "(rotation collision reintroduced?)"
+            )
+
+    def test_rotation_preserves_size_accounting(self, tmp_log_dir: Path):
+        """A fresh rotation must start with byte counter 0.  Under the
+        previous bug the writer opened the existing (collided) file in
+        append mode and then read ``st_size`` off the already-populated
+        file, so ``_current_size`` came back non-zero on a 'new' file."""
+        writer = RotatingJsonlWriter(
+            tmp_log_dir, max_file_mb=1, max_files=100
+        )
+        try:
+            writer.write(_make_event())
+            writer._rotate()
+            # Immediately after rotation the writer must have opened a
+            # fresh, empty file.
+            assert writer._current_size == 0
+        finally:
+            writer.close()
 
 
 class TestLogReader:
@@ -129,9 +185,9 @@ class TestLogReader:
 
     def test_filter_by_source(self, tmp_log_dir: Path):
         events = [
-            _make_event(source="ros_monitor", event_type="topic_frequency"),
-            _make_event(source="system_monitor", event_type="cpu_usage"),
-            _make_event(source="ros_monitor", event_type="topic_frequency"),
+            _make_event(source="ros_monitor", event_type="ros.frequency"),
+            _make_event(source="system_monitor", event_type="system.cpu"),
+            _make_event(source="ros_monitor", event_type="ros.frequency"),
         ]
         self._write_events(tmp_log_dir, events)
         reader = LogReader(tmp_log_dir)
@@ -146,9 +202,9 @@ class TestLogReader:
         e1_warning = BlackBoxEvent(
             timestamp=datetime.now(timezone.utc),
             source="anomaly_engine",
-            event_type="anomaly_threshold",
+            event_type="anomaly.threshold",
             severity="warning",
-            data={"detector": "threshold", "metric": "cpu", "value": 95.0,
+            data={"detector": "threshold", "metric": "cpu_percent", "value": 95.0,
                   "threshold": 90.0, "message": "test"},
         )
         self._write_events(tmp_log_dir, [e1, e1_warning])

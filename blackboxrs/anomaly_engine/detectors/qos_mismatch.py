@@ -94,9 +94,15 @@ def _check_dimension(
 class QoSMismatchDetector(BaseDetector):
     """Fires when publisher and subscriber QoS profiles are incompatible.
 
-    Inspects ``ros_monitor`` events with ``event_type == "qos_profile"``
-    that carry ``publisher_qos`` and ``subscriber_qos`` dictionaries in
-    their ``data`` payload.  Checks reliability and durability dimensions.
+    Consumes :class:`RosMonitor` ``ros.qos`` events whose ``data``
+    payload carries ``publisher_qos_profiles`` and
+    ``subscriber_qos_profiles`` lists (each entry is a per-endpoint QoS
+    dict produced by :func:`introspection._serialise_qos`).  Compares
+    every (publisher, subscriber) pair and emits a single anomaly per
+    topic when at least one pair is incompatible.
+
+    Topics with zero publishers or zero subscribers are skipped — there
+    is no compatibility relation to check.
     """
 
     @property
@@ -105,38 +111,44 @@ class QoSMismatchDetector(BaseDetector):
         return "qos_mismatch"
 
     def check(self, event: BlackBoxEvent) -> BlackBoxEvent | None:
-        """Evaluate a QoS profile event for pub/sub incompatibilities.
+        """Evaluate a QoS event for pub/sub incompatibilities.
 
         Args:
             event: The incoming pipeline event.
 
         Returns:
             An anomaly event listing all incompatibilities found, or
-            ``None`` if the profiles are compatible.
+            ``None`` if every pub/sub pair is compatible.
         """
-        if event.source != "ros_monitor" or event.event_type != "qos_profile":
+        if event.source != "ros_monitor" or event.event_type != "ros.qos":
             return None
 
-        pub_qos: dict[str, Any] | None = event.data.get("publisher_qos")
-        sub_qos: dict[str, Any] | None = event.data.get("subscriber_qos")
+        pub_profiles: list[dict[str, Any]] | None = event.data.get(
+            "publisher_qos_profiles"
+        )
+        sub_profiles: list[dict[str, Any]] | None = event.data.get(
+            "subscriber_qos_profiles"
+        )
         topic: str = event.data.get("topic", "<unknown>")
 
-        if pub_qos is None or sub_qos is None:
+        if not pub_profiles or not sub_profiles:
             return None
 
         mismatches: list[str] = []
+        for pub_idx, pub_qos in enumerate(pub_profiles):
+            for sub_idx, sub_qos in enumerate(sub_profiles):
+                pair_label = f"pub#{pub_idx}↔sub#{sub_idx}"
+                reliability_issue = _check_dimension(
+                    pub_qos, sub_qos, "reliability", _RELIABILITY_RANK
+                )
+                if reliability_issue:
+                    mismatches.append(f"{pair_label}: {reliability_issue}")
 
-        reliability_issue = _check_dimension(
-            pub_qos, sub_qos, "reliability", _RELIABILITY_RANK
-        )
-        if reliability_issue:
-            mismatches.append(reliability_issue)
-
-        durability_issue = _check_dimension(
-            pub_qos, sub_qos, "durability", _DURABILITY_RANK
-        )
-        if durability_issue:
-            mismatches.append(durability_issue)
+                durability_issue = _check_dimension(
+                    pub_qos, sub_qos, "durability", _DURABILITY_RANK
+                )
+                if durability_issue:
+                    mismatches.append(f"{pair_label}: {durability_issue}")
 
         if not mismatches:
             return None
@@ -148,15 +160,15 @@ class QoSMismatchDetector(BaseDetector):
         anomaly = AnomalyData(
             detector=self.name,
             metric=f"qos:{topic}",
-            value=len(mismatches),
-            threshold=0,
+            value=float(len(mismatches)),
+            threshold=0.0,
             message=message,
         )
 
         logger.warning("QoS mismatch detected: %s", message)
 
         return BlackBoxEvent.anomaly_event(
-            event_type="anomaly_qos_mismatch",
+            event_type="anomaly.qos_mismatch",
             data=anomaly.model_dump(),
             severity="warning",
             **event.metadata,
