@@ -134,9 +134,7 @@ class BlackBoxDaemon:
     def __init__(self, config: BlackBoxConfig) -> None:
         self._config = config
         self._session = Session()
-        self._event_bus = EventBus(
-            default_queue_maxsize=config.event_bus_queue_maxsize
-        )
+        self._event_bus = EventBus(default_queue_maxsize=config.event_bus_queue_maxsize)
         self._components: list[_Component] = []
         self._running = False
         self._stop_event = Event()
@@ -187,9 +185,7 @@ class BlackBoxDaemon:
         if self._config.anomaly_engine.enabled:
             from blackboxrs.anomaly_engine import AnomalyEngine  # noqa: E402
 
-            engine = AnomalyEngine(
-                self._event_bus, self._config.anomaly_engine, self._session
-            )
+            engine = AnomalyEngine(self._event_bus, self._config.anomaly_engine, self._session)
             self._register(engine)
 
         # --- Rosbag2 recorder --------------------------------------------
@@ -199,28 +195,29 @@ class BlackBoxDaemon:
         if self._config.rosbag2.enabled:
             from blackboxrs.recording import Rosbag2Recorder  # noqa: E402
 
-            recorder = Rosbag2Recorder(
-                self._event_bus, self._config.rosbag2, self._session
-            )
+            recorder = Rosbag2Recorder(self._event_bus, self._config.rosbag2, self._session)
             self._register(recorder)
 
         # --- ROS monitor --------------------------------------------------
         if self._config.ros_monitor.enabled:
             from blackboxrs.ros_monitor import RosMonitor  # noqa: E402
 
-            ros_mon = RosMonitor(
-                self._event_bus, self._config.ros_monitor, self._session
-            )
+            ros_mon = RosMonitor(self._event_bus, self._config.ros_monitor, self._session)
             self._register(ros_mon)
 
         # --- System monitor -----------------------------------------------
         if self._config.system_monitor.enabled:
             from blackboxrs.system_monitor import SystemMonitor  # noqa: E402
 
-            sys_mon = SystemMonitor(
-                self._event_bus, self._config.system_monitor, self._session
-            )
+            sys_mon = SystemMonitor(self._event_bus, self._config.system_monitor, self._session)
             self._register(sys_mon)
+
+        # --- Prometheus exporter ------------------------------------------
+        if self._config.prometheus.enabled:
+            from blackboxrs.metrics import PrometheusExporter  # noqa: E402
+
+            prom = PrometheusExporter(self._event_bus, self._config.prometheus)
+            self._register(prom)
 
         # --- PID file -----------------------------------------------------
         self._write_pid_file()
@@ -361,9 +358,8 @@ class BlackBoxDaemon:
         # tests and hosts with unusual cmdline shapes).
         live_cmdline = _read_proc_cmdline(pid) or ""
         recorded_cmdline = payload.get("cmdline") or ""
-        cmdline_ok = (
-            _CMDLINE_MARKER in live_cmdline
-            or (recorded_cmdline and live_cmdline == recorded_cmdline)
+        cmdline_ok = _CMDLINE_MARKER in live_cmdline or (
+            recorded_cmdline and live_cmdline == recorded_cmdline
         )
         if not cmdline_ok:
             logger.info(
@@ -458,9 +454,7 @@ class BlackBoxDaemon:
         identity = _current_process_identity()
         payload = json.dumps(identity, separators=(",", ":"))
 
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=".blackboxrs.pid.", dir=str(self._PID_DIR)
-        )
+        fd, tmp_path = tempfile.mkstemp(prefix=".blackboxrs.pid.", dir=str(self._PID_DIR))
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(payload)

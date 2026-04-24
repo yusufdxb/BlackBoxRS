@@ -43,6 +43,9 @@ dev = [
     "pytest-cov",
     "ruff",
 ]
+prometheus = [
+    "prometheus_client>=0.17",
+]
 
 [project.scripts]
 robot-blackbox = "blackboxrs.cli.app:cli"

@@ -162,9 +162,7 @@ class BlackBoxConfig:
         return cls()
 
     @classmethod
-    def load(
-        cls, path: Path | None = None, *, strict: bool = False
-    ) -> BlackBoxConfig:
+    def load(cls, path: Path | None = None, *, strict: bool = False) -> BlackBoxConfig:
         """Load configuration from a YAML file.
 
         Missing keys in the file are filled with defaults.  If the file
@@ -193,7 +191,6 @@ class BlackBoxConfig:
             raw: dict[str, Any] = yaml.safe_load(fh) or {}
 
         return _dict_to_config(raw, strict=strict, source=str(path))
-
 
     # -- Persistence --------------------------------------------------------
 
@@ -272,9 +269,7 @@ def _merge_dataclass(
     """Instantiate a dataclass from a dict; warn/raise on unknown keys."""
     valid_keys = {f.name for f in fields(dc_cls)}
     unknown = [k for k in data if k not in valid_keys]
-    _report_unknown_keys(
-        unknown, context=context, strict=strict, source=source
-    )
+    _report_unknown_keys(unknown, context=context, strict=strict, source=source)
     return dc_cls(**{k: v for k, v in data.items() if k in valid_keys})
 
 
@@ -298,9 +293,7 @@ def _dict_to_config(
     """
     top_valid = {f.name for f in fields(BlackBoxConfig)}
     top_unknown = [k for k in raw if k not in top_valid]
-    _report_unknown_keys(
-        top_unknown, context="top-level", strict=strict, source=source
-    )
+    _report_unknown_keys(top_unknown, context="top-level", strict=strict, source=source)
 
     kwargs: dict[str, Any] = {}
 
