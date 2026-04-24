@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 
-import pytest
-
 from blackboxrs.anomaly_engine.detectors.base import BaseDetector
 from blackboxrs.core.schemas import BlackBoxEvent
 
