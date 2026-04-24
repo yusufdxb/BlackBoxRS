@@ -256,6 +256,11 @@ anomaly_engine:
     tolerance_percent: 20.0    # alert when measured Hz < (1-tol/100)*baseline
   dead_topic:
     timeout_sec: 5.0
+  # custom_detectors:            # user-supplied anomaly detectors
+  #   - class: "mypackage.detectors.LatencySpike"
+  #     params:
+  #       threshold_ms: 50.0
+  #   - class: "mypackage.detectors.JointTorqueAnomaly"
 
 rosbag2:
   enabled: false
@@ -273,10 +278,12 @@ rosbag2:
   topics: []                  # [] => `ros2 bag record -a`
 ```
 
-There is no `general:` block, no `log_format` field, no
-`log_retention_days`, no `detectors:` list, and no per-detector custom
-registration — all anomaly settings live under the three nested blocks
-(`thresholds`, `frequency`, `dead_topic`) shown above. If you write
+There is no `general:` block, no `log_format` field, and no
+`log_retention_days`. Built-in anomaly settings live under the three
+nested blocks (`thresholds`, `frequency`, `dead_topic`). Custom
+detectors can be added via the `custom_detectors` list — each entry
+needs a `class` (dotted import path to a `BaseDetector` subclass) and
+optional `params` (kwargs passed to `__init__`). If you write
 something else in your YAML, it will not be applied, and you'll see
 a warning like:
 

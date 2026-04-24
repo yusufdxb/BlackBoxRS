@@ -93,9 +93,12 @@ process and writes to local files.
   through every registered detector. Anomaly events are republished to
   the bus; the engine skips events whose `source == "anomaly_engine"`
   to avoid feedback loops.
-- The four built-in detectors are hard-wired in
-  `_init_detectors`. Custom-detector loading from config is **not**
-  implemented (despite earlier docs saying otherwise).
+- Four built-in detectors are always loaded. Additional user-supplied
+  detectors can be registered via `anomaly_engine.custom_detectors` in
+  `config.yaml` — each entry specifies a dotted import path to a
+  `BaseDetector` subclass plus optional `params` kwargs. The loader
+  (`detectors/loader.py`) imports, validates, and instantiates them at
+  startup; errors are logged and skipped.
 
 | Detector | Consumes | Emits |
 |---|---|---|
@@ -103,6 +106,7 @@ process and writes to local files.
 | `FrequencyDetector` | `ros.frequency` | `anomaly.frequency` (auto-learned baseline + tolerance floor) |
 | `DeadTopicDetector` | `ros.frequency` | `anomaly.dead_topic` (only fires when *another* event arrives — driven by the bus, not by an internal heartbeat) |
 | `QoSMismatchDetector` | `ros.qos` | `anomaly.qos_mismatch` (one event per topic with at least one incompatible pub × sub pair) |
+| Custom detectors | User-defined | User-defined (should use `anomaly.` prefix by convention) |
 
 ### `recording/` — Anomaly-triggered rosbag2 capture
 - `Rosbag2Recorder` subscribes to `channel="anomaly_engine"` and
