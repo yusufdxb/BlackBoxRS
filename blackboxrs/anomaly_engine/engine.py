@@ -76,6 +76,11 @@ class AnomalyEngine:
             QoSMismatchDetector(),
             DeadTopicDetector(self._config.dead_topic),
         ]
+        if self._config.custom_detectors:
+            from .detectors.loader import load_custom_detectors
+
+            custom = load_custom_detectors(self._config.custom_detectors)
+            detectors.extend(custom)
         logger.info(
             "Initialised %d anomaly detectors: %s",
             len(detectors),
