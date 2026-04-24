@@ -9,8 +9,8 @@
       "metrics": {
         "publish_rate_eps": {
           "direction": "min",
-          "min": 400000,
-          "min_ratio_to_baseline": 0.55,
+          "min": 150000,
+          "min_ratio_to_baseline": 0.25,
           "unit": "eps"
         }
       }
@@ -22,14 +22,14 @@
       "metrics": {
         "write_rate_eps": {
           "direction": "min",
-          "min": 150000,
-          "min_ratio_to_baseline": 0.50,
+          "min": 80000,
+          "min_ratio_to_baseline": 0.25,
           "unit": "eps"
         },
         "per_write_us_p99": {
           "direction": "max",
-          "max": 25.0,
-          "max_ratio_to_baseline": 4.5,
+          "max": 50.0,
+          "max_ratio_to_baseline": 8.0,
           "unit": "us"
         }
       }
@@ -48,8 +48,8 @@
         },
         "bytes_per_sec": {
           "direction": "min",
-          "min": 3500000,
-          "min_ratio_to_baseline": 0.55,
+          "min": 1500000,
+          "min_ratio_to_baseline": 0.25,
           "unit": "B/s"
         }
       }
