@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -220,3 +222,75 @@ class TestLogReader:
         assert list(reader.read_all()) == []
         assert reader.tail() == []
         assert reader.list_logs() == []
+
+
+class TestTimeBasedRetention:
+    """Test time-based log retention via max_age_hours."""
+
+    def _create_old_log(self, log_dir: Path, age_hours: float) -> Path:
+        """Create a fake log file and backdate its mtime."""
+        name = f"blackboxrs_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}.jsonl"
+        path = log_dir / name
+        path.write_text('{"placeholder": true}\n')
+        old_mtime = time.time() - (age_hours * 3600)
+        os.utime(path, (old_mtime, old_mtime))
+        return path
+
+    def test_expired_files_deleted_on_init(self, tmp_log_dir: Path):
+        old = self._create_old_log(tmp_log_dir, age_hours=48)
+        assert old.exists()
+        writer = RotatingJsonlWriter(tmp_log_dir, max_age_hours=24)
+        writer.close()
+        assert not old.exists()
+
+    def test_recent_files_kept(self, tmp_log_dir: Path):
+        recent = self._create_old_log(tmp_log_dir, age_hours=1)
+        writer = RotatingJsonlWriter(tmp_log_dir, max_age_hours=24)
+        writer.close()
+        assert recent.exists()
+
+    def test_disabled_by_default(self, tmp_log_dir: Path):
+        old = self._create_old_log(tmp_log_dir, age_hours=9999)
+        writer = RotatingJsonlWriter(tmp_log_dir)
+        writer.close()
+        assert old.exists()
+
+    def test_zero_disables_retention(self, tmp_log_dir: Path):
+        old = self._create_old_log(tmp_log_dir, age_hours=9999)
+        writer = RotatingJsonlWriter(tmp_log_dir, max_age_hours=0)
+        writer.close()
+        assert old.exists()
+
+    def test_expired_files_deleted_on_rotation(self, tmp_log_dir: Path):
+        writer = RotatingJsonlWriter(
+            tmp_log_dir, max_file_mb=1, max_files=100, max_age_hours=24
+        )
+        writer.write(_make_event())
+        old = self._create_old_log(tmp_log_dir, age_hours=48)
+        assert old.exists()
+        writer._rotate()
+        writer.close()
+        assert not old.exists()
+
+    def test_current_file_not_pruned(self, tmp_log_dir: Path):
+        writer = RotatingJsonlWriter(
+            tmp_log_dir, max_file_mb=1, max_files=100, max_age_hours=0.0001
+        )
+        writer.write(_make_event())
+        time.sleep(0.01)
+        writer._cleanup_expired_files()
+        assert writer._current_file is not None
+        current = Path(writer._current_file.name)
+        assert current.exists()
+        writer.close()
+
+    def test_mix_of_old_and_new_files(self, tmp_log_dir: Path):
+        old1 = self._create_old_log(tmp_log_dir, age_hours=72)
+        old2 = self._create_old_log(tmp_log_dir, age_hours=49)
+        time.sleep(0.01)
+        recent = self._create_old_log(tmp_log_dir, age_hours=12)
+        writer = RotatingJsonlWriter(tmp_log_dir, max_age_hours=24)
+        writer.close()
+        assert not old1.exists()
+        assert not old2.exists()
+        assert recent.exists()

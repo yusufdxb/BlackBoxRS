@@ -88,6 +88,15 @@ class AnomalyEngineConfig:
 
 
 @dataclass
+class PrometheusConfig:
+    """Settings for optional Prometheus metrics export."""
+
+    enabled: bool = False
+    port: int = 9100
+    host: str = "0.0.0.0"
+
+
+@dataclass
 class Rosbag2RecorderConfig:
     """Settings for anomaly-triggered rosbag2 recording."""
 
@@ -133,11 +142,13 @@ class BlackBoxConfig:
     log_dir: str = "~/.blackboxrs/logs"
     log_rotation_mb: int = 50
     log_max_files: int = 20
+    log_max_age_hours: float = 0
     event_bus_queue_maxsize: int = 1024
     ros_monitor: RosMonitorConfig = field(default_factory=RosMonitorConfig)
     system_monitor: SystemMonitorConfig = field(default_factory=SystemMonitorConfig)
     anomaly_engine: AnomalyEngineConfig = field(default_factory=AnomalyEngineConfig)
     rosbag2: Rosbag2RecorderConfig = field(default_factory=Rosbag2RecorderConfig)
+    prometheus: PrometheusConfig = field(default_factory=PrometheusConfig)
 
     # -- Factory methods ----------------------------------------------------
 
@@ -214,6 +225,7 @@ _NESTED_MAP: dict[str, type] = {
     "system_monitor": SystemMonitorConfig,
     "anomaly_engine": AnomalyEngineConfig,
     "rosbag2": Rosbag2RecorderConfig,
+    "prometheus": PrometheusConfig,
 }
 
 _ANOMALY_NESTED_MAP: dict[str, type] = {

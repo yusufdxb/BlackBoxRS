@@ -53,6 +53,7 @@ class LoggingPipeline:
             log_dir=Path(os.path.expanduser(config.log_dir)),
             max_file_mb=config.log_rotation_mb,
             max_files=config.log_max_files,
+            max_age_hours=config.log_max_age_hours,
         )
         self._running = False
         self._queue: Queue[BlackBoxEvent] | None = None

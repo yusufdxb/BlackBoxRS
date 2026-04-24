@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from io import TextIOWrapper
 from pathlib import Path
@@ -51,6 +52,9 @@ class RotatingJsonlWriter:
         max_file_mb: Maximum size of a single log file in megabytes
             before rotation occurs.
         max_files: Maximum number of log files to retain.
+        max_age_hours: Maximum age of log files in hours.  Files whose
+            modification time is older than this are deleted.  ``0``
+            disables time-based retention (the default).
     """
 
     def __init__(
@@ -58,14 +62,17 @@ class RotatingJsonlWriter:
         log_dir: Path,
         max_file_mb: int = 50,
         max_files: int = 20,
+        max_age_hours: float = 0,
     ) -> None:
         self._log_dir = Path(os.path.expanduser(log_dir))
         self._max_bytes = max_file_mb * 1024 * 1024
         self._max_files = max_files
+        self._max_age_hours = max_age_hours
         self._current_file: TextIOWrapper | None = None
         self._current_size: int = 0
 
         self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._cleanup_expired_files()
 
     # -- Public API -----------------------------------------------------------
 
@@ -143,12 +150,13 @@ class RotatingJsonlWriter:
         """Close the current file and open a new one.
 
         After opening the new file, old files beyond the retention
-        limit are removed.
+        limit are removed and expired files are pruned.
         """
         logger.info("Rotating log file (current size: %d bytes)", self._current_size)
         self.close()
         self._open_new_file()
         self._cleanup_old_files()
+        self._cleanup_expired_files()
 
     def _cleanup_old_files(self) -> None:
         """Delete the oldest log files when the count exceeds the limit.
@@ -167,3 +175,27 @@ class RotatingJsonlWriter:
                 logger.info("Deleted old log file: %s", stale)
             except OSError:
                 logger.warning("Failed to delete old log file: %s", stale)
+
+    def _cleanup_expired_files(self) -> None:
+        """Delete log files whose modification time exceeds the max age.
+
+        Skipped entirely when ``max_age_hours`` is ``0`` (disabled).
+        The currently-open file is never removed.
+        """
+        if self._max_age_hours <= 0:
+            return
+
+        cutoff = time.time() - (self._max_age_hours * 3600)
+        current_path: Path | None = None
+        if self._current_file is not None and not self._current_file.closed:
+            current_path = Path(self._current_file.name)
+
+        for path in self._log_dir.glob("blackboxrs_*.jsonl"):
+            if current_path is not None and path == current_path:
+                continue
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    logger.info("Pruned expired log file: %s", path)
+            except OSError:
+                logger.warning("Failed to prune expired log file: %s", path)
