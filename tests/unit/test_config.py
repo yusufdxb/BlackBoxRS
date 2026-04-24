@@ -267,3 +267,38 @@ class TestUnknownKeys:
         assert not [
             rec for rec in caplog.records if "Unknown config key" in rec.message
         ], "Round-tripped config produced spurious unknown-key warnings"
+
+
+class TestCustomDetectorsConfig:
+    """Test custom_detectors config field."""
+
+    def test_custom_detectors_default_empty(self):
+        cfg = BlackBoxConfig.default()
+        assert cfg.anomaly_engine.custom_detectors == []
+
+    def test_custom_detectors_round_trips_through_load(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            'anomaly_engine:\n'
+            '  custom_detectors:\n'
+            '    - class: "mymod.MyDetector"\n'
+            '      params:\n'
+            '        threshold: 42.0\n'
+            '    - class: "othermod.OtherDetector"\n'
+        )
+        cfg = BlackBoxConfig.load(config_file)
+        assert len(cfg.anomaly_engine.custom_detectors) == 2
+        assert cfg.anomaly_engine.custom_detectors[0]["class"] == "mymod.MyDetector"
+        assert cfg.anomaly_engine.custom_detectors[0]["params"] == {"threshold": 42.0}
+        assert cfg.anomaly_engine.custom_detectors[1]["class"] == "othermod.OtherDetector"
+
+    def test_custom_detectors_no_unknown_key_warning(self, tmp_path, caplog):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            'anomaly_engine:\n'
+            '  custom_detectors:\n'
+            '    - class: "mymod.MyDetector"\n'
+        )
+        with caplog.at_level(logging.WARNING, logger="blackboxrs.core.config"):
+            BlackBoxConfig.load(config_file)
+        assert "Unknown config key" not in caplog.text

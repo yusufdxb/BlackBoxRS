@@ -84,6 +84,7 @@ class AnomalyEngineConfig:
     thresholds: AnomalyThresholds = field(default_factory=AnomalyThresholds)
     frequency: FrequencyConfig = field(default_factory=FrequencyConfig)
     dead_topic: DeadTopicConfig = field(default_factory=DeadTopicConfig)
+    custom_detectors: list[dict] = field(default_factory=list)
 
 
 @dataclass
