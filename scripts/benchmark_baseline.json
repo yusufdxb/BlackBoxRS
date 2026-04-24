@@ -1,0 +1,43 @@
+{
+  "generated_at": "2026-04-18T00:00:00Z",
+  "python": "3.10.12",
+  "event_payload_bytes": 559,
+  "benchmarks": [
+    {
+      "bench": "event_bus",
+      "events": 200000,
+      "queue_depth": 1024,
+      "consumer_delay_us": 0.0,
+      "publish_elapsed_sec": 0.2600,
+      "publish_rate_eps": 769202.0,
+      "delivered": 72098,
+      "dropped": 127902,
+      "drop_rate_pct": 63.95
+    },
+    {
+      "bench": "writer",
+      "events": 50000,
+      "total_elapsed_sec": 0.1607,
+      "write_rate_eps": 311178.0,
+      "bytes_written": 28000560,
+      "bytes_per_sec": 174263283.0,
+      "per_write_us_mean": 3.13,
+      "per_write_us_p50": 2.91,
+      "per_write_us_p99": 5.06,
+      "per_write_us_max": 135.50
+    },
+    {
+      "bench": "pipeline",
+      "events": 100000,
+      "queue_depth": 1024,
+      "publish_elapsed_sec": 0.0826,
+      "total_elapsed_sec": 0.0865,
+      "publish_rate_eps": 1210605.0,
+      "delivered": 1041,
+      "dropped": 98963,
+      "drop_rate_pct": 98.96,
+      "bytes_written": 580720,
+      "bytes_per_sec": 6711035.0
+    }
+  ]
+}

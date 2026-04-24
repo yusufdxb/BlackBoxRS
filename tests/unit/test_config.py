@@ -14,6 +14,7 @@ from blackboxrs.core.config import (
     ConfigError,
     DeadTopicConfig,
     FrequencyConfig,
+    Rosbag2RecorderConfig,
     RosMonitorConfig,
     SystemMonitorConfig,
 )
@@ -59,6 +60,20 @@ class TestDefaultConfig:
         cfg = BlackBoxConfig.default()
         assert cfg.anomaly_engine.frequency.tolerance_percent == 20.0
 
+    def test_default_rosbag2_settings(self):
+        cfg = BlackBoxConfig.default()
+        assert cfg.rosbag2.enabled is False
+        assert cfg.rosbag2.output_dir == "~/.blackboxrs/bags"
+        assert cfg.rosbag2.record_duration_sec == 30.0
+        assert cfg.rosbag2.executable == "ros2"
+        assert cfg.rosbag2.storage_id == "sqlite3"
+        assert cfg.rosbag2.trigger_event_types == [
+            "anomaly.threshold",
+            "anomaly.frequency",
+            "anomaly.dead_topic",
+            "anomaly.qos_mismatch",
+        ]
+
 
 class TestConfigSaveLoad:
     """Test YAML save/load round-trip."""
@@ -73,6 +88,7 @@ class TestConfigSaveLoad:
         assert loaded.log_rotation_mb == cfg.log_rotation_mb
         assert loaded.ros_monitor.enabled == cfg.ros_monitor.enabled
         assert loaded.anomaly_engine.thresholds.cpu_percent == cfg.anomaly_engine.thresholds.cpu_percent
+        assert loaded.rosbag2.trigger_event_types == cfg.rosbag2.trigger_event_types
 
     def test_save_creates_parent_dirs(self, tmp_path: Path):
         cfg = BlackBoxConfig.default()
@@ -94,6 +110,11 @@ class TestConfigSaveLoad:
                 thresholds=AnomalyThresholds(cpu_percent=75.0),
                 dead_topic=DeadTopicConfig(timeout_sec=10.0),
             ),
+            rosbag2=Rosbag2RecorderConfig(
+                enabled=True,
+                record_duration_sec=12.0,
+                topics=["/cmd_vel"],
+            ),
         )
         cfg_path = tmp_path / "custom.yaml"
         cfg.save(cfg_path)
@@ -103,6 +124,8 @@ class TestConfigSaveLoad:
         assert loaded.log_rotation_mb == 100
         assert loaded.anomaly_engine.thresholds.cpu_percent == 75.0
         assert loaded.anomaly_engine.dead_topic.timeout_sec == 10.0
+        assert loaded.rosbag2.enabled is True
+        assert loaded.rosbag2.topics == ["/cmd_vel"]
 
 
 class TestConfigFieldAccess:
@@ -128,6 +151,18 @@ class TestConfigFieldAccess:
     def test_frequency_config_fields(self):
         f = FrequencyConfig(tolerance_percent=30.0)
         assert f.tolerance_percent == 30.0
+
+    def test_rosbag2_config_fields(self):
+        cfg = Rosbag2RecorderConfig(
+            enabled=True,
+            cooldown_sec=15.0,
+            storage_id="mcap",
+            topics=["/scan"],
+        )
+        assert cfg.enabled is True
+        assert cfg.cooldown_sec == 15.0
+        assert cfg.storage_id == "mcap"
+        assert cfg.topics == ["/scan"]
 
 
 class TestUnknownKeys:

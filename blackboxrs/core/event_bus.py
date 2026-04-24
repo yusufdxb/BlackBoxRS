@@ -64,6 +64,11 @@ class EventBus:
     # Subscribe / unsubscribe
     # ------------------------------------------------------------------
 
+    @property
+    def default_queue_maxsize(self) -> int:
+        """Return the default queue capacity for new subscriptions."""
+        return self._default_queue_maxsize
+
     def subscribe(
         self,
         channel: str | None = None,

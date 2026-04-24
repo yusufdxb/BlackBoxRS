@@ -26,7 +26,10 @@ class TopicFrequencyData(BaseModel):
 
     topic: str = Field(..., description="Fully qualified ROS topic name.")
     frequency_hz: float = Field(..., description="Measured publish frequency in Hz.")
-    expected_hz: float = Field(..., description="Expected publish frequency in Hz.")
+    interval_ms: float | None = Field(
+        default=None,
+        description="Estimated mean inter-message interval in milliseconds.",
+    )
 
 
 class SystemMetricData(BaseModel):
@@ -48,17 +51,17 @@ class AnomalyData(BaseModel):
 
 
 class QoSProfileData(BaseModel):
-    """Payload for QoS compatibility reports between pub/sub pairs."""
+    """Payload for a ROS QoS snapshot."""
 
     topic: str = Field(..., description="Fully qualified ROS topic name.")
-    publisher_qos: dict[str, Any] = Field(
+    msg_type: str = Field(..., description="ROS interface type for the topic.")
+    publisher_count: int = Field(..., description="Number of discovered publishers.")
+    subscriber_count: int = Field(..., description="Number of discovered subscribers.")
+    publisher_qos_profiles: list[dict[str, Any]] = Field(
         ..., description="QoS settings on the publisher side."
     )
-    subscriber_qos: dict[str, Any] = Field(
+    subscriber_qos_profiles: list[dict[str, Any]] = Field(
         ..., description="QoS settings on the subscriber side."
-    )
-    compatible: bool = Field(
-        ..., description="Whether publisher and subscriber QoS profiles are compatible."
     )
 
 
@@ -66,7 +69,9 @@ class QoSProfileData(BaseModel):
 # Unified event envelope
 # ---------------------------------------------------------------------------
 
-_SOURCE_TYPE = Literal["ros_monitor", "system_monitor", "anomaly_engine"]
+_SOURCE_TYPE = Literal[
+    "ros_monitor", "system_monitor", "anomaly_engine", "rosbag_recorder"
+]
 _SEVERITY_TYPE = Literal["debug", "info", "warning", "error", "critical"]
 
 
@@ -179,6 +184,24 @@ class BlackBoxEvent(BaseModel):
         return cls(
             timestamp=Clock.now(),
             source="anomaly_engine",
+            event_type=event_type,
+            severity=severity,
+            data=data,
+            metadata=dict(meta),
+        )
+
+    @classmethod
+    def recorder_event(
+        cls,
+        event_type: str,
+        data: dict[str, Any],
+        severity: _SEVERITY_TYPE = "info",
+        **meta: Any,
+    ) -> BlackBoxEvent:
+        """Create an event originating from the rosbag recorder."""
+        return cls(
+            timestamp=Clock.now(),
+            source="rosbag_recorder",
             event_type=event_type,
             severity=severity,
             data=data,

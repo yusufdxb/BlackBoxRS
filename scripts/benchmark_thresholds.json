@@ -1,0 +1,58 @@
+{
+  "benchmarks": {
+    "event_bus": {
+      "inputs": {
+        "events": 200000,
+        "queue_depth": 1024,
+        "consumer_delay_us": 0.0
+      },
+      "metrics": {
+        "publish_rate_eps": {
+          "direction": "min",
+          "min": 400000,
+          "min_ratio_to_baseline": 0.55,
+          "unit": "eps"
+        }
+      }
+    },
+    "writer": {
+      "inputs": {
+        "events": 50000
+      },
+      "metrics": {
+        "write_rate_eps": {
+          "direction": "min",
+          "min": 150000,
+          "min_ratio_to_baseline": 0.50,
+          "unit": "eps"
+        },
+        "per_write_us_p99": {
+          "direction": "max",
+          "max": 25.0,
+          "max_ratio_to_baseline": 4.5,
+          "unit": "us"
+        }
+      }
+    },
+    "pipeline": {
+      "inputs": {
+        "events": 100000,
+        "queue_depth": 1024
+      },
+      "metrics": {
+        "delivered": {
+          "direction": "min",
+          "min": 550,
+          "min_ratio_to_baseline": 0.60,
+          "unit": "events"
+        },
+        "bytes_per_sec": {
+          "direction": "min",
+          "min": 3500000,
+          "min_ratio_to_baseline": 0.55,
+          "unit": "B/s"
+        }
+      }
+    }
+  }
+}

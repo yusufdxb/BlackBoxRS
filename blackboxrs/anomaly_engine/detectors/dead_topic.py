@@ -21,10 +21,15 @@ logger = logging.getLogger(__name__)
 class DeadTopicDetector(BaseDetector):
     """Fires when a previously active topic goes silent.
 
-    Every incoming event that carries a ``topic`` key in its ``data``
-    payload is used to update the last-seen timestamp for that topic.
-    When :meth:`check` is called, any topic whose last-seen time
-    exceeds ``timeout_sec`` is flagged as dead.
+    Only real message-observation events refresh topic liveness.
+    Today that means ``ros_monitor`` events with
+    ``event_type == "ros.frequency"``. Metadata snapshots such as
+    ``ros.qos`` keep a topic on the graph but do not prove that
+    messages are still flowing, so they must not reset the dead-topic
+    timer.
+
+    When :meth:`check` is called, any tracked topic whose last-seen
+    time exceeds ``timeout_sec`` is flagged as dead.
 
     Because the detector is driven by the event stream it can only
     fire when *other* events arrive.  A fully silent bus produces no
@@ -64,8 +69,9 @@ class DeadTopicDetector(BaseDetector):
         """
         now = Clock.now()
 
-        # Update last-seen for the topic in this event (if present).
-        topic: str | None = event.data.get("topic")
+        topic: str | None = None
+        if event.source == "ros_monitor" and event.event_type == "ros.frequency":
+            topic = event.data.get("topic")
         if topic is not None:
             self._last_seen[topic] = now
             # If we previously alerted on this topic, clear it since it's alive.

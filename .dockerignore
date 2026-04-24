@@ -1,0 +1,13 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.pyc
+*.pyo
+build
+dist
+blackboxrs.egg-info
+artifacts
+*.jsonl

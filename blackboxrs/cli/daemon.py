@@ -192,6 +192,18 @@ class BlackBoxDaemon:
             )
             self._register(engine)
 
+        # --- Rosbag2 recorder --------------------------------------------
+        # Start after the anomaly engine so it reacts to emitted anomaly
+        # events, but before the producers so it can see the first
+        # anomaly the session generates.
+        if self._config.rosbag2.enabled:
+            from blackboxrs.recording import Rosbag2Recorder  # noqa: E402
+
+            recorder = Rosbag2Recorder(
+                self._event_bus, self._config.rosbag2, self._session
+            )
+            self._register(recorder)
+
         # --- ROS monitor --------------------------------------------------
         if self._config.ros_monitor.enabled:
             from blackboxrs.ros_monitor import RosMonitor  # noqa: E402

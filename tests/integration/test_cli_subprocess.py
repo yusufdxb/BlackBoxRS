@@ -105,7 +105,9 @@ class TestCliForegroundLifecycle:
         _write_test_config(config_path, log_dir)
 
         env = os.environ.copy()
+        real_home = os.path.expanduser("~")
         env["HOME"] = str(home)
+        env.setdefault("PYTHONUSERBASE", os.path.join(real_home, ".local"))
         # Keep child's stdout/stderr out of the test output but capture
         # for diagnostic purposes on failure.
 
@@ -208,7 +210,9 @@ def _prepare_isolated_home(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
     _write_test_config(config_path, log_dir)
 
     env = os.environ.copy()
+    real_home = os.path.expanduser("~")
     env["HOME"] = str(home)
+    env.setdefault("PYTHONUSERBASE", os.path.join(real_home, ".local"))
     return home, blackbox_dir, config_path, env
 
 

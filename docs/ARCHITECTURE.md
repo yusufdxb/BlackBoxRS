@@ -48,12 +48,15 @@ process and writes to local files.
   full the event is dropped for that subscriber, a per-queue drop
   counter is incremented, and a rate-limited warning is logged.
   Slow consumers cannot back-pressure or memory-bomb the producers.
+  Critical internal consumers (logger, anomaly engine, recorder) ask
+  for larger protected queue capacities than the bus default.
 - **schemas.py** — Pydantic v2 models for the event envelope and a few
   typed payloads. The envelope enforces a fixed `source` Literal
-  (`ros_monitor | system_monitor | anomaly_engine`) and `severity`
-  Literal (`debug | info | warning | error | critical`).
+  (`ros_monitor | system_monitor | anomaly_engine | rosbag_recorder`)
+  and `severity` Literal (`debug | info | warning | error | critical`).
 - **config.py** — Dataclass-based YAML config. Unknown keys are
-  ignored; missing keys fall back to dataclass defaults.
+  warned on by default and raised in strict mode; missing keys fall
+  back to dataclass defaults.
 - **clock.py** — Centralised UTC-now and ISO formatting. There is no
   ROS sim-time integration today.
 - **session.py** — Per-run identifier (UUID prefix), hostname, and
@@ -98,8 +101,21 @@ process and writes to local files.
 |---|---|---|
 | `ThresholdDetector` | `system.cpu` (`cpu_percent`), `system.memory` (`memory_percent`), `system.gpu` (`gpu_temp_c`) | `anomaly.threshold` |
 | `FrequencyDetector` | `ros.frequency` | `anomaly.frequency` (auto-learned baseline + tolerance floor) |
-| `DeadTopicDetector` | any event with `data.topic` | `anomaly.dead_topic` (only fires when *another* event arrives — driven by the bus, not by an internal heartbeat) |
+| `DeadTopicDetector` | `ros.frequency` | `anomaly.dead_topic` (only fires when *another* event arrives — driven by the bus, not by an internal heartbeat) |
 | `QoSMismatchDetector` | `ros.qos` | `anomaly.qos_mismatch` (one event per topic with at least one incompatible pub × sub pair) |
+
+### `recording/` — Anomaly-triggered rosbag2 capture
+- `Rosbag2Recorder` subscribes to `channel="anomaly_engine"` and
+  reacts only to configured anomaly types (default: all four built-in
+  anomaly event types, overrideable in config).
+- Starts `ros2 bag record` as a supervised subprocess in its own
+  process group, stops it after `record_duration_sec`, and enforces a
+  cooldown between captures.
+- Emits structured lifecycle events
+  (`rosbag.recorder_ready|recorder_unavailable|recording_started|
+  stopped|failed|skipped`) under the
+  `rosbag_recorder` source so detached/background mode remains
+  debuggable through the normal JSONL log.
 
 ### `logging/` — Structured persistence
 - `LoggingPipeline` subscribes globally and drains events to a
@@ -141,13 +157,16 @@ process and writes to local files.
 ```
 [ROS 2 Graph] ──► ros_monitor ──┐
                                  ├──► event_bus ──┬─► anomaly_engine ──► event_bus (re-publish)
+                                 │                ├─► rosbag2 recorder ─► ros2 bag record
 [Host OS]    ──► system_monitor─┘                 │
                                                   └─► logging pipeline ──► JSONL file
 ```
 
 The anomaly engine starts before the producers do, so it sees every
-event from `t=0`. Both the engine and the logging pipeline subscribe
-**globally** to the bus.
+event from `t=0`. The recorder starts immediately after the anomaly
+engine so it can catch the first anomaly of the session. The engine and
+logging pipeline subscribe **globally** to the bus; the recorder uses an
+`anomaly_engine`-scoped subscription.
 
 ## Threading Model
 
@@ -158,6 +177,7 @@ own `start()`:
 |---|---|---|
 | `LoggingPipeline` | `logging-pipeline` | Drains its bus subscription, writes JSONL |
 | `AnomalyEngine`   | `anomaly-engine`   | Drains its bus subscription, runs detectors |
+| `Rosbag2Recorder` | `rosbag2-recorder` | Supervises anomaly-triggered rosbag2 captures |
 | `SystemMonitor`   | `blackbox-system-monitor` | Polls collectors at `interval_sec` |
 | `RosMonitor`      | `blackbox-ros-monitor` | Spins the rclpy executor |
 
@@ -225,6 +245,21 @@ anomaly_engine:
     tolerance_percent: 20.0
   dead_topic:
     timeout_sec: 5.0
+
+rosbag2:
+  enabled: false
+  executable: ros2
+  output_dir: ~/.blackboxrs/bags
+  record_duration_sec: 30.0
+  cooldown_sec: 60.0
+  storage_id: sqlite3
+  max_recordings_per_run: 10
+  trigger_event_types:
+    - anomaly.threshold
+    - anomaly.frequency
+    - anomaly.dead_topic
+    - anomaly.qos_mismatch
+  topics: []
 ```
 
 There is no top-level `general:` block, no `log_format` field, no
@@ -252,7 +287,9 @@ diagrams suggesting so.
 - **Verified locally** (`tests/integration/`):
   - one thread per component, threshold detector against real
     `system.cpu` events, events reaching the JSONL log on disk, PID-
-    file lifecycle, anomaly engine subscribe-before-publish ordering;
+    file lifecycle, anomaly engine subscribe-before-publish ordering,
+    and anomaly-triggered recorder lifecycle events flushed to disk via
+    the full daemon path;
   - CLI subprocess smoke test (`test_cli_subprocess.py`): `python -m
     blackboxrs start --foreground` writes an identity pidfile, flushes
     real events to disk, and exits cleanly on SIGTERM;
@@ -260,12 +297,11 @@ diagrams suggesting so.
     publisher on an isolated `ROS_DOMAIN_ID`, confirms `RosMonitor`
     discovers the topic, auto-subscribes, and emits `ros.topology` +
     `ros.frequency` events with a positive `frequency_hz`, and that
-    `topic_filters` actually excludes filtered topics. This test
-    auto-skips when `rclpy` is not importable, so CI on GitHub-hosted
-    runners (no ROS 2 install) skips it honestly rather than fakes it.
+    `topic_filters` actually excludes filtered topics.
 - **Verified in CI**: `ruff check` and `pytest -q` on Python 3.10 / 3.11
-  / 3.12 via `.github/workflows/ci.yml`. The rclpy-gated tests are
-  skipped on those runners; everything else runs.
+  / 3.12, a benchmark regression gate on Ubuntu 22.04 / Python 3.10,
+  and a Docker-built ROS 2 Humble job that runs the live `rclpy`
+  integration test inside `docker/Dockerfile.humble`.
 - **Still inferred**: live Jetson sysfs / tegrastats values,
   multi-host ROS 2 scenarios, behaviour under ROS distros other than
   Humble.

@@ -107,14 +107,18 @@ def _start_background(config_path: str | None) -> None:
     if config_path:
         cmd.extend(["--config", config_path])
 
+    log_path = Path("~/.blackboxrs/daemon.stdout_stderr.log").expanduser()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
     try:
-        subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        with open(log_path, "ab") as stdio_log:
+            subprocess.Popen(
+                cmd,
+                stdout=stdio_log,
+                stderr=stdio_log,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
     except OSError as exc:
         click.echo(click.style(f"Failed to spawn daemon: {exc}", fg="red"))
         raise SystemExit(1)
@@ -131,7 +135,8 @@ def _start_background(config_path: str | None) -> None:
         click.echo(
             click.style(
                 "BlackBoxRS daemon was spawned but does not appear to be running. "
-                "Try starting with --foreground to see errors.",
+                f"See {log_path} for background stdout/stderr, or try starting "
+                "with --foreground to see errors directly.",
                 fg="yellow",
             )
         )
@@ -197,7 +202,7 @@ def status() -> None:
 @click.option(
     "--source",
     "-s",
-    type=click.Choice(["ros", "system", "anomaly", "all"]),
+    type=click.Choice(["ros", "system", "anomaly", "recorder", "all"]),
     default="all",
     help="Filter events by source module.",
 )
@@ -241,6 +246,7 @@ def dump_log(
         "ros": "ros_monitor",
         "system": "system_monitor",
         "anomaly": "anomaly_engine",
+        "recorder": "rosbag_recorder",
         "all": None,
     }
     source_filter = source_map[source]
@@ -416,6 +422,21 @@ anomaly_engine:
     tolerance_percent: 20.0
   dead_topic:
     timeout_sec: 5.0
+
+rosbag2:
+  enabled: false
+  output_dir: "~/.blackboxrs/bags"
+  record_duration_sec: 30.0
+  cooldown_sec: 60.0
+  executable: "ros2"
+  storage_id: "sqlite3"
+  max_recordings_per_run: 10
+  trigger_event_types:
+    - "anomaly.threshold"
+    - "anomaly.frequency"
+    - "anomaly.dead_topic"
+    - "anomaly.qos_mismatch"
+  topics: []
 """
 
 

@@ -22,6 +22,8 @@ from .writer import RotatingJsonlWriter
 logger = logging.getLogger(__name__)
 
 _DRAIN_TIMEOUT_SEC = 0.25
+_PROTECTED_QUEUE_FACTOR = 4
+_PROTECTED_QUEUE_MIN = 4096
 
 
 class LoggingPipeline:
@@ -68,7 +70,11 @@ class LoggingPipeline:
             logger.warning("LoggingPipeline.start() called but already running")
             return
 
-        self._queue = self._event_bus.subscribe()
+        queue_size = max(
+            _PROTECTED_QUEUE_MIN,
+            self._event_bus.default_queue_maxsize * _PROTECTED_QUEUE_FACTOR,
+        )
+        self._queue = self._event_bus.subscribe(maxsize=queue_size)
         self._running = True
         self._thread = threading.Thread(
             target=self.run,

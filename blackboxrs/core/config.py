@@ -86,6 +86,28 @@ class AnomalyEngineConfig:
     dead_topic: DeadTopicConfig = field(default_factory=DeadTopicConfig)
 
 
+@dataclass
+class Rosbag2RecorderConfig:
+    """Settings for anomaly-triggered rosbag2 recording."""
+
+    enabled: bool = False
+    output_dir: str = "~/.blackboxrs/bags"
+    record_duration_sec: float = 30.0
+    cooldown_sec: float = 60.0
+    executable: str = "ros2"
+    storage_id: str = "sqlite3"
+    max_recordings_per_run: int = 10
+    trigger_event_types: list[str] = field(
+        default_factory=lambda: [
+            "anomaly.threshold",
+            "anomaly.frequency",
+            "anomaly.dead_topic",
+            "anomaly.qos_mismatch",
+        ]
+    )
+    topics: list[str] = field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
@@ -114,6 +136,7 @@ class BlackBoxConfig:
     ros_monitor: RosMonitorConfig = field(default_factory=RosMonitorConfig)
     system_monitor: SystemMonitorConfig = field(default_factory=SystemMonitorConfig)
     anomaly_engine: AnomalyEngineConfig = field(default_factory=AnomalyEngineConfig)
+    rosbag2: Rosbag2RecorderConfig = field(default_factory=Rosbag2RecorderConfig)
 
     # -- Factory methods ----------------------------------------------------
 
@@ -189,6 +212,7 @@ _NESTED_MAP: dict[str, type] = {
     "ros_monitor": RosMonitorConfig,
     "system_monitor": SystemMonitorConfig,
     "anomaly_engine": AnomalyEngineConfig,
+    "rosbag2": Rosbag2RecorderConfig,
 }
 
 _ANOMALY_NESTED_MAP: dict[str, type] = {

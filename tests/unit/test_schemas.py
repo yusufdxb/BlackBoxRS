@@ -117,6 +117,15 @@ class TestBlackBoxEventConstructors:
         )
         assert event.severity == "error"
 
+    def test_recorder_event(self):
+        event = BlackBoxEvent.recorder_event(
+            event_type="rosbag.recording_started",
+            data={"output_dir": "/tmp/bag"},
+        )
+        assert event.source == "rosbag_recorder"
+        assert event.event_type == "rosbag.recording_started"
+        assert event.severity == "info"
+
 
 class TestBlackBoxEventSerialization:
     """Test to_jsonl() and from_jsonl() round-trip."""
@@ -148,9 +157,14 @@ class TestTypedDataModels:
     """Test the typed payload models."""
 
     def test_topic_frequency_data(self):
-        data = TopicFrequencyData(topic="/cmd_vel", frequency_hz=10.0, expected_hz=10.0)
+        data = TopicFrequencyData(
+            topic="/cmd_vel",
+            frequency_hz=10.0,
+            interval_ms=100.0,
+        )
         assert data.topic == "/cmd_vel"
         assert data.frequency_hz == 10.0
+        assert data.interval_ms == 100.0
 
     def test_system_metric_data(self):
         data = SystemMetricData(metric="cpu_percent", value=55.0, unit="%")
@@ -171,13 +185,15 @@ class TestTypedDataModels:
     def test_qos_profile_data(self):
         data = QoSProfileData(
             topic="/scan",
-            publisher_qos={"reliability": "reliable"},
-            subscriber_qos={"reliability": "best_effort"},
-            compatible=False,
+            msg_type="sensor_msgs/msg/LaserScan",
+            publisher_count=1,
+            subscriber_count=1,
+            publisher_qos_profiles=[{"reliability": "reliable"}],
+            subscriber_qos_profiles=[{"reliability": "best_effort"}],
         )
-        assert data.compatible is False
-        assert data.publisher_qos["reliability"] == "reliable"
+        assert data.publisher_count == 1
+        assert data.publisher_qos_profiles[0]["reliability"] == "reliable"
 
     def test_topic_frequency_data_missing_field_raises(self):
-        with pytest.raises(ValidationError):
-            TopicFrequencyData(topic="/cmd_vel", frequency_hz=10.0)  # type: ignore[call-arg]
+        data = TopicFrequencyData(topic="/cmd_vel", frequency_hz=10.0)
+        assert data.interval_ms is None

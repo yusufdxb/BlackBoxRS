@@ -163,6 +163,8 @@ def format_banner(session_id: str, config: BlackBoxConfig) -> str:
         components.append(click.style("system_monitor", fg="green"))
     if config.anomaly_engine.enabled:
         components.append(click.style("anomaly_engine", fg="green"))
+    if config.rosbag2.enabled:
+        components.append(click.style("rosbag2", fg="green"))
     components.append(click.style("logging", fg="green"))  # always on
 
     lines.append(f"  Components: {', '.join(components)}")

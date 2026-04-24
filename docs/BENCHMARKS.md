@@ -14,6 +14,7 @@ event path, re-run this benchmark and update the numbers below.**
 source .venv/bin/activate
 python scripts/benchmark.py                     # human-readable
 python scripts/benchmark.py --json              # one JSON row per bench
+python scripts/benchmark.py --json-output out.json
 python scripts/benchmark.py --help              # all knobs
 ```
 
@@ -29,6 +30,19 @@ you end-to-end numbers under a live ROS 2 graph:
 All three runs use a realistic event payload — the `system.cpu`
 record the SystemMonitor actually emits (24 per-CPU values, metadata
 envelope, ~560 bytes of JSON on disk).
+
+## CI regression gate
+
+CI enforces a conservative performance floor using:
+
+- `scripts/benchmark.py --json-output artifacts/benchmark-results.json`
+- `scripts/check_benchmark_regressions.py`
+- `scripts/benchmark_baseline.json`
+- `scripts/benchmark_thresholds.json`
+
+The checked-in thresholds are deliberately loose tripwires for GitHub's
+shared runners, not promises about any particular robot host. The
+workstation numbers below are still the reference narrative.
 
 ## What this benchmark deliberately does NOT claim
 
@@ -118,12 +132,12 @@ counter matches the loss, and producers never block.
 
 ## How to spot a regression
 
-If you touch the hot path, compare before/after with `--json`:
+If you touch the hot path, compare before/after with `--json-output`:
 
 ```bash
-python scripts/benchmark.py --json > before.json
+python scripts/benchmark.py --json-output before.json
 # ... change code ...
-python scripts/benchmark.py --json > after.json
+python scripts/benchmark.py --json-output after.json
 diff before.json after.json
 ```
 

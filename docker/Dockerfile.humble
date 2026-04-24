@@ -20,9 +20,9 @@
 #       -e ROS_DOMAIN_ID=42 \
 #       --entrypoint bash blackboxrs:humble
 #
-# The image is intentionally thin: no dev tooling except pytest/ruff,
-# no ROS bagging tools, no editor.  Extend with your own Dockerfile
-# for application-specific layers.
+# The image is intentionally thin: just enough tooling to run the
+# daemon, execute live-ROS tests, and support rosbag2 recording. No
+# editor or extra application layers are bundled.
 
 FROM ros:humble-ros-base
 
@@ -36,6 +36,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         python3-pip \
+        ros-humble-ros2bag \
+        ros-humble-rosbag2-storage-default-plugins \
         ros-humble-std-msgs \
  && rm -rf /var/lib/apt/lists/*
 
@@ -43,12 +45,19 @@ WORKDIR /opt/blackboxrs
 
 # Copy only the metadata first so the dep-install layer is cached
 # across source edits.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md pytest.ini ./
 COPY blackboxrs/ ./blackboxrs/
 
 # Install blackboxrs + test extras so pytest can run against the
-# image to reproduce the live-ROS tests.
-RUN pip3 install --no-cache-dir -e ".[dev]"
+# image to reproduce the live-ROS tests. A regular install is more
+# robust here than editable mode because the ROS base image does not
+# ship a new-enough build backend for PEP 660 by default.
+RUN pip3 install --no-cache-dir --upgrade "pip>=24" "setuptools<80" wheel \
+ && pip3 install --no-cache-dir ".[dev]"
+
+# Keep the live-ROS integration test in the image so CI can verify the
+# real rclpy path without bind-mounting the repository.
+COPY tests/ ./tests/
 
 # Make the CLI discoverable in a ROS-sourced shell.
 ENV PATH="/usr/local/bin:${PATH}"

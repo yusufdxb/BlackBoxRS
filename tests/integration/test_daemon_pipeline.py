@@ -22,12 +22,14 @@ import threading
 import time
 from pathlib import Path
 from typing import Callable, Iterable
+import signal
 
 from blackboxrs.cli.daemon import BlackBoxDaemon
 from blackboxrs.core.config import (
     AnomalyEngineConfig,
     AnomalyThresholds,
     BlackBoxConfig,
+    Rosbag2RecorderConfig,
     RosMonitorConfig,
     SystemMonitorConfig,
 )
@@ -80,6 +82,41 @@ def _wait_for(
             return True
         time.sleep(interval)
     return predicate()
+
+
+class _FakeRos2Process:
+    by_pid: dict[int, "_FakeRos2Process"] = {}
+    next_pid = 6000
+
+    def __init__(self, cmd, **kwargs):
+        self.cmd = cmd
+        self.kwargs = kwargs
+        self.pid = _FakeRos2Process.next_pid
+        _FakeRos2Process.next_pid += 1
+        self.returncode = None
+        _FakeRos2Process.by_pid[self.pid] = self
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        if self.returncode is None:
+            self.returncode = 0
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -signal.SIGKILL
+
+    def terminate(self):
+        self.returncode = -signal.SIGTERM
+
+
+def _fake_killpg(pid: int, sig: int) -> None:
+    proc = _FakeRos2Process.by_pid[pid]
+    if sig == signal.SIGINT:
+        proc.returncode = 0
+    else:
+        proc.returncode = -sig
 
 
 # ---------------------------------------------------------------------------
@@ -262,3 +299,59 @@ class TestAnomalyEngineSeesEveryEvent:
             "anomaly engine missed all events; subscribe-before-publish "
             "ordering may have regressed"
         )
+
+
+class TestRosbagRecorderIntegration:
+    def test_anomaly_triggers_rosbag_lifecycle_events(
+        self, tmp_path: Path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "blackboxrs.recording.rosbag2.shutil.which",
+            lambda name: "/usr/bin/ros2",
+        )
+        monkeypatch.setattr(
+            "blackboxrs.recording.rosbag2.subprocess.Popen",
+            _FakeRos2Process,
+        )
+        monkeypatch.setattr(
+            "blackboxrs.recording.rosbag2.os.killpg",
+            _fake_killpg,
+        )
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        cfg = BlackBoxConfig(
+            log_dir=str(log_dir),
+            log_rotation_mb=1,
+            log_max_files=5,
+            ros_monitor=RosMonitorConfig(enabled=False),
+            system_monitor=SystemMonitorConfig(enabled=True, interval_sec=0.1),
+            anomaly_engine=AnomalyEngineConfig(
+                enabled=True,
+                thresholds=AnomalyThresholds(cpu_percent=0.0),
+            ),
+            rosbag2=Rosbag2RecorderConfig(
+                enabled=True,
+                output_dir=str(tmp_path / "bags"),
+                record_duration_sec=0.1,
+                cooldown_sec=0.0,
+                trigger_event_types=["anomaly.threshold"],
+            ),
+        )
+
+        daemon = BlackBoxDaemon(cfg)
+        try:
+            daemon.start()
+            assert _wait_for(
+                lambda: any(
+                    e.event_type == "rosbag.recording_stopped"
+                    for e in _read_all(log_dir)
+                ),
+                timeout=5.0,
+            )
+        finally:
+            daemon.stop()
+
+        events = _read_all(log_dir)
+        assert any(e.event_type == "rosbag.recording_started" for e in events)
+        assert any(e.event_type == "rosbag.recording_stopped" for e in events)

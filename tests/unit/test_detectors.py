@@ -236,6 +236,25 @@ class TestDeadTopicDetector:
         detector.check(self._make_topic_event("/cmd_vel"))
         assert "/cmd_vel" not in detector._alerted
 
+    def test_qos_metadata_does_not_refresh_liveness(self):
+        detector = DeadTopicDetector(DeadTopicConfig(timeout_sec=1.0))
+        detector.check(self._make_topic_event("/cmd_vel"))
+        detector._last_seen["/cmd_vel"] = datetime.now(timezone.utc) - timedelta(seconds=5)
+        qos_event = BlackBoxEvent.ros_event(
+            event_type="ros.qos",
+            data={
+                "topic": "/cmd_vel",
+                "msg_type": "std_msgs/msg/String",
+                "publisher_count": 1,
+                "subscriber_count": 1,
+                "publisher_qos_profiles": [{"reliability": "ReliabilityPolicy.RELIABLE"}],
+                "subscriber_qos_profiles": [{"reliability": "ReliabilityPolicy.RELIABLE"}],
+            },
+        )
+        result = detector.check(qos_event)
+        assert result is not None
+        assert result.event_type == "anomaly.dead_topic"
+
     def test_name_property(self):
         assert DeadTopicDetector(DeadTopicConfig()).name == "dead_topic"
 

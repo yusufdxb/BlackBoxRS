@@ -13,6 +13,7 @@ from blackboxrs.core.config import (
     BlackBoxConfig,
     DeadTopicConfig,
     FrequencyConfig,
+    Rosbag2RecorderConfig,
     RosMonitorConfig,
     SystemMonitorConfig,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "EventBus",
     "FrequencyConfig",
     "QoSProfileData",
+    "Rosbag2RecorderConfig",
     "RosMonitorConfig",
     "Session",
     "SystemMetricData",

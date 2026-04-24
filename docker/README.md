@@ -11,6 +11,8 @@ wanting to run BlackBoxRS *against real ROS 2* had to source
 interpreter saw `rclpy`.  This container removes that ambiguity:
 everything the daemon needs is inside the image, built on top of the
 official `ros:humble-ros-base`.
+It also includes `ros2 bag` plus the default SQLite storage plugin so
+the anomaly-triggered recorder path is available in the verified image.
 
 ## Build
 
@@ -42,7 +44,7 @@ docker run --rm --network host \
     -e ROS_DOMAIN_ID=42 \
     --entrypoint bash \
     blackboxrs:humble \
-    -lc 'source /opt/ros/humble/setup.bash && cd /opt/blackboxrs && python -m pytest tests/integration/test_ros_live.py -q'
+    -lc 'source /opt/ros/humble/setup.bash && cd /opt/blackboxrs && python3 -m pytest tests/integration/test_ros_live.py -q'
 ```
 
 ## What this image does NOT do

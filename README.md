@@ -6,7 +6,7 @@
 ![ROS 2 Humble (verified)](https://img.shields.io/badge/ROS%202-Humble%20(verified)-brightgreen)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 
-> Status: **alpha (v0.1.0)**. Single-host, in-process. Useful as a
+> Status: **alpha (v0.3.0.dev0)**. Single-host, in-process. Useful as a
 > development-time observability daemon. Not yet validated on hardware
 > beyond a desktop Linux workstation. See _Status & Limitations_ below
 > for what is verified, what is inferred, and what is **not** built yet.
@@ -77,6 +77,10 @@ worker threads on top.
 - **Built-in anomaly detectors** — threshold (CPU%, memory%, GPU °C),
   per-topic frequency drop with auto-learned baseline, dead-topic
   silence, pub/sub QoS mismatch.
+- **Anomaly-triggered rosbag2 recording** — optional recorder component
+  that starts `ros2 bag record` for selected anomaly types, stops after
+  a bounded duration, enforces cooldowns, and logs structured recorder
+  lifecycle events.
 - **Structured JSONL logging** with size-based rotation and a bounded
   retained-file count.
 - **CLI (`robot-blackbox` or `python -m blackboxrs`)** — `start`,
@@ -93,7 +97,8 @@ These are listed so docs do not overstate what the code does:
   oldest files are pruned when more than `log_max_files` exist.
 - No custom-detector plugin system. The four built-in detectors are
   hard-wired in `anomaly_engine.engine.AnomalyEngine._init_detectors`.
-- No anomaly-triggered rosbag2 recording.
+- No pre-trigger rosbag buffering or snapshot mode. Recording starts
+  only after the triggering anomaly arrives.
 - No web dashboard, no Prometheus exporter, no fleet aggregation.
 - No TF tree monitoring, no service / action introspection.
 - `replay` prints the events from a log file in order. It is **not** a
@@ -164,7 +169,7 @@ see `pyproject.toml` for why).  There are two supported install paths:
 | `robot-blackbox start [--foreground] [-c CFG]` | Start the daemon (background by default). Refuses if the pidfile identity already matches a live daemon. |
 | `robot-blackbox stop`     | Send SIGTERM to a *verified* running daemon. Refuses if the pidfile identity cannot be verified (see _PID file safety_ below). |
 | `robot-blackbox status`   | Show running state, event counts by source/severity, latest event. |
-| `robot-blackbox dump-log` | Print recorded events. Filters: `--source {ros,system,anomaly,all}`, `--severity`, `--last N`, `--json`, `--follow`. |
+| `robot-blackbox dump-log` | Print recorded events. Filters: `--source {ros,system,anomaly,recorder,all}`, `--severity`, `--last N`, `--json`, `--follow`. |
 | `robot-blackbox replay`   | Print a log file in chronological order (no time-aligned playback). |
 | `robot-blackbox config`   | Print the effective configuration as YAML. |
 | `robot-blackbox init`     | Create `~/.blackboxrs/{config.yaml,logs/}` if missing. |
@@ -225,7 +230,10 @@ log_max_files: 20              # keep at most N rotated files (oldest pruned)
 event_bus_queue_maxsize: 1024  # bounded per-subscriber queue capacity;
                                 # full queues drop events + increment a
                                 # per-queue drop counter rather than
-                                # back-pressuring producers.
+                                # back-pressuring producers. Internal
+                                # logger / anomaly / recorder queues
+                                # are intentionally provisioned larger
+                                # than this default.
 
 ros_monitor:
   enabled: true
@@ -248,6 +256,21 @@ anomaly_engine:
     tolerance_percent: 20.0    # alert when measured Hz < (1-tol/100)*baseline
   dead_topic:
     timeout_sec: 5.0
+
+rosbag2:
+  enabled: false
+  executable: "ros2"
+  output_dir: "~/.blackboxrs/bags"
+  record_duration_sec: 30.0
+  cooldown_sec: 60.0
+  storage_id: "sqlite3"
+  max_recordings_per_run: 10
+  trigger_event_types:        # default: all built-in anomaly event types
+    - "anomaly.threshold"
+    - "anomaly.frequency"
+    - "anomaly.dead_topic"
+    - "anomaly.qos_mismatch"
+  topics: []                  # [] => `ros2 bag record -a`
 ```
 
 There is no `general:` block, no `log_format` field, no
@@ -285,7 +308,8 @@ Every line in the log is a single JSON object validated by
 }
 ```
 
-`source` is one of `ros_monitor`, `system_monitor`, `anomaly_engine`.
+`source` is one of `ros_monitor`, `system_monitor`, `anomaly_engine`,
+`rosbag_recorder`.
 `severity` is one of `debug | info | warning | error | critical`.
 
 ### Emitted event types
@@ -304,6 +328,12 @@ Every line in the log is a single JSON object validated by
 | `anomaly_engine` | `anomaly.frequency`     | as above; `metric` is `frequency:<topic>` |
 | `anomaly_engine` | `anomaly.dead_topic`    | as above; `metric` is `dead_topic:<topic>` |
 | `anomaly_engine` | `anomaly.qos_mismatch`  | as above; `metric` is `qos:<topic>` |
+| `rosbag_recorder` | `rosbag.recorder_ready` | recorder config, executable path, trigger types |
+| `rosbag_recorder` | `rosbag.recorder_unavailable` | missing `ros2` CLI / recorder unavailability reason |
+| `rosbag_recorder` | `rosbag.recording_started` | trigger metadata, output dir, pid, duration |
+| `rosbag_recorder` | `rosbag.recording_stopped` | stop reason, elapsed time, output dir, returncode |
+| `rosbag_recorder` | `rosbag.recording_failed` | spawn or runtime failure details |
+| `rosbag_recorder` | `rosbag.recording_skipped` | skipped trigger reason (e.g. max recordings reached) |
 
 These strings are the actual contract. The detector test suite (`tests/unit/test_detectors.py`) and the integration tests
 (`tests/integration/test_daemon_pipeline.py`) both build on these
@@ -322,6 +352,7 @@ BlackBoxRS/
 │   ├── ros_monitor/           # rclpy node, introspection, frequency tracker
 │   ├── system_monitor/        # psutil/sysfs/nvidia-smi/tegrastats collectors
 │   ├── anomaly_engine/        # threshold/frequency/dead-topic/qos detectors
+│   ├── recording/             # anomaly-triggered rosbag2 recorder
 │   ├── logging/               # rotating JSONL writer, log reader
 │   └── cli/                   # click app + daemon lifecycle
 ├── tests/
@@ -363,9 +394,10 @@ BlackBoxRS/
   fabricated.
 
 **Verified in CI** — `ruff check` and `pytest -q` on Python 3.10 /
-3.11 / 3.12 via `.github/workflows/ci.yml`. The rclpy-gated live-ROS
-tests are skipped on hosted runners (no ROS 2 install); everything
-else runs.
+3.11 / 3.12, a benchmark regression gate on Ubuntu 22.04 / Python 3.10,
+and a Docker-backed ROS 2 Humble live test that builds
+`docker/Dockerfile.humble` and runs `tests/integration/test_ros_live.py`
+inside the image.
 
 **Performance envelope** — `scripts/benchmark.py` measures EventBus
 publish throughput, `RotatingJsonlWriter` per-call latency, and the
@@ -389,6 +421,9 @@ does NOT measure (ROS 2 latency, fsync under contention, Jetson).
   churn tests (`tests/unit/test_ros_monitor_lifecycle.py`) cover the
   prune logic, but a multi-hour run with nodes coming and going has
   not been measured end-to-end.
+- Real rosbag capture on a robot under disk pressure. The recorder is
+  verified through supervised subprocess tests, not by inspecting a
+  long real bag on hardware yet.
 
 **Not yet built** — see _Not yet implemented_ above.
 
@@ -411,8 +446,8 @@ does NOT measure (ROS 2 latency, fsync under contention, Jetson).
 
 ## Roadmap (aspirational, not implemented)
 
-- Anomaly-triggered rosbag2 recording
 - Pluggable custom detectors loaded from config
+- Pre-trigger rosbag snapshot / ring-buffer recording
 - Web dashboard / Prometheus exporter
 - Multi-robot fleet aggregation
 - TF tree, service, and action monitoring

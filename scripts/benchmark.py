@@ -51,6 +51,7 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from queue import Empty
 from typing import Any
@@ -304,6 +305,16 @@ def _fmt_result(r: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _build_json_report(results: list[dict[str, Any]]) -> dict[str, Any]:
+    sample_event = _sample_event()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "python": sys.version.split()[0],
+        "event_payload_bytes": len(sample_event.to_jsonl()),
+        "benchmarks": results,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--bus-events", type=int, default=200_000)
@@ -330,6 +341,11 @@ def main() -> int:
         action="store_true",
         help="Emit one JSON object per benchmark to stdout (no prose).",
     )
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        help="Write a structured JSON report to this path.",
+    )
     args = parser.parse_args()
 
     results: list[dict[str, Any]] = []
@@ -352,13 +368,18 @@ def main() -> int:
             )
         )
 
+    json_report = _build_json_report(results)
+    if args.json_output is not None:
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(json.dumps(json_report, indent=2) + "\n")
+
     if args.json:
         for r in results:
             sys.stdout.write(json.dumps(r) + "\n")
     else:
         sys.stdout.write("BlackBoxRS performance envelope\n")
         sys.stdout.write(
-            f"Python {sys.version.split()[0]} | event payload: {len(_sample_event().to_jsonl())} bytes\n"
+            f"Python {json_report['python']} | event payload: {json_report['event_payload_bytes']} bytes\n"
         )
         for r in results:
             sys.stdout.write(_fmt_result(r) + "\n")
