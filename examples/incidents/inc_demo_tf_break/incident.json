@@ -1,0 +1,104 @@
+{
+  "bundle_path": "/tmp/bbrs_sample_7qj1f5wy/incidents/inc_2026-05-07T14-22-00_04ca9c43",
+  "created_at": "2026-05-08T20:13:20.431324Z",
+  "fingerprint": {
+    "algorithm_version": "v1",
+    "cluster_id": null,
+    "fingerprint_id": "fpr_5aa6d4e95e5af33a",
+    "human_label": null,
+    "payload": {
+      "detector_classes": [
+        "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector"
+      ],
+      "signature_fields": {
+        "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector": [
+          [
+            "topic",
+            "/tf_static"
+          ]
+        ]
+      },
+      "subsystems": [
+        "ros"
+      ],
+      "topology_signature": "6ce4faa1"
+    }
+  },
+  "host": "mewtwo",
+  "incident_id": "inc_2026-05-07T14-22-00_04ca9c43",
+  "likely_causes": [
+    {
+      "cause": "Topic /tf_static stopped emitting messages.",
+      "caveat": null,
+      "confidence": 1.0,
+      "evidence_refs": [
+        "events.jsonl#L18",
+        "triggers.json#trg_df6aa081",
+        "snapshots.json#2",
+        "events.jsonl#L11",
+        "snapshots.json#6"
+      ],
+      "precursor_chain": [
+        {
+          "evidence_ref": "snapshots.json#2",
+          "gap_sec": 6.0,
+          "kind": "derived",
+          "relevance": 0.24,
+          "subsystem": "ros",
+          "summary": "publisher count changed on /tf_static: 0 -> 1",
+          "t": "2026-05-07T14:22:02Z"
+        },
+        {
+          "evidence_ref": "events.jsonl#L11",
+          "gap_sec": 2.75,
+          "kind": "derived",
+          "relevance": 0.06,
+          "subsystem": "system",
+          "summary": "cpu_percent excursion: peak 95.0%, duration 4.0s above 90.0%",
+          "t": "2026-05-07T14:22:05.250000Z"
+        },
+        {
+          "evidence_ref": "snapshots.json#6",
+          "gap_sec": 2.0,
+          "kind": "derived",
+          "relevance": 0.28,
+          "subsystem": "ros",
+          "summary": "publisher count changed on /tf_static: 1 -> 0",
+          "t": "2026-05-07T14:22:06Z"
+        }
+      ],
+      "reasoning": [
+        "base score for DeadTopicDetector: 0.65.",
+        "severity bonus (error): +0.07.",
+        "precursor bonus: +0.30.",
+        "precursor: publisher count changed on /tf_static: 0 -> 1 (6.0s before trigger, subsystem=ros, relevance=0.24)",
+        "precursor: cpu_percent excursion: peak 95.0%, duration 4.0s above 90.0% (2.8s before trigger, subsystem=system, relevance=0.06)",
+        "precursor: publisher count changed on /tf_static: 1 -> 0 (2.0s before trigger, subsystem=ros, relevance=0.28)",
+        "precursor contribution capped at 0.30 (raw sum was 0.58).",
+        "diff bonus: +0.00.",
+        "no prior bundle on this host; signature diff not informative.",
+        "final confidence (clamped): 1.00."
+      ],
+      "recurrence": null,
+      "score": 1.02,
+      "subsystem": "ros"
+    }
+  ],
+  "linked_prevention_rules": [],
+  "notes": "Synthetic demo bundle. See DEMO_PLAN.md scenario S1.",
+  "schema_version": "1.0",
+  "session_id": "demo_tf_break",
+  "sessions": [],
+  "severity": "error",
+  "summary": "Topic /tf_static stopped emitting messages.",
+  "tags": [
+    "demo",
+    "tf-break"
+  ],
+  "title": "TF break on /tf_static",
+  "triggers": [
+    "trg_df6aa081"
+  ],
+  "window_end": "2026-05-07T14:22:20Z",
+  "window_start": "2026-05-07T14:22:00Z"
+}

@@ -1,0 +1,20 @@
+{
+  "hash": "0baea6b237b46ea15557e1df500f5b1a02a1037a5115487b49af6b1d85634a7f",
+  "payload": {
+    "blackboxrs_version": "0.3.0.dev0",
+    "nvidia_driver": "570.211.01",
+    "os": {
+      "kernel": "6.8.0-111-generic",
+      "name": "Ubuntu",
+      "version": "22.04"
+    },
+    "pip_freeze_sha256": "d6493736c41a25eed23c0c7bc30c686ca37b422783c1f608bac7855dfd67b748",
+    "python": {
+      "executable": "/home/yusuf/Projects/BlackBoxRS/.venv/bin/python",
+      "version": "3.10.12"
+    },
+    "ros_distro": "humble",
+    "ros_packages_apt_count": 439
+  },
+  "t": "2026-05-08T20:13:20.430741Z"
+}

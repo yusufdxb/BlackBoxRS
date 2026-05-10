@@ -1,0 +1,110 @@
+{
+  "config": {
+    "baseline_hash": null,
+    "changed": [],
+    "current_hash": "51d82a6394b7e27053ebd56e7e29c7c4a0305dd45c7d300de8db975b96c0be37",
+    "identical": false,
+    "only_in_baseline": [],
+    "only_in_current": [
+      {
+        "after": [],
+        "before": null,
+        "key": "attached_files"
+      },
+      {
+        "after": null,
+        "before": null,
+        "key": "blackboxrs_config_yaml_sha256"
+      },
+      {
+        "after": "humble",
+        "before": null,
+        "key": "env_subset.ROS_DISTRO"
+      },
+      {
+        "after": "0",
+        "before": null,
+        "key": "env_subset.ROS_LOCALHOST_ONLY"
+      },
+      {
+        "after": "2",
+        "before": null,
+        "key": "env_subset.ROS_VERSION"
+      },
+      {
+        "after": null,
+        "before": null,
+        "key": "rmw_implementation"
+      },
+      {
+        "after": "humble",
+        "before": null,
+        "key": "ros_distro"
+      },
+      {
+        "after": null,
+        "before": null,
+        "key": "ros_domain_id"
+      }
+    ]
+  },
+  "versions": {
+    "baseline_hash": null,
+    "changed": [],
+    "current_hash": "0baea6b237b46ea15557e1df500f5b1a02a1037a5115487b49af6b1d85634a7f",
+    "identical": false,
+    "only_in_baseline": [],
+    "only_in_current": [
+      {
+        "after": "0.3.0.dev0",
+        "before": null,
+        "key": "blackboxrs_version"
+      },
+      {
+        "after": "570.211.01",
+        "before": null,
+        "key": "nvidia_driver"
+      },
+      {
+        "after": "6.8.0-111-generic",
+        "before": null,
+        "key": "os.kernel"
+      },
+      {
+        "after": "Ubuntu",
+        "before": null,
+        "key": "os.name"
+      },
+      {
+        "after": "22.04",
+        "before": null,
+        "key": "os.version"
+      },
+      {
+        "after": "d6493736c41a25eed23c0c7bc30c686ca37b422783c1f608bac7855dfd67b748",
+        "before": null,
+        "key": "pip_freeze_sha256"
+      },
+      {
+        "after": "/home/yusuf/Projects/BlackBoxRS/.venv/bin/python",
+        "before": null,
+        "key": "python.executable"
+      },
+      {
+        "after": "3.10.12",
+        "before": null,
+        "key": "python.version"
+      },
+      {
+        "after": "humble",
+        "before": null,
+        "key": "ros_distro"
+      },
+      {
+        "after": 439,
+        "before": null,
+        "key": "ros_packages_apt_count"
+      }
+    ]
+  }
+}

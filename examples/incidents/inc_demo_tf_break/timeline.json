@@ -1,0 +1,396 @@
+[
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 1.0,
+      "interval_ms": 1000.0,
+      "topic": "/tf_static"
+    },
+    "evidence_ref": "events.jsonl#L1",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /tf_static: 1.0 Hz",
+    "t": "2026-05-07T14:22:00Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 32.5,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 32.5
+    },
+    "evidence_ref": "events.jsonl#L6",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 32.5 %",
+    "t": "2026-05-07T14:22:00.500000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 1.0,
+      "interval_ms": 1000.0,
+      "topic": "/tf_static"
+    },
+    "evidence_ref": "events.jsonl#L2",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /tf_static: 1.0 Hz",
+    "t": "2026-05-07T14:22:01Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 32.5,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 32.5
+    },
+    "evidence_ref": "events.jsonl#L7",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 32.5 %",
+    "t": "2026-05-07T14:22:01.500000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 1.0,
+      "interval_ms": 1000.0,
+      "topic": "/tf_static"
+    },
+    "evidence_ref": "events.jsonl#L3",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /tf_static: 1.0 Hz",
+    "t": "2026-05-07T14:22:02Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "msg_type": "tf2_msgs/msg/TFMessage",
+      "publisher_count": 1,
+      "publisher_qos_profiles": [
+        {
+          "durability": "TRANSIENT_LOCAL",
+          "reliability": "RELIABLE"
+        }
+      ],
+      "subscriber_count": 1,
+      "subscriber_qos_profiles": [
+        {
+          "durability": "TRANSIENT_LOCAL",
+          "reliability": "RELIABLE"
+        }
+      ],
+      "topic": "/tf_static"
+    },
+    "evidence_ref": "events.jsonl#L16",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "ros.qos",
+    "t": "2026-05-07T14:22:02Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 0.85,
+    "correlated_event_refs": [
+      "snapshots.json#1",
+      "snapshots.json#2"
+    ],
+    "data": {
+      "delta": "pub_count_changed",
+      "from": 0,
+      "to": 1,
+      "topic": "/tf_static"
+    },
+    "evidence_ref": "snapshots.json#2",
+    "kind": "derived",
+    "subsystem": "ros",
+    "summary": "publisher count changed on /tf_static: 0 -> 1",
+    "t": "2026-05-07T14:22:02Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 32.5,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 32.5
+    },
+    "evidence_ref": "events.jsonl#L8",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 32.5 %",
+    "t": "2026-05-07T14:22:02.500000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 1.0,
+      "interval_ms": 1000.0,
+      "topic": "/tf_static"
+    },
+    "evidence_ref": "events.jsonl#L4",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /tf_static: 1.0 Hz",
+    "t": "2026-05-07T14:22:03Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 32.5,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 32.5
+    },
+    "evidence_ref": "events.jsonl#L9",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 32.5 %",
+    "t": "2026-05-07T14:22:03.500000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 1.0,
+      "interval_ms": 1000.0,
+      "topic": "/tf_static"
+    },
+    "evidence_ref": "events.jsonl#L5",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /tf_static: 1.0 Hz",
+    "t": "2026-05-07T14:22:04Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 32.5,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 32.5
+    },
+    "evidence_ref": "events.jsonl#L10",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 32.5 %",
+    "t": "2026-05-07T14:22:04.500000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 95.0,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 95.0
+    },
+    "evidence_ref": "events.jsonl#L11",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 95.0 %",
+    "t": "2026-05-07T14:22:05.250000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 0.85,
+    "correlated_event_refs": [
+      "events.jsonl#L11",
+      "events.jsonl#L15"
+    ],
+    "data": {
+      "duration_sec": 4.0,
+      "metric": "cpu_percent",
+      "peak": 95.0,
+      "samples": 5,
+      "threshold": 90.0
+    },
+    "evidence_ref": "events.jsonl#L11",
+    "kind": "derived",
+    "subsystem": "system",
+    "summary": "cpu_percent excursion: peak 95.0%, duration 4.0s above 90.0%",
+    "t": "2026-05-07T14:22:05.250000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "msg_type": "tf2_msgs/msg/TFMessage",
+      "publisher_count": 0,
+      "publisher_qos_profiles": [],
+      "subscriber_count": 1,
+      "subscriber_qos_profiles": [
+        {
+          "durability": "TRANSIENT_LOCAL",
+          "reliability": "RELIABLE"
+        }
+      ],
+      "topic": "/tf_static"
+    },
+    "evidence_ref": "events.jsonl#L17",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "ros.qos",
+    "t": "2026-05-07T14:22:06Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 0.85,
+    "correlated_event_refs": [
+      "snapshots.json#5",
+      "snapshots.json#6"
+    ],
+    "data": {
+      "delta": "pub_count_changed",
+      "from": 1,
+      "to": 0,
+      "topic": "/tf_static"
+    },
+    "evidence_ref": "snapshots.json#6",
+    "kind": "derived",
+    "subsystem": "ros",
+    "summary": "publisher count changed on /tf_static: 1 -> 0",
+    "t": "2026-05-07T14:22:06Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 95.0,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 95.0
+    },
+    "evidence_ref": "events.jsonl#L12",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 95.0 %",
+    "t": "2026-05-07T14:22:06.250000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 95.0,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 95.0
+    },
+    "evidence_ref": "events.jsonl#L13",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 95.0 %",
+    "t": "2026-05-07T14:22:07.250000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "detector": "DeadTopicDetector",
+      "message": "Topic /tf_static silent for 5.0 s (timeout exceeded).",
+      "metric": "/tf_static",
+      "threshold": 5.0,
+      "topic": "/tf_static",
+      "value": 0.0
+    },
+    "evidence_ref": "triggers.json#trg_df6aa081",
+    "kind": "trigger",
+    "subsystem": "anomaly",
+    "summary": "anomaly: anomaly.dead_topic: Topic /tf_static silent for 5.0 s (timeout exceeded).",
+    "t": "2026-05-07T14:22:08Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 95.0,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 95.0
+    },
+    "evidence_ref": "events.jsonl#L14",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 95.0 %",
+    "t": "2026-05-07T14:22:08.250000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 95.0,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 95.0
+    },
+    "evidence_ref": "events.jsonl#L15",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 95.0 %",
+    "t": "2026-05-07T14:22:09.250000Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 30.0,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 30.0
+    },
+    "evidence_ref": "events.jsonl#L19",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 30.0 %",
+    "t": "2026-05-07T14:22:11Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "cpu_percent": 30.0,
+      "metric": "cpu_percent",
+      "unit": "%",
+      "value": 30.0
+    },
+    "evidence_ref": "events.jsonl#L20",
+    "kind": "raw",
+    "subsystem": "system",
+    "summary": "system.cpu: 30.0 %",
+    "t": "2026-05-07T14:22:12Z"
+  }
+]

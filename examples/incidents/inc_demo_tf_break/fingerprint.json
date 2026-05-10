@@ -1,0 +1,23 @@
+{
+  "algorithm_version": "v1",
+  "cluster_id": null,
+  "fingerprint_id": "fpr_5aa6d4e95e5af33a",
+  "human_label": null,
+  "payload": {
+    "detector_classes": [
+      "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector"
+    ],
+    "signature_fields": {
+      "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector": [
+        [
+          "topic",
+          "/tf_static"
+        ]
+      ]
+    },
+    "subsystems": [
+      "ros"
+    ],
+    "topology_signature": "6ce4faa1"
+  }
+}

@@ -1,0 +1,24 @@
+[
+  {
+    "data": {
+      "detector": "DeadTopicDetector",
+      "message": "Topic /tf_static silent for 5.0 s (timeout exceeded).",
+      "metric": "/tf_static",
+      "threshold": 5.0,
+      "topic": "/tf_static",
+      "value": 0.0
+    },
+    "detector": "DeadTopicDetector",
+    "detector_class": "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector",
+    "message": "Topic /tf_static silent for 5.0 s (timeout exceeded).",
+    "severity": "error",
+    "signature_fields": [
+      "topic"
+    ],
+    "source_event_ref": "events.jsonl#L18",
+    "subject": "/tf_static",
+    "subsystem": "ros",
+    "t": "2026-05-07T14:22:08Z",
+    "trigger_id": "trg_df6aa081"
+  }
+]
