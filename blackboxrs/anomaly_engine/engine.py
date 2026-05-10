@@ -18,9 +18,12 @@ from blackboxrs.core.session import Session
 
 from .detectors import (
     BaseDetector,
+    ClockSkewDetector,
     DeadTopicDetector,
     FrequencyDetector,
+    ProcessSignalsDetector,
     QoSMismatchDetector,
+    TfTopologyDetector,
     ThresholdDetector,
 )
 
@@ -75,6 +78,9 @@ class AnomalyEngine:
             FrequencyDetector(self._config.frequency),
             QoSMismatchDetector(),
             DeadTopicDetector(self._config.dead_topic),
+            TfTopologyDetector(self._config.tf_topology),
+            ProcessSignalsDetector(self._config.process_signals),
+            ClockSkewDetector(self._config.clock_skew),
         ]
         if self._config.custom_detectors:
             from .detectors.loader import load_custom_detectors

@@ -75,10 +75,13 @@ logger = logging.getLogger(__name__)
 # ranker because precursor evidence is the load-bearing signal, not
 # detector identity. Unknown detector classes default to 0.30.
 _BASE_SCORE: dict[str, float] = {
-    "QoSMismatchDetector": 0.85,  # very specific failure mode
-    "DeadTopicDetector": 0.65,    # specific symptom, cause is upstream
-    "FrequencyDetector": 0.55,    # symptom; many possible causes
-    "ThresholdDetector": 0.40,    # symptom domain; not the root
+    "QoSMismatchDetector": 0.85,    # very specific failure mode
+    "TfTopologyDetector": 0.75,     # structural fault, narrow set of causes
+    "ClockSkewDetector": 0.70,      # specific upstream cause for tf/bag bugs
+    "DeadTopicDetector": 0.65,      # specific symptom, cause is upstream
+    "FrequencyDetector": 0.55,      # symptom; many possible causes
+    "ProcessSignalsDetector": 0.45, # resource symptom; cause is the node logic
+    "ThresholdDetector": 0.40,      # symptom domain; not the root
 }
 _DEFAULT_BASE = 0.30
 
@@ -116,6 +119,24 @@ _PRECURSOR_RELEVANCE: dict[str, dict[str, float]] = {
     },
     "ThresholdDetector": {
         "resource_excursion": 0.12,
+    },
+    # New evidence-breadth detectors. Weights are conservative; the
+    # ranker still requires precursor evidence to push past the base
+    # score, and resource excursions are the most operationally useful
+    # precursor for both process-signals and tf-topology incidents
+    # (a runaway node starves the bus, which then breaks the tree).
+    "TfTopologyDetector": {
+        "silence_interval": 0.18,    # /tf topic going quiet right before
+        "resource_excursion": 0.15,  # CPU spike in tf publisher
+        "graph_delta": 0.10,         # nodes joining/leaving change tf
+    },
+    "ProcessSignalsDetector": {
+        "resource_excursion": 0.18,  # an excursion *is* what we report
+        "silence_interval": 0.10,    # bus starvation often paired
+    },
+    "ClockSkewDetector": {
+        "resource_excursion": 0.12,  # NTP daemon starvation -> drift
+        "graph_delta": 0.08,         # new node, wrong /clock source
     },
 }
 
@@ -165,6 +186,23 @@ _DIFF_RELEVANT_KEY_PREFIXES: dict[str, tuple[str, ...]] = {
     ),
     "ThresholdDetector": (
         "kernel", "nvidia_driver", "os.version", "cuda",
+    ),
+    # tf graph is sensitive to URDF / robot_description changes and to
+    # any tool that publishes static transforms (e.g. robot_state_publisher).
+    "TfTopologyDetector": (
+        "ros_distro", "rmw_implementation", "attached_files",
+        "ros_packages_apt_count", "blackboxrs_config_yaml_sha256",
+    ),
+    # New process / kernel / driver state is the most plausible
+    # coincident change for a per-process resource excursion.
+    "ProcessSignalsDetector": (
+        "kernel", "nvidia_driver", "ros_packages_apt_count",
+        "blackboxrs_config_yaml_sha256",
+    ),
+    # Clock skew: anything that touches the kernel time subsystem,
+    # NTP/chrony config, or the /etc/timezone file.
+    "ClockSkewDetector": (
+        "kernel", "os.version", "attached_files",
     ),
 }
 
@@ -459,6 +497,25 @@ def _cause_summary(trigger: DetectorTrigger) -> str:
         return (
             f"System metric {trigger.subject!s} crossed a configured "
             f"threshold."
+        )
+    if cls == "TfTopologyDetector":
+        kind = trigger.data.get("failure_kind", "structural fault")
+        return (
+            f"TF tree {kind} on frame {trigger.subject!s}; tf2 lookups "
+            f"will fail or return inconsistent transforms."
+        )
+    if cls == "ProcessSignalsDetector":
+        metric = trigger.data.get("metric", "resource")
+        return (
+            f"Process {trigger.subject!s} exceeded a {metric} "
+            f"threshold; the node may be starving the bus or leaking."
+        )
+    if cls == "ClockSkewDetector":
+        a = trigger.data.get("source_a", "?")
+        b = trigger.data.get("source_b", "?")
+        return (
+            f"Clock skew between {a!s} and {b!s}; TF lookups and "
+            f"bag playback will misbehave until clocks are realigned."
         )
     return f"{cls} fired on {trigger.subject!s}."
 

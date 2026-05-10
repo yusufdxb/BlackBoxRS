@@ -31,28 +31,14 @@ and reports the worst pair when it exceeds the threshold.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
 
+from blackboxrs.core.config import ClockSkewConfig
 from blackboxrs.core.schemas import AnomalyData, BlackBoxEvent
 
 from .base import BaseDetector
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ClockSkewConfig:
-    """Configuration for :class:`ClockSkewDetector`.
-
-    Attributes:
-        max_skew_sec: A pairwise skew (in seconds) larger than this
-            value flags the snapshot. Defaults to 0.1s, which is the
-            typical tolerance band for TF lookups in well-tuned ROS
-            systems; ``ros2 doctor`` warns above 0.05s.
-    """
-
-    max_skew_sec: float = 0.1
 
 
 class ClockSkewDetector(BaseDetector):
