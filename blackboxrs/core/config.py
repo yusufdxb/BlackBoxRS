@@ -77,6 +77,33 @@ class DeadTopicConfig:
 
 
 @dataclass
+class TfTopologyConfig:
+    """Configuration for the TF topology detector.
+
+    Mirrors :class:`blackboxrs.anomaly_engine.detectors.tf_topology.TfTopologyConfig`
+    so that operators can tune the staleness threshold from YAML without
+    having to import the detector module.
+    """
+
+    stale_timeout_sec: float = 5.0
+
+
+@dataclass
+class ProcessSignalsConfig:
+    """Configuration for the per-process CPU/RSS signals detector."""
+
+    cpu_percent: float = 90.0
+    rss_mb: float = 1024.0
+
+
+@dataclass
+class ClockSkewConfig:
+    """Configuration for the NTP/clock-skew detector."""
+
+    max_skew_sec: float = 0.1
+
+
+@dataclass
 class AnomalyEngineConfig:
     """Settings for the anomaly detection engine."""
 
@@ -84,6 +111,11 @@ class AnomalyEngineConfig:
     thresholds: AnomalyThresholds = field(default_factory=AnomalyThresholds)
     frequency: FrequencyConfig = field(default_factory=FrequencyConfig)
     dead_topic: DeadTopicConfig = field(default_factory=DeadTopicConfig)
+    tf_topology: TfTopologyConfig = field(default_factory=TfTopologyConfig)
+    process_signals: ProcessSignalsConfig = field(
+        default_factory=ProcessSignalsConfig
+    )
+    clock_skew: ClockSkewConfig = field(default_factory=ClockSkewConfig)
     custom_detectors: list[dict] = field(default_factory=list)
 
 
@@ -113,6 +145,9 @@ class Rosbag2RecorderConfig:
             "anomaly.frequency",
             "anomaly.dead_topic",
             "anomaly.qos_mismatch",
+            "anomaly.tf_topology",
+            "anomaly.process_signals",
+            "anomaly.clock_skew",
         ]
     )
     topics: list[str] = field(default_factory=list)
@@ -229,6 +264,9 @@ _ANOMALY_NESTED_MAP: dict[str, type] = {
     "thresholds": AnomalyThresholds,
     "frequency": FrequencyConfig,
     "dead_topic": DeadTopicConfig,
+    "tf_topology": TfTopologyConfig,
+    "process_signals": ProcessSignalsConfig,
+    "clock_skew": ClockSkewConfig,
 }
 
 

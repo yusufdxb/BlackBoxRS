@@ -37,27 +37,14 @@ responsible for the actual ``tf2`` parsing, exactly like
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
 
+from blackboxrs.core.config import TfTopologyConfig
 from blackboxrs.core.schemas import AnomalyData, BlackBoxEvent
 
 from .base import BaseDetector
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class TfTopologyConfig:
-    """Configuration for :class:`TfTopologyDetector`.
-
-    Attributes:
-        stale_timeout_sec: Edges whose ``last_update_sec_ago`` exceeds
-            this value are flagged stale. Static edges (``is_static =
-            True``) are exempt because ``/tf_static`` is published once.
-    """
-
-    stale_timeout_sec: float = 5.0
 
 
 class TfTopologyDetector(BaseDetector):

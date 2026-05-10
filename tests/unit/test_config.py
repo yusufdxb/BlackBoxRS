@@ -72,6 +72,9 @@ class TestDefaultConfig:
             "anomaly.frequency",
             "anomaly.dead_topic",
             "anomaly.qos_mismatch",
+            "anomaly.tf_topology",
+            "anomaly.process_signals",
+            "anomaly.clock_skew",
         ]
 
 

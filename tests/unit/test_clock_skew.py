@@ -8,10 +8,8 @@ detector is a pure event-stream consumer.
 
 from __future__ import annotations
 
-from blackboxrs.anomaly_engine.detectors.clock_skew import (
-    ClockSkewConfig,
-    ClockSkewDetector,
-)
+from blackboxrs.anomaly_engine.detectors.clock_skew import ClockSkewDetector
+from blackboxrs.core.config import ClockSkewConfig
 from blackboxrs.core.schemas import BlackBoxEvent
 
 

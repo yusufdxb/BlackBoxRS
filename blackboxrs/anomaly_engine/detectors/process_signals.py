@@ -35,30 +35,14 @@ happens upstream; we only consume the resulting payload.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
 
+from blackboxrs.core.config import ProcessSignalsConfig
 from blackboxrs.core.schemas import AnomalyData, BlackBoxEvent
 
 from .base import BaseDetector
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ProcessSignalsConfig:
-    """Configuration for :class:`ProcessSignalsDetector`.
-
-    Attributes:
-        cpu_percent: A process whose ``cpu_percent`` exceeds this
-            value is flagged. The value is per-process and may exceed
-            100% on multi-core machines (psutil convention).
-        rss_mb: A process whose resident-set-size in MB exceeds this
-            value is flagged.
-    """
-
-    cpu_percent: float = 90.0
-    rss_mb: float = 1024.0
 
 
 class ProcessSignalsDetector(BaseDetector):

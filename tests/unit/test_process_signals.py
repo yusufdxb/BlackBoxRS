@@ -9,9 +9,9 @@ detector is a pure event-stream consumer.
 from __future__ import annotations
 
 from blackboxrs.anomaly_engine.detectors.process_signals import (
-    ProcessSignalsConfig,
     ProcessSignalsDetector,
 )
+from blackboxrs.core.config import ProcessSignalsConfig
 from blackboxrs.core.schemas import BlackBoxEvent
 
 

@@ -8,10 +8,8 @@ are needed — the detector is a pure event-stream consumer.
 
 from __future__ import annotations
 
-from blackboxrs.anomaly_engine.detectors.tf_topology import (
-    TfTopologyConfig,
-    TfTopologyDetector,
-)
+from blackboxrs.anomaly_engine.detectors.tf_topology import TfTopologyDetector
+from blackboxrs.core.config import TfTopologyConfig
 from blackboxrs.core.schemas import BlackBoxEvent
 
 
