@@ -38,6 +38,12 @@ class FrequencyDetector(BaseDetector):
         config: A :class:`FrequencyConfig` holding ``tolerance_percent``.
     """
 
+    #: Fingerprint-stable identity. Two frequency-drop incidents on the
+    #: same topic should collide; on different topics they should not.
+    signature_fields = ["topic"]
+
+    target_subsystem = "ros"
+
     def __init__(self, config: FrequencyConfig) -> None:
         self._tolerance_pct = config.tolerance_percent
         self._samples: dict[str, list[float]] = defaultdict(list)
@@ -111,9 +117,18 @@ class FrequencyDetector(BaseDetector):
             floor,
         )
 
+        # Surface signature-field values into ``data`` so they round-trip
+        # into the trigger model and the fingerprint algorithm picks them
+        # up via ``DetectorTrigger.signature_fields`` + ``data``.
+        data = anomaly.model_dump()
+        data["topic"] = topic
+
+        metadata = dict(event.metadata)
+        metadata.update(self.detector_metadata())
+
         return BlackBoxEvent.anomaly_event(
             event_type="anomaly.frequency",
-            data=anomaly.model_dump(),
+            data=data,
             severity="warning",
-            **event.metadata,
+            **metadata,
         )

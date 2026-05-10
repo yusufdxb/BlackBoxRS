@@ -1,467 +1,288 @@
 # BlackBoxRS
 
-**Flight recorder for ROS 2 robots** — early-stage / single-host
+**Incident intelligence and prevention for ROS 2 robots.**
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![ROS 2 Humble (verified)](https://img.shields.io/badge/ROS%202-Humble%20(verified)-brightgreen)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 
-> Status: **alpha (v0.3.0.dev0)**. Single-host, in-process. Useful as a
-> development-time observability daemon. Not yet validated on hardware
-> beyond a desktop Linux workstation. See _Status & Limitations_ below
-> for what is verified, what is inferred, and what is **not** built yet.
+> Status: **alpha (v0.4.0.dev0)**. Single-host, in-process. Pivoted from
+> "flight recorder" to incident intelligence in this release. The new
+> incident-bundle pipeline, report generator, fingerprinting, and
+> prevention scaffold are working; the full preflight check library and
+> richer timeline derivation land in v0.4.0 stable. See
+> `STATUS_AND_LIMITATIONS_REWRITE.md` for what is verified versus
+> planned.
+
+When a ROS 2 robot fails, BlackBoxRS produces a reproducible incident
+bundle: timeline, evidence, config and version signatures, a likely-cause
+narrative grounded in the evidence, and a recommended preflight rule the
+next launch can run to keep the same failure from happening again.
+
+The bundle is the artifact. Postmortems collapse from an afternoon to a
+paragraph.
 
 ---
 
-## Overview
+## What problem this solves
 
-BlackBoxRS is a development-time observability daemon for ROS 2 robots.
-It runs as a single Python process alongside your stack and writes a
-structured JSONL stream of:
+Field robotics teams running ROS 2 lose hours per week to "why isn't
+this running like yesterday?" Logs are not an answer; they are raw
+material. Today, when a robot fails on a field test:
 
-- ROS 2 graph state (topics, nodes, per-publisher QoS, per-subscriber QoS)
-- Per-topic message frequencies (sliding-window estimates)
-- Host telemetry (CPU, memory, disk usage + I/O rate, thermal zones)
-- GPU telemetry on hosts where `nvidia-smi` is available, or on Jetson
-  via the `/sys/devices/gpu.0/load` sysfs node and the GPU thermal zone
-- Anomaly events fired by four built-in detectors (threshold, frequency
-  drop, dead topic, QoS mismatch)
+1. Engineer SSHs in, `ros2 topic list`, scrolls journalctl, greps. 20 to
+   90 minutes per incident.
+2. They paste log fragments into Slack. Three other engineers compare
+   notes from memory.
+3. The "fix" is a one-line config change with no record of *why*.
+4. The same failure recurs on a different robot two weeks later.
 
-Logs are appended as newline-delimited JSON to size-rotated files in
-`~/.blackboxrs/logs/`.
-
----
-
-## Architecture
+After BlackBoxRS:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     BlackBoxRS Daemon                        │
-│                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ ros_monitor   │  │system_monitor│  │  anomaly_engine  │  │
-│  │ (rclpy node)  │  │  (psutil +   │  │  threshold       │  │
-│  │               │  │   sysfs)     │  │  frequency       │  │
-│  │ topology +    │  │ cpu/mem/disk │  │  dead-topic      │  │
-│  │ frequency +   │  │ thermal/gpu  │  │  qos-mismatch    │  │
-│  │ qos snapshot  │  │              │  │                  │  │
-│  └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘  │
-│         │                 │                    │             │
-│         ▼                 ▼                    ▼             │
-│        ┌────────────────── core.event_bus ──────────────┐   │
-│        │  thread-safe in-process pub/sub (queue.Queue)  │   │
-│        └─────────────────────┬──────────────────────────┘   │
-│                              ▼                              │
-│                ┌────── logging pipeline ───────┐            │
-│                │  RotatingJsonlWriter -> *.jsonl│           │
-│                └───────────────────────────────┘            │
-└─────────────────────────────────────────────────────────────┘
+robot-blackbox start                   # already running on the robot
+# robot fails
+robot-blackbox incident build --since 5m
+# → ~/.blackboxrs/incidents/inc_2026-05-07T14-22-00_a3f2/
+#   ├── report.md
+#   ├── incident.json
+#   ├── timeline.json
+#   ├── fingerprint.json
+#   ├── signatures/{config.json, versions.json}
+#   └── evidence/{events.jsonl, triggers.json, snapshots.json}
 ```
 
-Threading model: each component owns exactly one background thread
-(spawned inside its own `start()`); the daemon does not stack additional
-worker threads on top.
+Engineer reads `report.md`, the likely cause is named with confidence
+and the supporting evidence is hyperlinked into the bundle. They convert
+it to a `PreventionRule` with one command. The next launch runs
+`robot-blackbox preflight` and the rule fires before the failure.
 
 ---
 
-## Implemented features
+## The loop
 
-- **ROS 2 topic introspection** — discovery, dynamic generic
-  subscription, sliding-window frequency tracker, per-publisher and
-  per-subscriber QoS snapshot. Requires `rclpy`. With `rclpy` absent the
-  ROS monitor logs a warning and stays inactive.
-- **Host telemetry** — CPU usage and load average, memory + swap, disk
-  usage + I/O rate, Linux `thermal_zone*` zones.
-- **GPU telemetry** — `nvidia-smi` on desktops, sysfs on Jetson. Skipped
-  silently on hosts with neither.
-- **Built-in anomaly detectors** — threshold (CPU%, memory%, GPU °C),
-  per-topic frequency drop with auto-learned baseline, dead-topic
-  silence, pub/sub QoS mismatch.
-- **Anomaly-triggered rosbag2 recording** — optional recorder component
-  that starts `ros2 bag record` for selected anomaly types, stops after
-  a bounded duration, enforces cooldowns, and logs structured recorder
-  lifecycle events.
-- **Structured JSONL logging** with size-based rotation and a bounded
-  retained-file count.
-- **CLI (`robot-blackbox` or `python -m blackboxrs`)** — `start`,
-  `stop`, `status`, `dump-log` (with severity / source filters and a
-  `--follow` mode), `replay`, `config`, `init`.
-- **Pure Python defaults**, optional `rclpy` for ROS 2 integration.
+```
+observe   →   explain   →   replay   →   prevent
+   │             │             │             │
+   ▼             ▼             ▼             ▼
+ daemon      incident       bundle is    preflight
+ captures    builder        portable;    rule blocks
+ events,     produces       another      next launch
+ anomalies,  bundle with    engineer     when the
+ host +      timeline +     re-renders   precursor
+ GPU         fingerprint    the report   reappears
+```
 
-## Not yet implemented
-
-These are listed so docs do not overstate what the code does:
-
-- No SQLite log backend — JSONL only.
-- No time-based log retention. Rotation is **size + file-count** based;
-  oldest files are pruned when more than `log_max_files` exist.
-- No custom-detector plugin system. The four built-in detectors are
-  hard-wired in `anomaly_engine.engine.AnomalyEngine._init_detectors`.
-- No pre-trigger rosbag buffering or snapshot mode. Recording starts
-  only after the triggering anomaly arrives.
-- No web dashboard, no Prometheus exporter, no fleet aggregation.
-- No TF tree monitoring, no service / action introspection.
-- `replay` prints the events from a log file in order. It is **not** a
-  time-aligned playback or a publisher to a topic.
-- ROS 2 latency is **not** measured end-to-end. The ROS monitor reports
-  `interval_ms = 1 / frequency_hz` (mean inter-message interval), not
-  pub→sub wall-clock latency.
+`observe` was the v0.3 wedge. `explain → replay → prevent` is what makes
+this a product.
 
 ---
 
-## Quick Start
+## Sample incident
 
-### System-only (no ROS 2)
+`examples/incidents/inc_demo_tf_break/` is a synthetic but realistic
+TF-break incident bundle, committed to the repo. The top of its
+`report.md`:
+
+```
+# Incident `inc_2026-05-07T14-22-00_04ca9c43`
+
+- **Severity**: error
+- **Window**: 2026-05-07 14:22:00.000Z → 2026-05-07 14:22:15.000Z
+- **Session**: `demo_tf_break`
+- **Host**: `mewtwo`
+
+## Summary
+
+Topic /tf_static stopped emitting messages.
+
+## Timeline
+
+| t                          | subsystem | kind    | summary                        | conf. | evidence                  |
+|----------------------------|-----------|---------|--------------------------------|-------|---------------------------|
+| 2026-05-07 14:22:00.000Z   | ros       | raw     | frequency on /tf_static: 1.0Hz | 1.00  | events.jsonl#L1           |
+| ...                        | ...       | ...     | ...                            | ...   | ...                       |
+| 2026-05-07 14:22:08.000Z   | anomaly   | trigger | dead_topic on /tf_static       | 1.00  | triggers.json#trg_df6aa081 |
+
+## Likely causes
+
+1. **Topic /tf_static stopped emitting messages.** _(confidence 1.00)_
+   - evidence: `events.jsonl#L11`, `triggers.json#trg_df6aa081`
+
+## Fingerprint
+
+- id: `fpr_68463b41f2ab8910`
+- detectors: `DeadTopicDetector`
+- subsystems: `anomaly`
+
+## Recommended preflight rule
+
+```yaml
+check: topic_present
+params:
+  topic: '/tf_static'
+  min_publishers: 1
+severity_on_fail: block
+```
+```
+
+Open `examples/incidents/inc_demo_tf_break/report.md` for the full
+bundle.
+
+---
+
+## What works today (verified)
+
+- **Existing v0.3 capture path** continues to work. ROS 2 topic
+  introspection, host telemetry, GPU telemetry, four anomaly detectors
+  (threshold, frequency drop, dead topic, QoS mismatch), JSONL logging
+  with size + age rotation, optional anomaly-triggered rosbag2
+  recording.
+- **Incident bundle pipeline.** `IncidentBuilder` slices the JSONL log
+  into a typed bundle: events, triggers, signatures, timeline,
+  fingerprint, report.
+- **Markdown report generator.** Every claim in `report.md` resolves to
+  a file in the bundle (`events.jsonl#Ln`, `triggers.json#<id>`).
+- **Config + version signatures.** Deterministic sha256 hashes of ROS
+  distro, RMW, env subset, attached files, and OS / Python / NVIDIA
+  driver state. Same inputs produce the same hash.
+- **Failure fingerprinting (algorithm v1).** Stable id from detector
+  classes, subsystems, signature fields, and topic-set topology. Two
+  bundles seeded the same way collide; perturb any input and the id
+  changes.
+- **Likely-cause ranking.** Heuristic: detector-class weight + severity
+  bonus. Confidence below 0.5 carries an explicit caveat. Confidence
+  ≥ 0.7 is promoted to the bundle summary.
+- **Prevention scaffold.** `PreventionRule` + `PreflightCheck` YAML I/O,
+  `PreflightRunner` with 0/1/2 exit codes (pass / block / warn).
+- **CLI.** `robot-blackbox incident build / show / list / attach`,
+  `preflight`, `prevention adopt --from-incident / list`.
+- **Sample bundle.** Reproducibly generated by
+  `python scripts/generate_sample_incident.py`.
+- **201 unit tests pass** (40 added in this pivot release).
+
+## What is planned (not yet built)
+
+- Derived timeline events (silence interval, resource excursion, graph
+  delta) and causality annotation. `timeline.json` currently contains
+  raw + trigger rows ordered by timestamp.
+- Snapshot projection (`SystemSnapshotter`). `snapshots.json` is
+  currently empty.
+- Real `topic_present`, `qos_match`, `node_running` preflight checks.
+  v0.4 vertical slice ships stubs that return `skipped`; the full
+  rclpy-coupled checks land in M6 (see `ROADMAP_V0_4.md`).
+- Cross-incident clustering (`cluster_id` reserved on
+  `FailureFingerprint`; v0.5).
+- `incident pack` / `unpack` for portable tarballs (M7).
+- Web dashboard. Out of scope for v0.4. The bundle is the artifact.
+- Multi-host capture. Single-host first; the bundle format is
+  forward-compatible.
+
+For a brutally honest status breakdown see
+`STATUS_AND_LIMITATIONS_REWRITE.md`.
+
+---
+
+## Quick start
 
 ```bash
 git clone https://github.com/yusufdxb/BlackBoxRS.git
 cd BlackBoxRS
 ./setup.sh
+source .venv/bin/activate
 
-# Initialise ~/.blackboxrs with a default config and logs/ dir
+# 1. Initialise.
 robot-blackbox init
 
-# Run in the foreground (Ctrl-C to stop)
-robot-blackbox start --foreground
+# 2. Run the daemon (foreground for the demo; -f shows live output).
+robot-blackbox start --foreground &
 
-# Or detach into the background
-robot-blackbox start
-robot-blackbox status
-robot-blackbox stop
+# 3. ... your robot does its thing, anomalies fire and get logged ...
 
-# Inspect recent events
-robot-blackbox dump-log --last 100
-robot-blackbox dump-log --source anomaly --severity warning
-robot-blackbox dump-log --follow             # tail -f the active log
+# 4. Build an incident bundle from the last 5 minutes.
+robot-blackbox incident build --since 5m
+
+# 5. Read the report.
+robot-blackbox incident show ~/.blackboxrs/incidents/inc_*
+
+# 6. Adopt a prevention rule from the incident.
+robot-blackbox prevention adopt --from-incident ~/.blackboxrs/incidents/inc_*
+
+# 7. On the next launch, run preflight.
+robot-blackbox preflight
 ```
 
-### With ROS 2
+For the sample bundle without running anything:
 
-`rclpy` is installed via apt from the ROS 2 distro (not from PyPI —
-see `pyproject.toml` for why).  There are two supported install paths:
-
-1. **Host install (Humble only, verified):**
-   ```bash
-   source /opt/ros/humble/setup.bash
-   ./setup.sh            # creates .venv/ on top of the sourced env
-   source .venv/bin/activate
-   robot-blackbox start --foreground
-   ```
-   The venv inherits `rclpy` / `std_msgs` / etc. from `/opt/ros/humble`
-   via the sourced shell's `PYTHONPATH`. If you skip `source
-   /opt/ros/humble/setup.bash` the ROS monitor logs a warning and
-   stays inactive (system-only mode).
-
-2. **Container (Humble, reproducible):**
-   ```bash
-   docker build -f docker/Dockerfile.humble -t blackboxrs:humble .
-   docker run --rm --network host -e ROS_DOMAIN_ID=42 blackboxrs:humble
-   ```
-   See `docker/README.md` for the full flow, including how to
-   reproduce the live-ROS integration tests inside the image.
-
----
-
-## CLI Reference
-
-| Command | Description |
-|---------|-------------|
-| `robot-blackbox start [--foreground] [-c CFG]` | Start the daemon (background by default). Refuses if the pidfile identity already matches a live daemon. |
-| `robot-blackbox stop`     | Send SIGTERM to a *verified* running daemon. Refuses if the pidfile identity cannot be verified (see _PID file safety_ below). |
-| `robot-blackbox status`   | Show running state, event counts by source/severity, latest event. |
-| `robot-blackbox dump-log` | Print recorded events. Filters: `--source {ros,system,anomaly,recorder,all}`, `--severity`, `--last N`, `--json`, `--follow`. |
-| `robot-blackbox replay`   | Print a log file in chronological order (no time-aligned playback). |
-| `robot-blackbox config`   | Print the effective configuration as YAML. |
-| `robot-blackbox init`     | Create `~/.blackboxrs/{config.yaml,logs/}` if missing. |
-
-`python -m blackboxrs <subcommand>` is equivalent in case the entry
-point is not on `PATH`.
-
-### PID file safety
-
-The pidfile at `~/.blackboxrs/blackboxrs.pid` is a small JSON document
-carrying process identity, not just a bare PID:
-
-```json
-{"pid": 12345, "starttime": 9876543,
- "cmdline": "python -m blackboxrs start --foreground"}
-```
-
-`starttime` is field 22 of `/proc/<pid>/stat` (boot-relative jiffies,
-stable for a PID's lifetime). Every `status` / `stop` call re-reads
-`/proc` and compares:
-
-- PID is alive (via `kill(pid, 0)`);
-- `starttime` matches the recorded value — a recycled PID belonging to
-  an unrelated process will always have a later `starttime`;
-- the live `cmdline` either contains `blackboxrs` or exactly matches
-  the recorded one.
-
-If any check fails the pidfile is treated as **stale**, removed, and
-the operation reports "not running". Legacy plain-integer pidfiles
-written by releases before the JSON identity format are also rejected
-as stale — BlackBoxRS will not signal a PID it cannot prove it owns.
-The writer uses `mkstemp + os.replace` so a concurrent reader never
-observes a partially written pidfile. Identity verification is
-Linux-specific (uses `/proc`); on non-Linux hosts only the cmdline
-round-trip check runs.
-
----
-
-## Configuration
-
-Config lives at `~/.blackboxrs/config.yaml` (or pass `-c PATH` to
-`start`). The schema is the dataclass tree in
-`blackboxrs.core.config.BlackBoxConfig`. Missing keys fall back to the
-dataclass default. Unknown keys are **not silently ignored** — by
-default they produce a `logging.WARNING` naming both the key and the
-scope it was found in, and `BlackBoxConfig.load(path, strict=True)`
-promotes those to a `ConfigError` so deployment validation / CI can
-catch typos before the daemon boots.
-
-The exact defaults written by `robot-blackbox init` are:
-
-```yaml
-# ~/.blackboxrs/config.yaml
-
-log_dir: "~/.blackboxrs/logs"
-log_rotation_mb: 50            # rotate when current file exceeds this size
-log_max_files: 20              # keep at most N rotated files (oldest pruned)
-event_bus_queue_maxsize: 1024  # bounded per-subscriber queue capacity;
-                                # full queues drop events + increment a
-                                # per-queue drop counter rather than
-                                # back-pressuring producers. Internal
-                                # logger / anomaly / recorder queues
-                                # are intentionally provisioned larger
-                                # than this default.
-
-ros_monitor:
-  enabled: true
-  poll_interval_sec: 1.0       # how often to re-snapshot the ROS graph
-  track_latency: true          # add interval_ms to ros.frequency events
-  topic_filters: []            # fnmatch patterns; [] means "all topics"
-
-system_monitor:
-  enabled: true
-  interval_sec: 1.0
-  gpu_backend: "auto"          # auto | nvidia-smi | tegrastats | none
-
-anomaly_engine:
-  enabled: true
-  thresholds:
-    cpu_percent: 90.0
-    memory_percent: 85.0
-    gpu_temp_c: 80.0
-  frequency:
-    tolerance_percent: 20.0    # alert when measured Hz < (1-tol/100)*baseline
-  dead_topic:
-    timeout_sec: 5.0
-  # custom_detectors:            # user-supplied anomaly detectors
-  #   - class: "mypackage.detectors.LatencySpike"
-  #     params:
-  #       threshold_ms: 50.0
-  #   - class: "mypackage.detectors.JointTorqueAnomaly"
-
-rosbag2:
-  enabled: false
-  executable: "ros2"
-  output_dir: "~/.blackboxrs/bags"
-  record_duration_sec: 30.0
-  cooldown_sec: 60.0
-  storage_id: "sqlite3"
-  max_recordings_per_run: 10
-  trigger_event_types:        # default: all built-in anomaly event types
-    - "anomaly.threshold"
-    - "anomaly.frequency"
-    - "anomaly.dead_topic"
-    - "anomaly.qos_mismatch"
-  topics: []                  # [] => `ros2 bag record -a`
-```
-
-There is no `general:` block, no `log_format` field, and no
-`log_retention_days`. Built-in anomaly settings live under the three
-nested blocks (`thresholds`, `frequency`, `dead_topic`). Custom
-detectors can be added via the `custom_detectors` list — each entry
-needs a `class` (dotted import path to a `BaseDetector` subclass) and
-optional `params` (kwargs passed to `__init__`). If you write
-something else in your YAML, it will not be applied, and you'll see
-a warning like:
-
-```
-WARNING  blackboxrs.core.config:
-  Unknown config key(s) under anomaly_engine.thresholds in
-  /home/me/.blackboxrs/config.yaml: made_up_key.
-```
-
-In strict mode (`BlackBoxConfig.load(path, strict=True)`) the same
-condition raises `blackboxrs.core.config.ConfigError` instead.
-
----
-
-## Event Schema
-
-Every line in the log is a single JSON object validated by
-`blackboxrs.core.schemas.BlackBoxEvent`:
-
-```json
-{
-  "timestamp": "2026-04-16T14:59:53.691602Z",
-  "source":    "system_monitor",
-  "event_type": "system.cpu",
-  "severity":  "info",
-  "data":      { "cpu_percent": 6.2, "cpu_count": 24, "per_cpu_percent": [...] },
-  "metadata":  { "session_id": "20c8b5f68030", "hostname": "mewtwo",
-                 "start_time": "2026-04-16T14:59:53.585415+00:00" }
-}
-```
-
-`source` is one of `ros_monitor`, `system_monitor`, `anomaly_engine`,
-`rosbag_recorder`.
-`severity` is one of `debug | info | warning | error | critical`.
-
-### Emitted event types
-
-| `source` | `event_type` | Notes |
-|----------|--------------|-------|
-| `system_monitor` | `system.cpu`     | `cpu_percent`, `cpu_count`, `per_cpu_percent`, `load_avg_*` |
-| `system_monitor` | `system.memory`  | `memory_percent`, `memory_used_mb`, `memory_total_mb`, swap |
-| `system_monitor` | `system.disk`    | `disk_percent`, `disk_used_gb`, `disk_total_gb`, `disk_read_mb_s`, `disk_write_mb_s` |
-| `system_monitor` | `system.gpu`     | `gpu_util_percent`, `gpu_temp_c`, mem + power (when backend supports them) |
-| `system_monitor` | `system.thermal` | `items: [{zone, type, temp_c}, ...]` |
-| `ros_monitor`    | `ros.topology`   | `topic_count`, `node_count`, `topics`, `nodes` |
-| `ros_monitor`    | `ros.frequency`  | `topic`, `frequency_hz`, optional `interval_ms` |
-| `ros_monitor`    | `ros.qos`        | `publisher_qos_profiles`, `subscriber_qos_profiles`, counts |
-| `anomaly_engine` | `anomaly.threshold`     | `detector`, `metric`, `value`, `threshold`, `message` |
-| `anomaly_engine` | `anomaly.frequency`     | as above; `metric` is `frequency:<topic>` |
-| `anomaly_engine` | `anomaly.dead_topic`    | as above; `metric` is `dead_topic:<topic>` |
-| `anomaly_engine` | `anomaly.qos_mismatch`  | as above; `metric` is `qos:<topic>` |
-| `rosbag_recorder` | `rosbag.recorder_ready` | recorder config, executable path, trigger types |
-| `rosbag_recorder` | `rosbag.recorder_unavailable` | missing `ros2` CLI / recorder unavailability reason |
-| `rosbag_recorder` | `rosbag.recording_started` | trigger metadata, output dir, pid, duration |
-| `rosbag_recorder` | `rosbag.recording_stopped` | stop reason, elapsed time, output dir, returncode |
-| `rosbag_recorder` | `rosbag.recording_failed` | spawn or runtime failure details |
-| `rosbag_recorder` | `rosbag.recording_skipped` | skipped trigger reason (e.g. max recordings reached) |
-
-These strings are the actual contract. The detector test suite (`tests/unit/test_detectors.py`) and the integration tests
-(`tests/integration/test_daemon_pipeline.py`) both build on these
-exact payloads.
-
----
-
-## Project Structure
-
-```
-BlackBoxRS/
-├── blackboxrs/
-│   ├── __init__.py
-│   ├── __main__.py            # `python -m blackboxrs` entry point
-│   ├── core/                  # event bus, config, session, clock, schemas
-│   ├── ros_monitor/           # rclpy node, introspection, frequency tracker
-│   ├── system_monitor/        # psutil/sysfs/nvidia-smi/tegrastats collectors
-│   ├── anomaly_engine/        # threshold/frequency/dead-topic/qos detectors
-│   ├── recording/             # anomaly-triggered rosbag2 recorder
-│   ├── logging/               # rotating JSONL writer, log reader
-│   └── cli/                   # click app + daemon lifecycle
-├── tests/
-│   ├── unit/                  # detectors, event bus, config, schemas, tracker, writer
-│   ├── synthetic/             # in-process bus → engine → writer scenarios
-│   └── integration/           # full BlackBoxDaemon end-to-end tests
-├── pyproject.toml
-├── setup.sh
-└── README.md
+```bash
+robot-blackbox incident show examples/incidents/inc_demo_tf_break/
 ```
 
 ---
 
-## Status & Limitations
+## Architecture (high-level)
 
-**What is verified locally** (`pytest -q` on this repo)
+```
+   ┌──────────── BlackBoxRS daemon ───────────┐
+   │ ros_monitor + system_monitor + recording │
+   │            │                             │
+   │            ▼                             │
+   │       core.event_bus  ──►  anomaly_engine│
+   │            │                             │
+   │            ▼                             │
+   │       logging.RotatingJsonlWriter        │
+   └──────────────┬───────────────────────────┘
+                  │
+       ~/.blackboxrs/logs/*.jsonl
+                  │
+                  ▼
+   ┌────── blackboxrs incident build ─────────┐
+   │ IncidentBuilder over the log slice:      │
+   │   events.jsonl  →  triggers              │
+   │                 →  signatures            │
+   │                 →  snapshots (M3.5)      │
+   │                 →  timeline              │
+   │                 →  fingerprint           │
+   │                 →  likely-cause          │
+   │                 →  report.md             │
+   └──────────────┬───────────────────────────┘
+                  │
+   ~/.blackboxrs/incidents/inc_<id>/
+                  │
+                  ▼
+   ┌────── blackboxrs preflight ──────────────┐
+   │ Loaded PreventionRules (YAML) →          │
+   │   topic_present / qos_match / node_*     │
+   │ → PreflightReport: pass / warn / block   │
+   └──────────────────────────────────────────┘
+```
 
-- **Unit tests** — detector contracts, event bus bounded queue + drop
-  accounting, config round-trip, log writer rotation (including the
-  sub-second collision regression), log reader, CLI log-follow
-  rotation-awareness, PID-file identity verification, schema /
-  event-name contracts.
-- **Integration tests** booting the full `BlackBoxDaemon` — one thread
-  per component (no double-start), threshold detector firing against
-  real `system.cpu` events, events reaching the JSONL log on disk, and
-  PID-file lifecycle.
-- **CLI subprocess tests** — real `python -m blackboxrs` child
-  processes exercise both lifecycles: `start --foreground` + SIGTERM,
-  and the default `start` (background) / `status` / `stop` operator
-  path. Stale and foreign pidfiles are refused and cleaned up, and
-  `start` recovers on the next attempt without manual intervention.
-- **Live ROS 2 tests** (`tests/integration/test_ros_live.py`) — boot a
-  real `rclpy` publisher on an isolated, per-session-random
-  `ROS_DOMAIN_ID` and confirm `RosMonitor` discovers the topic,
-  subscribes, and emits `ros.topology` + `ros.frequency` events with a
-  positive `frequency_hz`; `topic_filters` is verified to actually
-  exclude filtered topics. These tests auto-skip when `rclpy` is not
-  importable, so they are honest on hosts without ROS 2 rather than
-  fabricated.
-
-**Verified in CI** — `ruff check` and `pytest -q` on Python 3.10 /
-3.11 / 3.12, a benchmark regression gate on Ubuntu 22.04 / Python 3.10,
-and a Docker-backed ROS 2 Humble live test that builds
-`docker/Dockerfile.humble` and runs `tests/integration/test_ros_live.py`
-inside the image.
-
-**Performance envelope** — `scripts/benchmark.py` measures EventBus
-publish throughput, `RotatingJsonlWriter` per-call latency, and the
-full producer → bus → consumer → writer pipeline.  See
-[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for reproducible reference
-numbers on x86_64 and explicit statements about what the benchmark
-does NOT measure (ROS 2 latency, fsync under contention, Jetson).
-
-**Still inferred**
-
-- Jetson-specific paths (`tegrastats`, sysfs GPU load). The desktop
-  `nvidia-smi` branch is exercised locally; the Jetson branch is
-  implemented but not run here.
-- Multi-host ROS 2 scenarios (`ROS_LOCALHOST_ONLY=0`, DDS on a
-  physical network).
-- ROS distros other than Humble. The live-ROS tests run against
-  ROS 2 Humble on Ubuntu 22.04 / Python 3.10 only. Iron and Jazzy are
-  expected to work (the monitor uses only stable rclpy primitives) but
-  are explicitly **unverified in this repo** until CI runs them.
-- Long-run recorder state under heavy graph churn. The synthetic
-  churn tests (`tests/unit/test_ros_monitor_lifecycle.py`) cover the
-  prune logic, but a multi-hour run with nodes coming and going has
-  not been measured end-to-end.
-- Real rosbag capture on a robot under disk pressure. The recorder is
-  verified through supervised subprocess tests, not by inspecting a
-  long real bag on hardware yet.
-
-**Not yet built** — see _Not yet implemented_ above.
+Full design is in `ARCHITECTURE_PIVOT.md`. The pivot rationale and
+positioning are in `PIVOT_BRIEF.md` and `POSITIONING.md`.
 
 ---
 
-## Requirements
+## Repo guide
 
-- Python 3.10+
-- `psutil`, `pydantic>=2`, `click`, `pyyaml`
-- `rclpy` — optional; system monitoring runs without it.
-  **Live-verified distro:** ROS 2 Humble (Ubuntu 22.04, Python 3.10).
-  Iron and Jazzy should work because the monitor only uses stable
-  `rclpy` primitives (`create_node`, `create_subscription`,
-  `get_topic_names_and_types`, `get_publishers_info_by_topic`), but
-  those distros have not been booted against this code in CI or on the
-  author's workstation — treat as **inferred**, not verified, until you
-  see a live-ROS run in this repo's CI for them.
-
----
-
-## Roadmap (aspirational, not implemented)
-
-- Pluggable custom detectors loaded from config
-- Pre-trigger rosbag snapshot / ring-buffer recording
-- Web dashboard / Prometheus exporter
-- Multi-robot fleet aggregation
-- TF tree, service, and action monitoring
-- True time-aligned log replay (with optional ROS republish)
+- `PIVOT_BRIEF.md`: blunt diagnosis and the new product thesis.
+- `ARCHITECTURE_PIVOT.md`: domain objects, subsystems, data flow.
+- `ROADMAP_V0_4.md`: milestones and dependencies.
+- `DEMO_PLAN.md`: 5+ failure scenarios, demo arc, screencast layout.
+- `REPO_RESTRUCTURE_PLAN.md`: module-by-module disposition.
+- `POSITIONING.md`: framing, ICPs, anti-positioning.
+- `STATUS_AND_LIMITATIONS_REWRITE.md`: verified / inferred /
+  unverified / not built.
+- `TASKS_V0_4.md`: atomic execution checklist.
+- `examples/incidents/inc_demo_tf_break/`: a real bundle to inspect.
+- `scripts/generate_sample_incident.py`: regenerate the sample
+  bundle.
 
 ---
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See `LICENSE`.
+
+## Author
+
+Yusuf Guenena ([yusufdxb](https://github.com/yusufdxb)).

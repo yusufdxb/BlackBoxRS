@@ -101,9 +101,18 @@ class QoSMismatchDetector(BaseDetector):
     every (publisher, subscriber) pair and emits a single anomaly per
     topic when at least one pair is incompatible.
 
-    Topics with zero publishers or zero subscribers are skipped — there
+    Topics with zero publishers or zero subscribers are skipped, there
     is no compatibility relation to check.
     """
+
+    #: Identity for fingerprinting. Two QoS-mismatch incidents on the
+    #: same topic that fail on the same dimension(s) collide; flipping
+    #: the dimension (reliability vs durability) yields a different
+    #: fingerprint, which matches the operational reality that those
+    #: two failures need different fixes.
+    signature_fields = ["topic", "reliability_mismatch", "durability_mismatch"]
+
+    target_subsystem = "ros"
 
     @property
     def name(self) -> str:
@@ -135,20 +144,24 @@ class QoSMismatchDetector(BaseDetector):
             return None
 
         mismatches: list[str] = []
+        reliability_mismatch = False
+        durability_mismatch = False
         for pub_idx, pub_qos in enumerate(pub_profiles):
             for sub_idx, sub_qos in enumerate(sub_profiles):
-                pair_label = f"pub#{pub_idx}↔sub#{sub_idx}"
+                pair_label = f"pub#{pub_idx}|sub#{sub_idx}"
                 reliability_issue = _check_dimension(
                     pub_qos, sub_qos, "reliability", _RELIABILITY_RANK
                 )
                 if reliability_issue:
                     mismatches.append(f"{pair_label}: {reliability_issue}")
+                    reliability_mismatch = True
 
                 durability_issue = _check_dimension(
                     pub_qos, sub_qos, "durability", _DURABILITY_RANK
                 )
                 if durability_issue:
                     mismatches.append(f"{pair_label}: {durability_issue}")
+                    durability_mismatch = True
 
         if not mismatches:
             return None
@@ -167,9 +180,22 @@ class QoSMismatchDetector(BaseDetector):
 
         logger.warning("QoS mismatch detected: %s", message)
 
+        # Surface signature-field values so two incidents with the same
+        # topic + same dimension(s) of mismatch fingerprint identically.
+        # We deliberately omit pub_idx / sub_idx and the pairwise pair
+        # labels: those are noise that varies between runs while the
+        # underlying bug is the same.
+        data = anomaly.model_dump()
+        data["topic"] = topic
+        data["reliability_mismatch"] = reliability_mismatch
+        data["durability_mismatch"] = durability_mismatch
+
+        metadata = dict(event.metadata)
+        metadata.update(self.detector_metadata())
+
         return BlackBoxEvent.anomaly_event(
             event_type="anomaly.qos_mismatch",
-            data=anomaly.model_dump(),
+            data=data,
             severity="warning",
-            **event.metadata,
+            **metadata,
         )

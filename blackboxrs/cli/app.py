@@ -28,6 +28,11 @@ from blackboxrs.cli.formatters import (
     format_event,
     format_status,
 )
+from blackboxrs.cli.incident_cmd import (
+    incident_group,
+    preflight_cmd,
+    prevention_group,
+)
 from blackboxrs.logging.reader import LogReader
 
 # Glob pattern used by the writer.  Keeping it in one place so the
@@ -42,7 +47,15 @@ _LOG_GLOB = "blackboxrs_*.jsonl"
 @click.group()
 @click.version_option(version=__version__, prog_name="BlackBoxRS")
 def cli() -> None:
-    """BlackBoxRS -- Flight recorder for ROS 2 robots."""
+    """BlackBoxRS: incident intelligence and prevention for ROS 2 robots."""
+
+
+# Register the new pivot commands. Existing daemon commands are
+# defined inline below; the incident / preflight / prevention groups
+# live in cli/incident_cmd.py.
+cli.add_command(incident_group)
+cli.add_command(preflight_cmd)
+cli.add_command(prevention_group)
 
 
 # ---------------------------------------------------------------------------

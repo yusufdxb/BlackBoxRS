@@ -30,14 +30,15 @@ class _Rule(NamedTuple):
     data_key: str           # key into event.data carrying the metric value
     threshold_attr: str     # attribute on AnomalyThresholds for the limit
     unit: str               # human-readable unit for messages
+    target_subsystem: str   # "system" / "gpu" depending on metric domain
 
 
 # Each rule maps one (event_type, data_key) pair to a configured limit.
 # This is the single source of truth for the threshold detector contract.
 _METRIC_RULES: tuple[_Rule, ...] = (
-    _Rule("system.cpu", "cpu_percent", "cpu_percent", "%"),
-    _Rule("system.memory", "memory_percent", "memory_percent", "%"),
-    _Rule("system.gpu", "gpu_temp_c", "gpu_temp_c", "C"),
+    _Rule("system.cpu", "cpu_percent", "cpu_percent", "%", "system"),
+    _Rule("system.memory", "memory_percent", "memory_percent", "%", "system"),
+    _Rule("system.gpu", "gpu_temp_c", "gpu_temp_c", "C", "gpu"),
 )
 
 
@@ -55,6 +56,17 @@ class ThresholdDetector(BaseDetector):
         thresholds: An :class:`AnomalyThresholds` dataclass holding the
             upper-bound values for each metric.
     """
+
+    #: Fingerprint-stable identity field. The ``metric`` key in ``data``
+    #: is set to e.g. ``cpu_percent`` / ``memory_percent`` / ``gpu_temp_c``
+    #: by the rule machinery, which is exactly the granularity we want
+    #: failures to collide at.
+    signature_fields = ["metric"]
+
+    #: Resolved per-event in :meth:`check` because cpu/memory thresholds
+    #: live in the system subsystem and gpu_temp_c lives in gpu. We
+    #: still expose a class-level default so generic introspection works.
+    target_subsystem = "system"
 
     def __init__(self, thresholds: AnomalyThresholds) -> None:
         self._thresholds = thresholds
@@ -106,11 +118,19 @@ class ThresholdDetector(BaseDetector):
                 rule.unit,
             )
 
+            metadata = dict(event.metadata)
+            metadata.update(self.detector_metadata())
+            # Per-event subsystem override: cpu/mem live in "system",
+            # gpu_temp_c lives in "gpu". The class default is "system";
+            # we override here to keep gpu temperature triggers tagged
+            # accurately for fingerprinting and report rendering.
+            metadata["target_subsystem"] = rule.target_subsystem
+
             return BlackBoxEvent.anomaly_event(
                 event_type="anomaly.threshold",
                 data=anomaly.model_dump(),
                 severity="warning",
-                **event.metadata,
+                **metadata,
             )
 
         return None

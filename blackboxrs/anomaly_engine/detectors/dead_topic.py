@@ -40,6 +40,13 @@ class DeadTopicDetector(BaseDetector):
         config: A :class:`DeadTopicConfig` holding ``timeout_sec``.
     """
 
+    #: Two dead-topic incidents on the same topic should collide. The
+    #: elapsed silence duration is intentionally NOT a signature field
+    #: because it is timing noise, not identity.
+    signature_fields = ["topic"]
+
+    target_subsystem = "ros"
+
     def __init__(self, config: DeadTopicConfig) -> None:
         self._timeout_sec = config.timeout_sec
         self._last_seen: dict[str, datetime] = {}
@@ -104,11 +111,17 @@ class DeadTopicDetector(BaseDetector):
                 elapsed,
             )
 
+            data = anomaly.model_dump()
+            data["topic"] = tracked_topic
+
+            metadata = dict(event.metadata)
+            metadata.update(self.detector_metadata())
+
             return BlackBoxEvent.anomaly_event(
                 event_type="anomaly.dead_topic",
-                data=anomaly.model_dump(),
+                data=data,
                 severity="warning",
-                **event.metadata,
+                **metadata,
             )
 
         return None
