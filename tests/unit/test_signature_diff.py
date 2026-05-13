@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from blackboxrs.incident.diff import IncidentDiff, SignatureDiff, compute
+from blackboxrs.incident.diff import IncidentDiff, compute
 from blackboxrs.incident.models import ConfigSignature, VersionSignature
 
 

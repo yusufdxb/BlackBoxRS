@@ -35,7 +35,7 @@ def _minimal_inputs(bundle: Path) -> Incident:
 
 
 def test_writer_creates_required_directories(tmp_path: Path):
-    w = BundleWriter(tmp_path / "inc")
+    BundleWriter(tmp_path / "inc")
     assert (tmp_path / "inc" / "evidence").is_dir()
     assert (tmp_path / "inc" / "signatures").is_dir()
     assert (tmp_path / "inc" / "attachments").is_dir()

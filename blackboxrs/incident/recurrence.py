@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Iterator
 
 from .bundle import BundleReader
 from .models import RecurrenceContext

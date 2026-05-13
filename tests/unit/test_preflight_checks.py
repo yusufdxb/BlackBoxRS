@@ -22,7 +22,6 @@ from blackboxrs.prevention.checks import (
 )
 from blackboxrs.prevention.rules import (
     PreflightCheck,
-    PreventionRule,
     make_rule,
 )
 from blackboxrs.prevention.runner import PreflightRunner
