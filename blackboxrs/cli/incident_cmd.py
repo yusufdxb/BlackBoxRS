@@ -109,6 +109,21 @@ def incident_group() -> None:
     type=click.Path(file_okay=False),
     help=f"Output root (default: {_DEFAULT_INCIDENTS_DIR}).",
 )
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    type=click.Path(exists=False),
+    default=None,
+    help="Path to a YAML configuration file (default: ~/.blackboxrs/config.yaml).",
+)
+@click.option(
+    "--log-dir",
+    "log_dir_override",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Override the log directory the builder reads events from.",
+)
 def incident_build(
     since_spec: str | None,
     start_iso: str | None,
@@ -117,6 +132,8 @@ def incident_build(
     tags: tuple[str, ...],
     title: str | None,
     incidents_dir: str | None,
+    config_path: str | None,
+    log_dir_override: str | None,
 ) -> None:
     """Build an incident bundle from the current log directory."""
     if since_spec and (start_iso or end_iso):
@@ -135,7 +152,13 @@ def incident_build(
         end = datetime.now(timezone.utc)
         start = end - timedelta(minutes=5)
 
-    cfg = BlackBoxConfig.load()
+    cfg = (
+        BlackBoxConfig.load(Path(config_path).expanduser())
+        if config_path
+        else BlackBoxConfig.load()
+    )
+    if log_dir_override:
+        cfg.log_dir = str(Path(log_dir_override).expanduser())
     out_dir = Path(incidents_dir).expanduser() if incidents_dir else None
 
     bundle_path = build_incident(
