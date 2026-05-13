@@ -8,7 +8,6 @@ the inputs) output every time.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Iterable
 
 from .bundle import BundleReader
 from .models import (
@@ -270,7 +269,7 @@ def _render_changes(out: list[str], side) -> None:
         truncated = True
     out.extend(rows)
     if truncated:
-        out.append(f"  _(truncated; full diff in `signatures/diff.json`)_")
+        out.append("  _(truncated; full diff in `signatures/diff.json`)_")
 
 
 def _fingerprint_section(fp: FailureFingerprint | None) -> str:

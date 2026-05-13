@@ -51,7 +51,6 @@ tuned in one place. They are documented and conservative.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Callable, Iterable, Sequence
 
 from .diff import IncidentDiff

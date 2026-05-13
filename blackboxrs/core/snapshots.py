@@ -36,9 +36,7 @@ from blackboxrs.core.schemas import BlackBoxEvent
 # the few functions that need them.
 if TYPE_CHECKING:  # pragma: no cover - type hints only
     from blackboxrs.incident.models import (
-        GPUSnapshot,
         SystemSnapshot,
-        TopicSnapshot,
     )
 
 

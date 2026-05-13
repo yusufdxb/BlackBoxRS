@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Iterable
 
-from blackboxrs.core.config import AnomalyThresholds, DeadTopicConfig
+from blackboxrs.core.config import AnomalyThresholds
 from blackboxrs.core.schemas import BlackBoxEvent
 
 from . import derived as derived_mod
