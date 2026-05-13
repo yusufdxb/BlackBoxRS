@@ -61,16 +61,16 @@ it to a `PreventionRule` with one command. The next launch runs
 
 ## The loop
 
-```
-observe   →   explain   →   replay   →   prevent
-   │             │             │             │
-   ▼             ▼             ▼             ▼
- daemon      incident       bundle is    preflight
- captures    builder        portable;    rule blocks
- events,     produces       another      next launch
- anomalies,  bundle with    engineer     when the
- host +      timeline +     re-renders   precursor
- GPU         fingerprint    the report   reappears
+```mermaid
+graph LR
+    O[observe] --> E[explain]
+    E --> R[replay]
+    R --> P[prevent]
+
+    O --> Od["daemon captures events,<br/>anomalies, host + GPU"]
+    E --> Ed["incident builder produces<br/>bundle with timeline + fingerprint"]
+    R --> Rd["bundle is portable;<br/>another engineer<br/>re-renders the report"]
+    P --> Pd["preflight rule blocks<br/>next launch when the<br/>precursor reappears"]
 ```
 
 `observe` was the v0.3 wedge. `explain → replay → prevent` is what makes
@@ -222,39 +222,55 @@ robot-blackbox incident show examples/incidents/inc_demo_tf_break/
 
 ## Architecture (high-level)
 
-```
-   ┌──────────── BlackBoxRS daemon ───────────┐
-   │ ros_monitor + system_monitor + recording │
-   │            │                             │
-   │            ▼                             │
-   │       core.event_bus  ──►  anomaly_engine│
-   │            │                             │
-   │            ▼                             │
-   │       logging.RotatingJsonlWriter        │
-   └──────────────┬───────────────────────────┘
-                  │
-       ~/.blackboxrs/logs/*.jsonl
-                  │
-                  ▼
-   ┌────── blackboxrs incident build ─────────┐
-   │ IncidentBuilder over the log slice:      │
-   │   events.jsonl  →  triggers              │
-   │                 →  signatures            │
-   │                 →  snapshots (M3.5)      │
-   │                 →  timeline              │
-   │                 →  fingerprint           │
-   │                 →  likely-cause          │
-   │                 →  report.md             │
-   └──────────────┬───────────────────────────┘
-                  │
-   ~/.blackboxrs/incidents/inc_<id>/
-                  │
-                  ▼
-   ┌────── blackboxrs preflight ──────────────┐
-   │ Loaded PreventionRules (YAML) →          │
-   │   topic_present / qos_match / node_*     │
-   │ → PreflightReport: pass / warn / block   │
-   └──────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Daemon["BlackBoxRS daemon"]
+        Monitors["ros_monitor + system_monitor + recording"]
+        EventBus["core.event_bus"]
+        Anomaly["anomaly_engine"]
+        Writer["logging.RotatingJsonlWriter"]
+        Monitors --> EventBus
+        EventBus --> Anomaly
+        EventBus --> Writer
+    end
+
+    Logs["~/.blackboxrs/logs/*.jsonl"]
+    Writer --> Logs
+
+    subgraph Build["blackboxrs incident build"]
+        Builder["IncidentBuilder over the log slice"]
+        Events["events.jsonl"]
+        Triggers["triggers"]
+        Signatures["signatures"]
+        Snapshots["snapshots (M3.5)"]
+        Timeline["timeline"]
+        Fingerprint["fingerprint"]
+        Cause["likely-cause"]
+        Report["report.md"]
+        Builder --> Events
+        Events --> Triggers
+        Events --> Signatures
+        Events --> Snapshots
+        Events --> Timeline
+        Events --> Fingerprint
+        Events --> Cause
+        Events --> Report
+    end
+
+    Logs --> Builder
+
+    IncidentDir["~/.blackboxrs/incidents/inc_(id)/"]
+    Report --> IncidentDir
+
+    subgraph Preflight["blackboxrs preflight"]
+        Rules["Loaded PreventionRules (YAML)"]
+        Checks["topic_present / qos_match / node_*"]
+        PReport["PreflightReport: pass / warn / block"]
+        Rules --> Checks
+        Checks --> PReport
+    end
+
+    IncidentDir --> Rules
 ```
 
 Full design is in `ARCHITECTURE_PIVOT.md`. The pivot rationale and
