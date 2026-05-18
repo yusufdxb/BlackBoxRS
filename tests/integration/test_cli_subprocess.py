@@ -23,6 +23,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,33 @@ def _write_test_config(dest: Path, log_dir: Path) -> None:
                 cpu_percent: 200.0
                 memory_percent: 200.0
                 gpu_temp_c: 200.0
+            """
+        )
+    )
+
+
+def _write_observer_config(dest: Path, log_dir: Path, observed_host: str) -> None:
+    """Observer-mode config. ROS disabled because there's no live graph
+    in this subprocess test, and system_monitor is auto-disabled by
+    ``apply_runtime_role`` anyway. We exercise the role plumbing, the
+    startup log line, and the bundle metadata path — not live capture."""
+    dest.write_text(
+        textwrap.dedent(
+            f"""\
+            log_dir: "{log_dir}"
+            log_rotation_mb: 50
+            log_max_files: 5
+            event_bus_queue_maxsize: 256
+
+            runtime:
+              role: observer
+              observed_host: {observed_host}
+
+            ros_monitor:
+              enabled: false
+
+            anomaly_engine:
+              enabled: true
             """
         )
     )
@@ -494,3 +522,204 @@ class TestCliRefusesStalePidfile:
         finally:
             _run_cli(["stop"], env=env, timeout=10.0)
             _wait_for(lambda: not pid_file.exists(), timeout=10.0)
+
+
+# ---------------------------------------------------------------------------
+# Observer-mode lifecycle — runtime.role: observer, end-to-end
+# ---------------------------------------------------------------------------
+
+
+class TestCliObserverLifecycle:
+    """The observer-mode pivot promises that a workstation can run the
+    daemon and produce a bundle that names both the observer and the
+    observed robot. These tests exercise that path against real
+    subprocess invocations of the CLI so the unit-test seam
+    (`build_incident` on a JSONL fixture) is not the only thing in CI
+    proving observer mode."""
+
+    _OBSERVED = "go2-edu-01"
+
+    def _seed_dead_topic_jsonl(self, log_dir: Path) -> None:
+        """Write a tiny synthetic anomaly stream the observer-mode
+        builder can chew on. Mirrors what an off-board daemon would
+        capture from a robot whose /scan went silent."""
+        start = datetime(2026, 5, 17, 14, 22, 0, tzinfo=timezone.utc)
+        events = [
+            {
+                "timestamp": (start + timedelta(seconds=i))
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "source": "ros_monitor",
+                "event_type": "ros.frequency",
+                "severity": "info",
+                "data": {"topic": "/scan", "frequency_hz": 10.0,
+                         "interval_ms": 100.0},
+                "metadata": {"session_id": "obs_cli", "role": "observer",
+                             "observed_host": self._OBSERVED},
+            }
+            for i in range(4)
+        ]
+        events.append({
+            "timestamp": (start + timedelta(seconds=8))
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "source": "anomaly_engine",
+            "event_type": "anomaly.dead_topic",
+            "severity": "error",
+            "data": {
+                "detector": "DeadTopicDetector",
+                "topic": "/scan", "metric": "/scan",
+                "value": 0.0, "threshold": 5.0,
+                "message": "Topic /scan silent for 5.0 s (timeout exceeded).",
+            },
+            "metadata": {
+                "session_id": "obs_cli",
+                "role": "observer",
+                "observed_host": self._OBSERVED,
+                "detector_class": (
+                    "blackboxrs.anomaly_engine.detectors.dead_topic."
+                    "DeadTopicDetector"
+                ),
+                "signature_fields": ["topic"],
+                "target_subsystem": "ros",
+            },
+        })
+        log_file = log_dir / "blackboxrs_20260517_142200_000000.jsonl"
+        with open(log_file, "w", encoding="utf-8") as fh:
+            for ev in events:
+                fh.write(json.dumps(ev))
+                fh.write("\n")
+
+    def test_start_foreground_announces_observer_mode_in_stderr(
+        self, tmp_path: Path
+    ):
+        home = tmp_path / "home"
+        home.mkdir()
+        blackbox_dir = home / ".blackboxrs"
+        log_dir = blackbox_dir / "logs"
+        blackbox_dir.mkdir()
+        log_dir.mkdir()
+
+        config_path = tmp_path / "config.yaml"
+        _write_observer_config(config_path, log_dir, self._OBSERVED)
+
+        env = os.environ.copy()
+        env["HOME"] = str(home)
+        env.setdefault(
+            "PYTHONUSERBASE",
+            os.path.join(os.path.expanduser("~"), ".local"),
+        )
+
+        cmd = [
+            sys.executable, "-m", "blackboxrs",
+            "start", "--foreground", "--config", str(config_path),
+        ]
+        proc = subprocess.Popen(
+            cmd, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        pid_file = blackbox_dir / "blackboxrs.pid"
+        try:
+            assert _wait_for(
+                lambda: pid_file.is_file() and pid_file.stat().st_size > 0,
+                timeout=5.0,
+            ), "pidfile did not appear within 5s"
+        finally:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                stdout_bytes, stderr_bytes = proc.communicate(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout_bytes, stderr_bytes = proc.communicate(timeout=5.0)
+                pytest.fail(
+                    "observer-mode daemon did not exit within 10s of SIGTERM"
+                )
+
+        combined = (
+            stdout_bytes.decode(errors="replace")
+            + stderr_bytes.decode(errors="replace")
+        )
+        # The startup banner must announce observer mode and the
+        # observed_host. Emitted by format_banner when
+        # config.runtime.is_observer is True.
+        assert "observer mode" in combined, (
+            f"observer-mode startup line missing; got:\n{combined}"
+        )
+        assert self._OBSERVED in combined, (
+            f"observed_host {self._OBSERVED!r} missing from startup banner; "
+            f"got:\n{combined}"
+        )
+        assert proc.returncode == 0, (
+            f"observer-mode daemon exited with returncode={proc.returncode}; "
+            f"combined={combined}"
+        )
+        assert not pid_file.exists(), (
+            "pidfile was not cleaned up on shutdown"
+        )
+
+    def test_incident_build_in_observer_mode_emits_observer_and_observed(
+        self, tmp_path: Path
+    ):
+        home = tmp_path / "home"
+        home.mkdir()
+        blackbox_dir = home / ".blackboxrs"
+        log_dir = blackbox_dir / "logs"
+        incidents_dir = blackbox_dir / "incidents"
+        blackbox_dir.mkdir()
+        log_dir.mkdir()
+        incidents_dir.mkdir()
+
+        config_path = tmp_path / "config.yaml"
+        _write_observer_config(config_path, log_dir, self._OBSERVED)
+        self._seed_dead_topic_jsonl(log_dir)
+
+        env = os.environ.copy()
+        env["HOME"] = str(home)
+        env.setdefault(
+            "PYTHONUSERBASE",
+            os.path.join(os.path.expanduser("~"), ".local"),
+        )
+
+        result = _run_cli(
+            [
+                "incident", "build",
+                "--config", str(config_path),
+                "--log-dir", str(log_dir),
+                "--incidents-dir", str(incidents_dir),
+                "--start", "2026-05-17T14:22:00+00:00",
+                "--end", "2026-05-17T14:22:20+00:00",
+                "--title", "observer cli smoke",
+            ],
+            env=env,
+        )
+        assert result.returncode == 0, (
+            f"incident build failed in observer mode:\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+
+        bundles = list(incidents_dir.glob("inc_*"))
+        assert len(bundles) == 1, (
+            f"expected exactly one bundle, got {bundles}"
+        )
+        bundle = bundles[0]
+
+        incident_obj = json.loads(
+            (bundle / "incident.json").read_text(encoding="utf-8")
+        )
+        assert incident_obj["observed_host"] == self._OBSERVED
+        assert incident_obj["observer_host"], (
+            "observer_host should be populated in observer-mode bundle"
+        )
+
+        report = (bundle / "report.md").read_text(encoding="utf-8")
+        assert "- **Observer**:" in report
+        assert f"`{self._OBSERVED}`" in report
+        # The old single-line Host: header must not co-exist with the
+        # two-line Observer/Observed header.
+        assert "- **Host**:" not in report

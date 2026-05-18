@@ -1,0 +1,20 @@
+{
+  "hash": "7e3844a710c94cba6949762ee83cd3ba46f2d3052917da304d2420178082e00c",
+  "payload": {
+    "blackboxrs_version": "0.4.0.dev0",
+    "nvidia_driver": "570.211.01",
+    "os": {
+      "kernel": "6.8.0-111-generic",
+      "name": "Ubuntu",
+      "version": "22.04"
+    },
+    "pip_freeze_sha256": "2060a587836d0bc1a721c9b0d71a043dcad12164430805458787cd7f87c357b1",
+    "python": {
+      "executable": "/usr/bin/python3",
+      "version": "3.10.12"
+    },
+    "ros_distro": "humble",
+    "ros_packages_apt_count": 444
+  },
+  "t": "2026-05-17T23:45:05.490732Z"
+}
