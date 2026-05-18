@@ -51,12 +51,12 @@
   "versions": {
     "baseline_hash": null,
     "changed": [],
-    "current_hash": "0baea6b237b46ea15557e1df500f5b1a02a1037a5115487b49af6b1d85634a7f",
+    "current_hash": "7e3844a710c94cba6949762ee83cd3ba46f2d3052917da304d2420178082e00c",
     "identical": false,
     "only_in_baseline": [],
     "only_in_current": [
       {
-        "after": "0.3.0.dev0",
+        "after": "0.4.0.dev0",
         "before": null,
         "key": "blackboxrs_version"
       },
@@ -81,12 +81,12 @@
         "key": "os.version"
       },
       {
-        "after": "d6493736c41a25eed23c0c7bc30c686ca37b422783c1f608bac7855dfd67b748",
+        "after": "2060a587836d0bc1a721c9b0d71a043dcad12164430805458787cd7f87c357b1",
         "before": null,
         "key": "pip_freeze_sha256"
       },
       {
-        "after": "/home/yusuf/Projects/BlackBoxRS/.venv/bin/python",
+        "after": "/usr/bin/python3",
         "before": null,
         "key": "python.executable"
       },
@@ -101,7 +101,7 @@
         "key": "ros_distro"
       },
       {
-        "after": 439,
+        "after": 444,
         "before": null,
         "key": "ros_packages_apt_count"
       }

@@ -1,6 +1,6 @@
 {
-  "bundle_path": "/tmp/bbrs_sample_7qj1f5wy/incidents/inc_2026-05-07T14-22-00_04ca9c43",
-  "created_at": "2026-05-08T20:13:20.431324Z",
+  "bundle_path": "/tmp/bbrs_sample_d0_ebav6/incidents/inc_2026-05-07T14-22-00_04ca9c43",
+  "created_at": "2026-05-17T23:44:32.674887Z",
   "fingerprint": {
     "algorithm_version": "v1",
     "cluster_id": null,
@@ -86,6 +86,8 @@
   ],
   "linked_prevention_rules": [],
   "notes": "Synthetic demo bundle. See DEMO_PLAN.md scenario S1.",
+  "observed_host": null,
+  "observer_host": null,
   "schema_version": "1.0",
   "session_id": "demo_tf_break",
   "sessions": [],

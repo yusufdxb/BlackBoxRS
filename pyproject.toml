@@ -4,15 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blackboxrs"
-version = "0.3.0"
-description = "Flight recorder for ROS 2 robots"
+version = "0.4.0.dev0"
+description = "Incident intelligence and prevention for ROS 2 robots."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
     { name = "Yusuf Guenena", email = "yusuf.a.guenena@gmail.com" },
 ]
-keywords = ["ros2", "robotics", "monitoring", "observability", "telemetry"]
+keywords = [
+    "ros2",
+    "robotics",
+    "incident-response",
+    "observability",
+    "postmortem",
+    "preflight",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
