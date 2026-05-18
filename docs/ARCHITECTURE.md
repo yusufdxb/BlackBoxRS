@@ -2,12 +2,24 @@
 
 ## System Overview
 
-BlackBoxRS is a single-host observability daemon for ROS 2 robots. It
-passively observes a running ROS 2 graph, collects system telemetry,
+BlackBoxRS is a single-process observability daemon for ROS 2 robots.
+It passively observes a running ROS 2 graph, collects system telemetry,
 runs a small set of built-in anomaly detectors, and streams every event
 into a structured JSONL log on disk. There is no out-of-process queue,
 no message broker, no remote storage — everything runs in one Python
 process and writes to local files.
+
+The daemon supports two runtime roles (see *Runtime roles* below):
+
+- `onboard` (default) — the daemon runs on the same host as the ROS 2
+  node graph it watches.
+- `observer` — the daemon runs on a separate workstation that reaches
+  the robot's topic graph over DDS. Host-bound collectors and
+  detectors auto-disable; DDS-bound detectors keep running.
+
+The bundle format is identical between the two roles; observer-mode
+bundles carry both `observer_host` and `observed_host` fields so the
+two sides of the capture are never confused.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -217,6 +229,37 @@ unboundedly. Per-queue drop counters are exposed via
 `event_type` is the contract. The full inventory of emitted types is
 in the README.
 
+## Runtime roles
+
+The `runtime` block in `~/.blackboxrs/config.yaml` declares where the
+daemon is running relative to the robot:
+
+```yaml
+runtime:
+  role: onboard            # or: observer
+  observed_host: null      # set to the robot's label when role=observer
+```
+
+Implementation: `BlackBoxConfig.apply_runtime_role()` (in
+`blackboxrs/core/config.py`) is called once from `BlackBoxConfig.load()`
+and again, idempotently, from `BlackBoxDaemon.__init__`. When
+`role == "observer"` it deterministically flips:
+
+| Subsystem | Onboard | Observer |
+|---|---|---|
+| `system_monitor` (CPU / memory / disk / GPU / thermal) | enabled | **disabled** (would describe the observer host) |
+| `anomaly_engine.ProcessSignalsDetector` (per-process `/proc`) | not currently wired (no producer yet); would be skipped in observer mode when re-added | n/a |
+| `frequency`, `dead_topic`, `qos_mismatch` detectors (live today) | enabled | enabled (DDS-bound, valid remotely) |
+| `tf_topology`, `clock_skew` detectors | not currently wired (no producer yet); DDS-bound when re-added | n/a |
+| `Session.observed_host` / `Incident.observed_host` | `None` | populated from config |
+| `Session.role` | `"onboard"` | `"observer"` (surfaces in event metadata) |
+| `Incident.observer_host` | `None` | local hostname |
+| `report.md` header | shows `Host:` | shows `Observer:` + `Observed:` |
+
+The bundle layout, schema version, and serialisation are identical
+across roles — observer-mode bundles are valid input to every existing
+reader.
+
 ## Configuration
 
 YAML config at `~/.blackboxrs/config.yaml`. The schema is the
@@ -227,6 +270,10 @@ log_dir: ~/.blackboxrs/logs
 log_rotation_mb: 50
 log_max_files: 20
 event_bus_queue_maxsize: 1024
+
+runtime:
+  role: onboard           # onboard | observer
+  observed_host: null     # free-form label of the robot when role=observer
 
 ros_monitor:
   enabled: true

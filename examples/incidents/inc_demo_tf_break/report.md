@@ -1,7 +1,7 @@
 # Incident `inc_2026-05-07T14-22-00_04ca9c43`
 
 - **Severity**: error
-- **Created**: 2026-05-08 20:13:20.431324Z
+- **Created**: 2026-05-17 23:44:32.674887Z
 - **Window**: 2026-05-07 14:22:00.000000Z → 2026-05-07 14:22:20.000000Z
 - **Session**: `demo_tf_break`
 - **Host**: `mewtwo`
@@ -86,10 +86,10 @@ Topic /tf_static stopped emitting messages.
 
 **Version signature**
 
-- hash: `0baea6b237b46ea15557e1df500f5b1a02a1037a5115487b49af6b1d85634a7f`
+- hash: `7e3844a710c94cba6949762ee83cd3ba46f2d3052917da304d2420178082e00c`
 - os: `Ubuntu 22.04` (kernel `6.8.0-111-generic`)
 - python: `3.10.12`
-- blackboxrs: `0.3.0.dev0`
+- blackboxrs: `0.4.0.dev0`
 - nvidia driver: `570.211.01`
 
 ## Config / version diff vs prior session

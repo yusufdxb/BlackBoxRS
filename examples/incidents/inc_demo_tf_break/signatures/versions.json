@@ -1,20 +1,20 @@
 {
-  "hash": "0baea6b237b46ea15557e1df500f5b1a02a1037a5115487b49af6b1d85634a7f",
+  "hash": "7e3844a710c94cba6949762ee83cd3ba46f2d3052917da304d2420178082e00c",
   "payload": {
-    "blackboxrs_version": "0.3.0.dev0",
+    "blackboxrs_version": "0.4.0.dev0",
     "nvidia_driver": "570.211.01",
     "os": {
       "kernel": "6.8.0-111-generic",
       "name": "Ubuntu",
       "version": "22.04"
     },
-    "pip_freeze_sha256": "d6493736c41a25eed23c0c7bc30c686ca37b422783c1f608bac7855dfd67b748",
+    "pip_freeze_sha256": "2060a587836d0bc1a721c9b0d71a043dcad12164430805458787cd7f87c357b1",
     "python": {
-      "executable": "/home/yusuf/Projects/BlackBoxRS/.venv/bin/python",
+      "executable": "/usr/bin/python3",
       "version": "3.10.12"
     },
     "ros_distro": "humble",
-    "ros_packages_apt_count": 439
+    "ros_packages_apt_count": 444
   },
-  "t": "2026-05-08T20:13:20.430741Z"
+  "t": "2026-05-17T23:44:32.674277Z"
 }
