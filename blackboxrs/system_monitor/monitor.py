@@ -66,10 +66,14 @@ class SystemMonitor:
     def _init_collectors(self) -> list[tuple[str, Any]]:
         """Initialize all available collectors.
 
-        Returns:
-            A list of ``(name, collector_instance)`` tuples.  The GPU
-            collector is only included when a backend is detected.
+        Returns an empty list when the monitor is disabled (typical in
+        observer mode, where the collectors would describe the
+        observer host instead of the robot) so we don't import psutil
+        or probe GPU backends only to throw the results away.
         """
+        if not getattr(self._config, "enabled", True):
+            return []
+
         collectors: list[tuple[str, Any]] = [
             ("cpu", CpuCollector()),
             ("memory", MemoryCollector()),
