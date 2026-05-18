@@ -105,7 +105,16 @@ class ClockSkewConfig:
 
 @dataclass
 class AnomalyEngineConfig:
-    """Settings for the anomaly detection engine."""
+    """Settings for the anomaly detection engine.
+
+    ``observer_mode`` is normally derived from the top-level
+    :class:`RuntimeConfig` by :meth:`BlackBoxConfig.apply_runtime_role`
+    just after loading. When True, detectors that read the local host
+    (process_signals, threshold over host cpu/mem) are skipped because
+    their numbers describe the observer workstation, not the robot.
+    DDS-bound detectors (frequency, dead_topic, qos_mismatch,
+    tf_topology, clock_skew) keep running.
+    """
 
     enabled: bool = True
     thresholds: AnomalyThresholds = field(default_factory=AnomalyThresholds)
@@ -117,6 +126,42 @@ class AnomalyEngineConfig:
     )
     clock_skew: ClockSkewConfig = field(default_factory=ClockSkewConfig)
     custom_detectors: list[dict] = field(default_factory=list)
+    observer_mode: bool = False
+
+
+@dataclass
+class RuntimeConfig:
+    """Where BlackBoxRS is running relative to the robot.
+
+    - ``role="onboard"`` (default): colocated with the ROS 2 node graph
+      it is watching (e.g. on the robot's Jetson, or on a single-host
+      bringup machine). All collectors and detectors are meaningful
+      because the local host *is* the robot.
+    - ``role="observer"``: BlackBoxRS runs on a separate workstation
+      that reaches the robot's topic graph over DDS. Host-bound
+      collectors (CPU, memory, disk, per-process CPU/RSS) describe the
+      observer, not the robot, so they are skipped by default.
+      DDS-bound detectors continue to run.
+
+    ``observed_host`` is a free-form label for the robot/host being
+    watched (e.g. ``"go2-edu-01"``). It is recorded in session
+    metadata and in every incident bundle so a report can say
+    "captured by *observer* watching *observed_host*" instead of
+    pretending the observer's hostname is the robot's.
+    """
+
+    role: str = "onboard"
+    observed_host: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.role not in ("onboard", "observer"):
+            raise ConfigError(
+                f"runtime.role must be 'onboard' or 'observer', got {self.role!r}"
+            )
+
+    @property
+    def is_observer(self) -> bool:
+        return self.role == "observer"
 
 
 @dataclass
@@ -179,6 +224,7 @@ class BlackBoxConfig:
     log_max_files: int = 20
     log_max_age_hours: float = 0
     event_bus_queue_maxsize: int = 1024
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     ros_monitor: RosMonitorConfig = field(default_factory=RosMonitorConfig)
     system_monitor: SystemMonitorConfig = field(default_factory=SystemMonitorConfig)
     anomaly_engine: AnomalyEngineConfig = field(default_factory=AnomalyEngineConfig)
@@ -195,6 +241,29 @@ class BlackBoxConfig:
             A new :class:`BlackBoxConfig` with every field at its default.
         """
         return cls()
+
+    # -- Runtime-role policy ------------------------------------------------
+
+    def apply_runtime_role(self) -> BlackBoxConfig:
+        """Apply observer-mode policy implied by ``runtime.role``.
+
+        When the operator declares ``runtime.role: observer`` they are
+        saying "this process is on a workstation, not the robot." We
+        translate that one declaration into the concrete behavioural
+        flips required to keep the bundle honest:
+
+        - ``system_monitor.enabled`` is forced to False (CPU / mem /
+          disk / GPU readings would describe the observer host).
+        - ``anomaly_engine.observer_mode`` is set True so the engine
+          skips the per-process signals detector.
+
+        Onboard mode is a no-op so existing deployments are unaffected.
+        Returns ``self`` so the call can be chained after ``load()``.
+        """
+        if self.runtime.is_observer:
+            self.system_monitor.enabled = False
+            self.anomaly_engine.observer_mode = True
+        return self
 
     @classmethod
     def load(cls, path: Path | None = None, *, strict: bool = False) -> BlackBoxConfig:
@@ -225,7 +294,8 @@ class BlackBoxConfig:
         with open(path, "r", encoding="utf-8") as fh:
             raw: dict[str, Any] = yaml.safe_load(fh) or {}
 
-        return _dict_to_config(raw, strict=strict, source=str(path))
+        cfg = _dict_to_config(raw, strict=strict, source=str(path))
+        return cfg.apply_runtime_role()
 
     # -- Persistence --------------------------------------------------------
 
@@ -253,6 +323,7 @@ class BlackBoxConfig:
 # ---------------------------------------------------------------------------
 
 _NESTED_MAP: dict[str, type] = {
+    "runtime": RuntimeConfig,
     "ros_monitor": RosMonitorConfig,
     "system_monitor": SystemMonitorConfig,
     "anomaly_engine": AnomalyEngineConfig,

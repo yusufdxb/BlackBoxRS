@@ -256,6 +256,18 @@ class IncidentBuilder:
         )
         top = causes[0] if causes else None
 
+        # Observer mode plumbing: when the daemon was observing a remote
+        # robot, `host` (= socket.gethostname()) is the observer, not
+        # the robot. We carry both labels on the bundle so the report
+        # and any tooling can avoid mislabeling the source.
+        runtime = self._config.runtime
+        if runtime.is_observer:
+            observer_host: str | None = host
+            observed_host: str | None = runtime.observed_host
+        else:
+            observer_host = None
+            observed_host = None
+
         incident = Incident(
             incident_id=incident_id,
             created_at=datetime.now(timezone.utc),
@@ -263,6 +275,8 @@ class IncidentBuilder:
             window_end=window_end,
             session_id=sid,
             host=host,
+            observer_host=observer_host,
+            observed_host=observed_host,
             severity=severity,  # type: ignore[arg-type]
             title=title or _default_title(triggers),
             summary=_summary_line(top, triggers),

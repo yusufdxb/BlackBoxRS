@@ -42,7 +42,15 @@ def _header(incident: Incident) -> str:
         ),
         f"- **Session**: `{incident.session_id}`",
     ]
-    if incident.host:
+    if incident.observed_host or incident.observer_host:
+        # Remote-observer bundles: name who captured vs. who the bundle
+        # is about, so the observer's hostname isn't mistaken for the
+        # robot's.
+        observer = incident.observer_host or incident.host or "<unknown>"
+        observed = incident.observed_host or "<unspecified>"
+        parts.append(f"- **Observer**: `{observer}`")
+        parts.append(f"- **Observed**: `{observed}`")
+    elif incident.host:
         parts.append(f"- **Host**: `{incident.host}`")
     if incident.tags:
         parts.append(f"- **Tags**: {', '.join(incident.tags)}")

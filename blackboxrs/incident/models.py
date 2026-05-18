@@ -313,6 +313,13 @@ class Incident(BaseModel):
     window_end: datetime
     session_id: str
     host: str | None = None
+    # In onboard mode `host` is the robot; both observer_host and
+    # observed_host are None. In observer mode `host` mirrors
+    # observer_host for backwards compatibility (older readers fall back
+    # to it), while observed_host carries the operator-supplied label
+    # for the robot the bundle is *about*.
+    observer_host: str | None = None
+    observed_host: str | None = None
     severity: Severity = "warning"
     title: str = Field(..., max_length=200)
     summary: str = ""

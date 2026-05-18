@@ -152,9 +152,25 @@ def format_banner(session_id: str, config: BlackBoxConfig) -> str:
     """
     lines: list[str] = []
     lines.append(click.style(_BANNER_ART, fg="cyan", bold=True))
-    lines.append(click.style("  Flight recorder for ROS 2 robots", fg="bright_black"))
+    lines.append(
+        click.style(
+            "  Incident intelligence and prevention for ROS 2 robots",
+            fg="bright_black",
+        )
+    )
     lines.append("")
     lines.append(f"  Session:    {click.style(session_id, fg='bright_cyan', bold=True)}")
+
+    if config.runtime.is_observer:
+        observed = config.runtime.observed_host or "<unspecified>"
+        lines.append(
+            f"  Mode:       {click.style('observer mode', fg='magenta', bold=True)}"
+            f"  (observed_host={click.style(observed, fg='bright_magenta')})"
+        )
+    else:
+        lines.append(
+            f"  Mode:       {click.style('onboard', fg='green', bold=True)}"
+        )
 
     components: list[str] = []
     if config.ros_monitor.enabled:
