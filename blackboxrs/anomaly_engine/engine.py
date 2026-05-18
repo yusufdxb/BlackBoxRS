@@ -18,14 +18,19 @@ from blackboxrs.core.session import Session
 
 from .detectors import (
     BaseDetector,
-    ClockSkewDetector,
     DeadTopicDetector,
     FrequencyDetector,
-    ProcessSignalsDetector,
     QoSMismatchDetector,
-    TfTopologyDetector,
     ThresholdDetector,
 )
+
+# ClockSkewDetector, ProcessSignalsDetector, and TfTopologyDetector are
+# implemented in `.detectors` and individually unit-tested, but are NOT
+# wired into the live engine. They each consume a producer event
+# (`system.clock_skew`, `system.process_signals`, `ros.tf`) that no
+# module in this codebase emits yet. They will be re-added below once
+# the matching collectors land in `system_monitor` / `ros_monitor`.
+# See STATUS_AND_LIMITATIONS_REWRITE.md for tracking.
 
 logger = logging.getLogger(__name__)
 
@@ -73,15 +78,24 @@ class AnomalyEngine:
         Returns:
             A list of ready-to-use detector instances.
         """
+        # Only detectors with live producers in this codebase are wired
+        # in. See the comment at the top of the file for the three that
+        # are intentionally absent until their producers ship.
         detectors: list[BaseDetector] = [
             ThresholdDetector(self._config.thresholds),
             FrequencyDetector(self._config.frequency),
             QoSMismatchDetector(),
             DeadTopicDetector(self._config.dead_topic),
-            TfTopologyDetector(self._config.tf_topology),
-            ProcessSignalsDetector(self._config.process_signals),
-            ClockSkewDetector(self._config.clock_skew),
         ]
+        if getattr(self._config, "observer_mode", False):
+            # Once host-bound detectors (process_signals, host-cpu
+            # threshold) are wired back in, this is where they would
+            # be skipped. Today's wired set is DDS-bound only, so the
+            # observer-mode branch is a no-op log line.
+            logger.info(
+                "anomaly_engine: observer_mode active "
+                "(no host-bound detectors are currently wired)."
+            )
         if self._config.custom_detectors:
             from .detectors.loader import load_custom_detectors
 
