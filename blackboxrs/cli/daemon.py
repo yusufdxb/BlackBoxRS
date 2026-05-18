@@ -132,8 +132,21 @@ class BlackBoxDaemon:
     _PID_FILE = _PID_DIR / "blackboxrs.pid"
 
     def __init__(self, config: BlackBoxConfig) -> None:
-        self._config = config
-        self._session = Session()
+        # Idempotent: applying the runtime-role policy a second time is a
+        # no-op, so this protects callers who construct a daemon from a
+        # raw `BlackBoxConfig()` without going through `load()`.
+        self._config = config.apply_runtime_role()
+        self._session = Session(
+            observed_host=self._config.runtime.observed_host,
+            role=self._config.runtime.role,
+        )
+        if self._config.runtime.is_observer:
+            logger.info(
+                "BlackBoxRS observer mode: observer=%s observed=%s "
+                "(host-bound collectors and ProcessSignalsDetector disabled).",
+                self._session.hostname,
+                self._config.runtime.observed_host or "<unspecified>",
+            )
         self._event_bus = EventBus(default_queue_maxsize=config.event_bus_queue_maxsize)
         self._components: list[_Component] = []
         self._running = False
