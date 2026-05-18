@@ -1,0 +1,110 @@
+{
+  "config": {
+    "baseline_hash": null,
+    "changed": [],
+    "current_hash": "51d82a6394b7e27053ebd56e7e29c7c4a0305dd45c7d300de8db975b96c0be37",
+    "identical": false,
+    "only_in_baseline": [],
+    "only_in_current": [
+      {
+        "after": [],
+        "before": null,
+        "key": "attached_files"
+      },
+      {
+        "after": null,
+        "before": null,
+        "key": "blackboxrs_config_yaml_sha256"
+      },
+      {
+        "after": "humble",
+        "before": null,
+        "key": "env_subset.ROS_DISTRO"
+      },
+      {
+        "after": "0",
+        "before": null,
+        "key": "env_subset.ROS_LOCALHOST_ONLY"
+      },
+      {
+        "after": "2",
+        "before": null,
+        "key": "env_subset.ROS_VERSION"
+      },
+      {
+        "after": null,
+        "before": null,
+        "key": "rmw_implementation"
+      },
+      {
+        "after": "humble",
+        "before": null,
+        "key": "ros_distro"
+      },
+      {
+        "after": null,
+        "before": null,
+        "key": "ros_domain_id"
+      }
+    ]
+  },
+  "versions": {
+    "baseline_hash": null,
+    "changed": [],
+    "current_hash": "7e3844a710c94cba6949762ee83cd3ba46f2d3052917da304d2420178082e00c",
+    "identical": false,
+    "only_in_baseline": [],
+    "only_in_current": [
+      {
+        "after": "0.4.0.dev0",
+        "before": null,
+        "key": "blackboxrs_version"
+      },
+      {
+        "after": "570.211.01",
+        "before": null,
+        "key": "nvidia_driver"
+      },
+      {
+        "after": "6.8.0-111-generic",
+        "before": null,
+        "key": "os.kernel"
+      },
+      {
+        "after": "Ubuntu",
+        "before": null,
+        "key": "os.name"
+      },
+      {
+        "after": "22.04",
+        "before": null,
+        "key": "os.version"
+      },
+      {
+        "after": "2060a587836d0bc1a721c9b0d71a043dcad12164430805458787cd7f87c357b1",
+        "before": null,
+        "key": "pip_freeze_sha256"
+      },
+      {
+        "after": "/usr/bin/python3",
+        "before": null,
+        "key": "python.executable"
+      },
+      {
+        "after": "3.10.12",
+        "before": null,
+        "key": "python.version"
+      },
+      {
+        "after": "humble",
+        "before": null,
+        "key": "ros_distro"
+      },
+      {
+        "after": 444,
+        "before": null,
+        "key": "ros_packages_apt_count"
+      }
+    ]
+  }
+}

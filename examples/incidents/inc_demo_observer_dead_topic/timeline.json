@@ -1,0 +1,199 @@
+[
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 10.0,
+      "interval_ms": 100.0,
+      "topic": "/scan"
+    },
+    "evidence_ref": "events.jsonl#L1",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /scan: 10.0 Hz",
+    "t": "2026-05-17T14:22:00Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 10.0,
+      "interval_ms": 100.0,
+      "topic": "/scan"
+    },
+    "evidence_ref": "events.jsonl#L2",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /scan: 10.0 Hz",
+    "t": "2026-05-17T14:22:01Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "msg_type": "sensor_msgs/msg/LaserScan",
+      "publisher_count": 1,
+      "publisher_qos_profiles": [
+        {
+          "durability": "VOLATILE",
+          "reliability": "BEST_EFFORT"
+        }
+      ],
+      "subscriber_count": 1,
+      "subscriber_qos_profiles": [
+        {
+          "durability": "VOLATILE",
+          "reliability": "BEST_EFFORT"
+        }
+      ],
+      "topic": "/scan"
+    },
+    "evidence_ref": "events.jsonl#L7",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "ros.qos",
+    "t": "2026-05-17T14:22:01Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 0.85,
+    "correlated_event_refs": [
+      "snapshots.json#0",
+      "snapshots.json#1"
+    ],
+    "data": {
+      "delta": "pub_count_changed",
+      "from": 0,
+      "to": 1,
+      "topic": "/scan"
+    },
+    "evidence_ref": "snapshots.json#1",
+    "kind": "derived",
+    "subsystem": "ros",
+    "summary": "publisher count changed on /scan: 0 -> 1",
+    "t": "2026-05-17T14:22:01Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 10.0,
+      "interval_ms": 100.0,
+      "topic": "/scan"
+    },
+    "evidence_ref": "events.jsonl#L3",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /scan: 10.0 Hz",
+    "t": "2026-05-17T14:22:02Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 10.0,
+      "interval_ms": 100.0,
+      "topic": "/scan"
+    },
+    "evidence_ref": "events.jsonl#L4",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /scan: 10.0 Hz",
+    "t": "2026-05-17T14:22:03Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 10.0,
+      "interval_ms": 100.0,
+      "topic": "/scan"
+    },
+    "evidence_ref": "events.jsonl#L5",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /scan: 10.0 Hz",
+    "t": "2026-05-17T14:22:04Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "frequency_hz": 10.0,
+      "interval_ms": 100.0,
+      "topic": "/scan"
+    },
+    "evidence_ref": "events.jsonl#L6",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "frequency on /scan: 10.0 Hz",
+    "t": "2026-05-17T14:22:05Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "msg_type": "sensor_msgs/msg/LaserScan",
+      "publisher_count": 0,
+      "publisher_qos_profiles": [],
+      "subscriber_count": 1,
+      "subscriber_qos_profiles": [
+        {
+          "durability": "VOLATILE",
+          "reliability": "BEST_EFFORT"
+        }
+      ],
+      "topic": "/scan"
+    },
+    "evidence_ref": "events.jsonl#L8",
+    "kind": "raw",
+    "subsystem": "ros",
+    "summary": "ros.qos",
+    "t": "2026-05-17T14:22:06Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 0.85,
+    "correlated_event_refs": [
+      "snapshots.json#5",
+      "snapshots.json#6"
+    ],
+    "data": {
+      "delta": "pub_count_changed",
+      "from": 1,
+      "to": 0,
+      "topic": "/scan"
+    },
+    "evidence_ref": "snapshots.json#6",
+    "kind": "derived",
+    "subsystem": "ros",
+    "summary": "publisher count changed on /scan: 1 -> 0",
+    "t": "2026-05-17T14:22:06Z"
+  },
+  {
+    "causality_hint": null,
+    "confidence": 1.0,
+    "correlated_event_refs": [],
+    "data": {
+      "detector": "DeadTopicDetector",
+      "message": "Topic /scan silent for 5.0 s (timeout exceeded).",
+      "metric": "/scan",
+      "threshold": 5.0,
+      "topic": "/scan",
+      "value": 0.0
+    },
+    "evidence_ref": "triggers.json#trg_1b0c2dbc",
+    "kind": "trigger",
+    "subsystem": "anomaly",
+    "summary": "anomaly: anomaly.dead_topic: Topic /scan silent for 5.0 s (timeout exceeded).",
+    "t": "2026-05-17T14:22:11Z"
+  }
+]

@@ -1,0 +1,354 @@
+[
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:00Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": null,
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:01Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 1,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:02Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 1,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:03Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 1,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:04Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 1,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:05Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 1,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:06Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:07Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:08Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:09Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:10Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:11Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:12Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:13Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:14Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-17T14:22:15Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.0,
+        "msg_type": "sensor_msgs/msg/LaserScan",
+        "name": "/scan",
+        "pub_count": 0,
+        "qos_summary": "best_effort/volatile",
+        "sub_count": 1
+      }
+    ]
+  }
+]

@@ -414,6 +414,16 @@ log_max_files: 20
 # bus.  Full queues drop events instead of back-pressuring producers.
 event_bus_queue_maxsize: 1024
 
+# Where this daemon runs relative to the robot.
+#   role: onboard   (default) — colocated with the ROS 2 node graph.
+#   role: observer  — running on a workstation, capturing the robot's
+#                    DDS traffic remotely. Set observed_host to a
+#                    free-form label for the robot you're watching;
+#                    see docs/QUICKSTART_REMOTE.md.
+runtime:
+  role: onboard
+  observed_host: null
+
 ros_monitor:
   enabled: true
   poll_interval_sec: 1.0
@@ -449,6 +459,9 @@ rosbag2:
     - "anomaly.frequency"
     - "anomaly.dead_topic"
     - "anomaly.qos_mismatch"
+    - "anomaly.tf_topology"
+    - "anomaly.process_signals"
+    - "anomaly.clock_skew"
   topics: []
 """
 

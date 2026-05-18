@@ -1,0 +1,24 @@
+[
+  {
+    "data": {
+      "detector": "DeadTopicDetector",
+      "message": "Topic /scan silent for 5.0 s (timeout exceeded).",
+      "metric": "/scan",
+      "threshold": 5.0,
+      "topic": "/scan",
+      "value": 0.0
+    },
+    "detector": "DeadTopicDetector",
+    "detector_class": "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector",
+    "message": "Topic /scan silent for 5.0 s (timeout exceeded).",
+    "severity": "error",
+    "signature_fields": [
+      "topic"
+    ],
+    "source_event_ref": "events.jsonl#L9",
+    "subject": "/scan",
+    "subsystem": "ros",
+    "t": "2026-05-17T14:22:11Z",
+    "trigger_id": "trg_1b0c2dbc"
+  }
+]
