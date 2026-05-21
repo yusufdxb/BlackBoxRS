@@ -147,7 +147,9 @@ class BlackBoxDaemon:
                 self._session.hostname,
                 self._config.runtime.observed_host or "<unspecified>",
             )
-        self._event_bus = EventBus(default_queue_maxsize=config.event_bus_queue_maxsize)
+        self._event_bus = EventBus(
+            default_queue_maxsize=self._config.event_bus_queue_maxsize
+        )
         self._components: list[_Component] = []
         self._running = False
         self._stop_event = Event()

@@ -204,20 +204,22 @@ bundle.
   can already see the robot's topics, auto-disables host-bound
   collectors, and tags each bundle with both `observer_host` and
   `observed_host` so reports name the two sides explicitly.
-- **360 unit tests pass** (run `pytest tests/unit/ -q`). CI exercises
-  Python 3.10 / 3.11 / 3.12 plus a live ROS 2 Humble Docker job on
-  every main commit.
+- **Derived timeline events.** `timeline.json` folds silence-interval,
+  resource-excursion, and graph-delta rows in alongside the raw and
+  trigger rows; the cause ranker scores them as precursors.
+- **Snapshot projection.** `SystemSnapshotter` projects the event
+  stream into a typed `snapshots.json` series used by the derivers and
+  the fingerprint topology signature.
+- **Preflight checks.** `topic_present`, `qos_match`, and
+  `node_running` are real rclpy-coupled graph queries. On a host with
+  no `rclpy` installed they return `skipped` (and say so) rather than
+  failing the launch.
+- **384 tests pass** (363 unit + 21 integration/synthetic; run
+  `pytest -q`). CI exercises Python 3.10 / 3.11 / 3.12 plus a live
+  ROS 2 Humble Docker job on every main commit.
 
 ## What is planned (not yet built)
 
-- Derived timeline events (silence interval, resource excursion, graph
-  delta) and causality annotation. `timeline.json` currently contains
-  raw + trigger rows ordered by timestamp.
-- Snapshot projection (`SystemSnapshotter`). `snapshots.json` is
-  currently empty.
-- Real `topic_present`, `qos_match`, `node_running` preflight checks.
-  v0.4 vertical slice ships stubs that return `skipped`; the full
-  rclpy-coupled checks land in M6 (see `ROADMAP_V0_4.md`).
 - Cross-incident clustering (`cluster_id` reserved on
   `FailureFingerprint`; v0.5).
 - `incident pack` / `unpack` for portable tarballs (M7).
