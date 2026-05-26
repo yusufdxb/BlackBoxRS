@@ -35,6 +35,23 @@ class ConfigError(ValueError):
 
 
 @dataclass
+class TfProducerConfig:
+    """Settings for the TF snapshot producer.
+
+    The producer subscribes to ``/tf`` and ``/tf_static``, maintains a
+    last-seen map per ``(parent, child)`` edge, and emits one
+    ``ros.tf`` snapshot event per tick. ``expected_frames`` is the
+    operator-declared frame set the TF topology detector uses to fire
+    ``orphan_frame`` anomalies; an empty list silently disables
+    orphan-frame detection at the detector side.
+    """
+
+    snapshot_hz: float = 1.0
+    expected_frames: list[str] = field(default_factory=list)
+    gc_age_sec: float = 60.0
+
+
+@dataclass
 class RosMonitorConfig:
     """Settings for the ROS 2 topic/node monitor."""
 
@@ -42,6 +59,7 @@ class RosMonitorConfig:
     poll_interval_sec: float = 1.0
     track_latency: bool = True
     topic_filters: list[str] = field(default_factory=list)
+    tf: TfProducerConfig = field(default_factory=TfProducerConfig)
 
 
 @dataclass
@@ -331,6 +349,10 @@ _NESTED_MAP: dict[str, type] = {
     "prometheus": PrometheusConfig,
 }
 
+_ROS_MONITOR_NESTED_MAP: dict[str, type] = {
+    "tf": TfProducerConfig,
+}
+
 _ANOMALY_NESTED_MAP: dict[str, type] = {
     "thresholds": AnomalyThresholds,
     "frequency": FrequencyConfig,
@@ -439,6 +461,30 @@ def _dict_to_config(
                     else:
                         inner[k] = v
                 kwargs[key] = nested_cls(**inner)
+            elif key == "ros_monitor":
+                ros_valid = {f.name for f in fields(nested_cls)}
+                ros_unknown = [k for k in value if k not in ros_valid]
+                _report_unknown_keys(
+                    ros_unknown,
+                    context="ros_monitor",
+                    strict=strict,
+                    source=source,
+                )
+                inner_ros: dict[str, Any] = {}
+                for k, v in value.items():
+                    if k not in ros_valid:
+                        continue
+                    if k in _ROS_MONITOR_NESTED_MAP and isinstance(v, dict):
+                        inner_ros[k] = _merge_dataclass(
+                            _ROS_MONITOR_NESTED_MAP[k],
+                            v,
+                            context=f"ros_monitor.{k}",
+                            strict=strict,
+                            source=source,
+                        )
+                    else:
+                        inner_ros[k] = v
+                kwargs[key] = nested_cls(**inner_ros)
             else:
                 kwargs[key] = _merge_dataclass(
                     nested_cls,
