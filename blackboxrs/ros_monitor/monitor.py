@@ -24,6 +24,7 @@ from blackboxrs.core.config import RosMonitorConfig
 from blackboxrs.core.session import Session
 from blackboxrs.ros_monitor.frequency_tracker import FrequencyTracker
 from blackboxrs.ros_monitor.introspection import GraphSnapshot, RosIntrospector
+from blackboxrs.ros_monitor.tf_snapshotter import TfSnapshotter
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ class RosMonitor:
         self._subscriptions: dict[str, Any] = {}
         self._poll_timer: Any = None
         self._freq_timer: Any = None
+        self._tf_snapshotter: TfSnapshotter | None = None
         self._running = False
         self._thread: Thread | None = None
         self._lock = threading.Lock()
@@ -145,6 +147,23 @@ class RosMonitor:
             freq_sec, self._emit_frequency_events
         )
 
+        # Start the TF snapshot producer. Failures are non-fatal so a
+        # missing tf2_msgs install or a strange node clock cannot take
+        # the whole ROS monitor offline.
+        try:
+            node_clock = self._node.get_clock()
+            self._tf_snapshotter = TfSnapshotter(
+                node=self._node,
+                event_bus=self._event_bus,
+                ros_config=self._config,
+                clock=lambda: node_clock.now().nanoseconds * 1e-9,
+                session_metadata=self._session.metadata(),
+            )
+            self._tf_snapshotter.start()
+        except Exception:  # noqa: BLE001
+            logger.warning("TF snapshotter failed to start", exc_info=True)
+            self._tf_snapshotter = None
+
         self._running = True
         self._thread = Thread(
             target=self._spin_loop,
@@ -177,6 +196,13 @@ class RosMonitor:
         if self._freq_timer is not None:
             self._freq_timer.cancel()
             self._freq_timer = None
+
+        if self._tf_snapshotter is not None:
+            try:
+                self._tf_snapshotter.stop()
+            except Exception:  # noqa: BLE001
+                logger.debug("TF snapshotter stop failed", exc_info=True)
+            self._tf_snapshotter = None
 
         with self._lock:
             self._subscriptions.clear()
