@@ -22,6 +22,7 @@ from blackboxrs.system_monitor.collectors.cpu import CpuCollector
 from blackboxrs.system_monitor.collectors.disk import DiskCollector
 from blackboxrs.system_monitor.collectors.gpu import GpuCollector
 from blackboxrs.system_monitor.collectors.memory import MemoryCollector
+from blackboxrs.system_monitor.collectors.process import ProcessSignalsCollector
 from blackboxrs.system_monitor.collectors.thermal import ThermalCollector
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ class SystemMonitor:
         self._session = session
         self._collectors: list[tuple[str, Any]] = self._init_collectors()
         self._clock_collector: ClockSkewCollector | None = self._init_clock_collector()
+        self._process_collector: ProcessSignalsCollector | None = (
+            self._init_process_signals_collector()
+        )
         self._running = False
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -129,6 +133,51 @@ class SystemMonitor:
         logger.info("ClockSkewCollector: initialised (budget=%.1f ms)", budget_sec * 1000)
         return collector
 
+    def _init_process_signals_collector(self) -> ProcessSignalsCollector | None:
+        """Initialise the per-process CPU/RSS producer if configured.
+
+        The producer is kept separate from the regular ``(name, collector)``
+        list because it publishes directly to the event bus (its event shape
+        is detector-specific) rather than returning a plain dict for the
+        generic ``system.<name>`` wrapper.
+
+        In observer mode the producer auto-disables and logs one INFO line.
+        psutil reports the observer workstation's processes, not the robot's.
+        The producer itself handles the observer-mode check; we only pass
+        ``is_observer`` so it can log the right message at startup.
+
+        The host-level collectors (cpu, memory, disk, etc.) are already
+        gated off by ``system_monitor.enabled=False`` when observer mode is
+        active (set by :meth:`BlackBoxConfig.apply_runtime_role`).  The
+        process-signals producer follows the same pattern: if
+        ``system_monitor.enabled`` is False we return ``None`` immediately
+        without even constructing a collector, which is consistent with the
+        existing host-bound collector behavior.
+        """
+        # If the whole system monitor is disabled (observer mode sets this),
+        # skip the producer — same pattern as the host CPU/mem collectors.
+        if not getattr(self._config, "enabled", True):
+            return None
+
+        ps_cfg = getattr(self._config, "process_signals", None)
+        if ps_cfg is None or not getattr(ps_cfg, "enabled", True):
+            logger.info("ProcessSignalsCollector: disabled by configuration")
+            return None
+
+        # Detect observer mode from session metadata: the session embeds
+        # role="observer" when RuntimeConfig.role=="observer".
+        is_observer = self._session.metadata().get("role") == "observer"
+
+        collector = ProcessSignalsCollector(
+            config=ps_cfg,
+            event_bus=self._event_bus,
+            session_meta=self._session.metadata(),
+            is_observer=is_observer,
+        )
+        if not is_observer:
+            logger.info("ProcessSignalsCollector: initialised")
+        return collector
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -176,6 +225,9 @@ class SystemMonitor:
 
         if self._clock_collector is not None:
             self._clock_collector.close()
+
+        if self._process_collector is not None:
+            self._process_collector.close()
 
         logger.info("System monitor stopped")
 
@@ -252,6 +304,8 @@ class SystemMonitor:
                     self._event_bus.publish(event)
                 if self._clock_collector is not None:
                     self._clock_collector.tick()
+                if self._process_collector is not None:
+                    self._process_collector.tick()
             except Exception:
                 logger.exception("Unhandled error in monitor run loop")
 

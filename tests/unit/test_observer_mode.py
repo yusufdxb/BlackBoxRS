@@ -161,16 +161,29 @@ class TestSession:
 
 
 class TestAnomalyEngineObserverMode:
-    """Engine detector list is the same in onboard and observer mode today.
+    """Engine detector list in onboard and observer mode.
 
-    The three detectors whose live wiring observer-mode would have to
-    *skip* (process_signals, host-cpu threshold variants, etc.) are not
-    yet wired in either mode — they will be added back when producers
-    ship in system_monitor / ros_monitor. Once they are, observer-mode
-    must skip them; the test here will grow at that point.
+    All 7 detectors are now wired. ProcessSignalsCollector
+    (ProcessSignalsDetector's producer) auto-disables in observer mode
+    so the detector is dormant there but always wired. The orphan
+    detector set is empty for the first time since the observer-mode
+    pivot.
+
+    Wiring history:
+      - tf_topology:       re-wired in commit 1dcd224 (TfSnapshotter producer)
+      - clock_skew:        re-wired in commit 5e1b3cc (ClockSkewCollector producer)
+      - process_signals:   re-wired in this commit (ProcessSignalsCollector producer)
     """
 
-    _CURRENTLY_WIRED = {"threshold", "frequency", "dead_topic", "qos_mismatch", "tf_topology", "clock_skew"}
+    _CURRENTLY_WIRED = {
+        "threshold",
+        "frequency",
+        "dead_topic",
+        "qos_mismatch",
+        "tf_topology",
+        "clock_skew",
+        "process_signals",
+    }
 
     def _make_engine(self, observer_mode: bool) -> AnomalyEngine:
         cfg = BlackBoxConfig.default()
@@ -184,22 +197,25 @@ class TestAnomalyEngineObserverMode:
         names = {d.name for d in engine._detectors}
         assert names == self._CURRENTLY_WIRED
 
-    def test_observer_engine_keeps_dds_bound_detectors(self):
+    def test_observer_engine_keeps_all_detectors(self):
+        """All 7 detectors remain wired in observer mode.
+
+        ProcessSignalsDetector is dormant (its producer auto-disables)
+        but stays wired so the detector set is identical in both modes.
+        """
         engine = self._make_engine(observer_mode=True)
         names = {d.name for d in engine._detectors}
-        # Every detector currently wired is DDS-bound, so observer mode
-        # is a no-op for the live list today.
         assert names == self._CURRENTLY_WIRED
 
     def test_orphan_detectors_not_wired(self):
-        # Guard against silent re-introduction of detectors without
-        # producers. If you wire a producer, add the detector name here
-        # AND to _CURRENTLY_WIRED above.
-        # tf_topology has been removed from this list because TfSnapshotter
-        # (commits 0ec7a41, 1481949) now ships as its live producer.
-        # clock_skew has been removed from this list because ClockSkewCollector
-        # now ships as its live producer.
-        for orphan in ("process_signals",):
+        """All detectors now have live producers: orphan set is empty.
+
+        This test is kept as a forward-guard: if a new detector is
+        added without a producer, add it to the orphans list here until
+        the producer ships, then move it to _CURRENTLY_WIRED.
+        """
+        orphan_detectors: list[str] = []  # empty — all three orphans closed
+        for orphan in orphan_detectors:
             for mode in (False, True):
                 engine = self._make_engine(observer_mode=mode)
                 names = {d.name for d in engine._detectors}
@@ -207,6 +223,10 @@ class TestAnomalyEngineObserverMode:
                     f"{orphan} re-introduced into engine without a producer "
                     f"in system_monitor — see engine.py header."
                 )
+        # Assert the invariant explicitly so the test body is visible
+        assert len(orphan_detectors) == 0, (
+            "All detectors have live producers; orphan_detectors must be empty."
+        )
 
 
 # ---------------------------------------------------------------------------
