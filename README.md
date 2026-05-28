@@ -11,9 +11,7 @@
 > capture) all work. All seven anomaly detectors are live with
 > producers in `system_monitor/` and `ros_monitor/`. The single
 > source of truth for the package version is `pyproject.toml`;
-> `blackboxrs.__version__` reads it via `importlib.metadata`. See
-> `STATUS_AND_LIMITATIONS_REWRITE.md` for the verified-vs-planned
-> breakdown.
+> `blackboxrs.__version__` reads it via `importlib.metadata`.
 
 When a ROS 2 robot fails, BlackBoxRS produces a reproducible incident
 bundle: timeline, evidence, config and version signatures, a likely-cause
@@ -226,9 +224,6 @@ bundle.
 - Multi-host capture. Single-host first; the bundle format is
   forward-compatible.
 
-For a brutally honest status breakdown see
-`STATUS_AND_LIMITATIONS_REWRITE.md`.
-
 ---
 
 ## Quick start
@@ -358,25 +353,9 @@ graph TD
     IncidentDir --> Rules
 ```
 
-Full design is in `ARCHITECTURE_PIVOT.md`. The pivot rationale and
-positioning are in `PIVOT_BRIEF.md` and `POSITIONING.md`.
+See `docs/ARCHITECTURE.md` for the full system design.
 
 ---
-
-## Repo guide
-
-- `PIVOT_BRIEF.md`: blunt diagnosis and the new product thesis.
-- `ARCHITECTURE_PIVOT.md`: domain objects, subsystems, data flow.
-- `ROADMAP_V0_4.md`: milestones and dependencies.
-- `DEMO_PLAN.md`: 5+ failure scenarios, demo arc, screencast layout.
-- `REPO_RESTRUCTURE_PLAN.md`: module-by-module disposition.
-- `POSITIONING.md`: framing, ICPs, anti-positioning.
-- `STATUS_AND_LIMITATIONS_REWRITE.md`: verified / inferred /
-  unverified / not built.
-- `TASKS_V0_4.md`: atomic execution checklist.
-- `examples/incidents/inc_demo_tf_break/`: a real bundle to inspect.
-- `scripts/generate_sample_incident.py`: regenerate the sample
-  bundle.
 
 ---
 
