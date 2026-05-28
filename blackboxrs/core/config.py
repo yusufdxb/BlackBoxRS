@@ -63,12 +63,38 @@ class RosMonitorConfig:
 
 
 @dataclass
+class ClockProducerConfig:
+    """Settings for the clock-skew producer.
+
+    The producer samples ``time.time()`` (``system`` source), optionally
+    an NTP peer via ``chronyc`` or ``ntpq``, and optionally the ROS
+    ``/clock`` topic if sim-time is active.
+
+    ``include_ros_clock="auto"`` mirrors ``runtime.use_sim_time`` — in
+    practice this means the producer checks whether ``rclpy`` is
+    importable and whether a ``/clock`` subscriber actually receives
+    messages before adding the source to a snapshot.
+
+    ``ntp_tool="auto"`` tries ``chronyc`` first and falls back to
+    ``ntpq``; if neither binary is found the NTP source is skipped for
+    that tick (a single WARN is logged).
+    """
+
+    enabled: bool = True
+    sample_hz: float = 1.0
+    include_ntp: bool = True
+    include_ros_clock: str = "auto"  # "auto" | "true" | "false"
+    ntp_tool: str = "auto"  # "auto" | "chronyc" | "ntpq"
+
+
+@dataclass
 class SystemMonitorConfig:
     """Settings for the system resource monitor."""
 
     enabled: bool = True
     interval_sec: float = 1.0
     gpu_backend: str = "auto"  # auto | tegrastats | nvidia-smi | none
+    clock: ClockProducerConfig = field(default_factory=ClockProducerConfig)
 
 
 @dataclass
@@ -353,6 +379,10 @@ _ROS_MONITOR_NESTED_MAP: dict[str, type] = {
     "tf": TfProducerConfig,
 }
 
+_SYSTEM_MONITOR_NESTED_MAP: dict[str, type] = {
+    "clock": ClockProducerConfig,
+}
+
 _ANOMALY_NESTED_MAP: dict[str, type] = {
     "thresholds": AnomalyThresholds,
     "frequency": FrequencyConfig,
@@ -485,6 +515,30 @@ def _dict_to_config(
                     else:
                         inner_ros[k] = v
                 kwargs[key] = nested_cls(**inner_ros)
+            elif key == "system_monitor":
+                sm_valid = {f.name for f in fields(nested_cls)}
+                sm_unknown = [k for k in value if k not in sm_valid]
+                _report_unknown_keys(
+                    sm_unknown,
+                    context="system_monitor",
+                    strict=strict,
+                    source=source,
+                )
+                inner_sm: dict[str, Any] = {}
+                for k, v in value.items():
+                    if k not in sm_valid:
+                        continue
+                    if k in _SYSTEM_MONITOR_NESTED_MAP and isinstance(v, dict):
+                        inner_sm[k] = _merge_dataclass(
+                            _SYSTEM_MONITOR_NESTED_MAP[k],
+                            v,
+                            context=f"system_monitor.{k}",
+                            strict=strict,
+                            source=source,
+                        )
+                    else:
+                        inner_sm[k] = v
+                kwargs[key] = nested_cls(**inner_sm)
             else:
                 kwargs[key] = _merge_dataclass(
                     nested_cls,

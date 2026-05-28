@@ -170,7 +170,7 @@ class TestAnomalyEngineObserverMode:
     must skip them; the test here will grow at that point.
     """
 
-    _CURRENTLY_WIRED = {"threshold", "frequency", "dead_topic", "qos_mismatch", "tf_topology"}
+    _CURRENTLY_WIRED = {"threshold", "frequency", "dead_topic", "qos_mismatch", "tf_topology", "clock_skew"}
 
     def _make_engine(self, observer_mode: bool) -> AnomalyEngine:
         cfg = BlackBoxConfig.default()
@@ -197,7 +197,9 @@ class TestAnomalyEngineObserverMode:
         # AND to _CURRENTLY_WIRED above.
         # tf_topology has been removed from this list because TfSnapshotter
         # (commits 0ec7a41, 1481949) now ships as its live producer.
-        for orphan in ("process_signals", "clock_skew"):
+        # clock_skew has been removed from this list because ClockSkewCollector
+        # now ships as its live producer.
+        for orphan in ("process_signals",):
             for mode in (False, True):
                 engine = self._make_engine(observer_mode=mode)
                 names = {d.name for d in engine._detectors}
