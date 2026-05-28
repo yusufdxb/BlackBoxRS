@@ -136,10 +136,16 @@ def _start_background(config_path: str | None) -> None:
         click.echo(click.style(f"Failed to spawn daemon: {exc}", fg="red"))
         raise SystemExit(1)
 
-    # Give the child a moment to write its PID file
-    time.sleep(0.5)
-
-    running, pid = BlackBoxDaemon.is_running()
+    # Poll for the child to write its PID file. The daemon does subprocess
+    # checks for chronyc/ntpq and a psutil enumeration on startup, so the
+    # window between spawn and "pidfile written" can run 0.5-3s on slow boxes.
+    deadline = time.monotonic() + 5.0
+    running, pid = False, None
+    while time.monotonic() < deadline:
+        running, pid = BlackBoxDaemon.is_running()
+        if running:
+            break
+        time.sleep(0.1)
     if running:
         click.echo(
             click.style(f"BlackBoxRS started in background (PID {pid}).", fg="green")
