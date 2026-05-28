@@ -88,6 +88,44 @@ class ClockProducerConfig:
 
 
 @dataclass
+class ProcessSignalsCollectorConfig:
+    """Settings for the per-process CPU/RSS signals producer.
+
+    The producer calls ``psutil.process_iter()`` on each tick and
+    matches running processes against ``tracked_patterns`` (glob list
+    against the full cmdline string).  The default patterns cover common
+    ROS 2 and controller node invocations:
+
+    - ``*ros2*``       — catches ``ros2 run foo bar`` and similar
+    - ``*rclpy*``      — catches ``python3 -m rclpy.*`` style launches
+    - ``*controller*`` — hardware-interface / ros2_control nodes
+    - ``*nav2*``       — navigation stack nodes
+    - ``*moveit*``     — MoveIt 2 nodes
+
+    ``max_tracked`` caps the snapshot size so the payload stays bounded
+    even on busy robot computers.
+
+    In observer mode (``runtime.role="observer"``) the producer
+    auto-disables and emits a single INFO log at startup.  psutil reports
+    the observer workstation's processes, not the robot's.  A DDS bridge
+    for remote process enumeration is deferred to v2.
+    """
+
+    enabled: bool = True
+    sample_hz: float = 1.0
+    tracked_patterns: list[str] = field(
+        default_factory=lambda: [
+            "*ros2*",
+            "*rclpy*",
+            "*controller*",
+            "*nav2*",
+            "*moveit*",
+        ]
+    )
+    max_tracked: int = 64
+
+
+@dataclass
 class SystemMonitorConfig:
     """Settings for the system resource monitor."""
 
@@ -95,6 +133,9 @@ class SystemMonitorConfig:
     interval_sec: float = 1.0
     gpu_backend: str = "auto"  # auto | tegrastats | nvidia-smi | none
     clock: ClockProducerConfig = field(default_factory=ClockProducerConfig)
+    process_signals: ProcessSignalsCollectorConfig = field(
+        default_factory=ProcessSignalsCollectorConfig
+    )
 
 
 @dataclass
@@ -381,6 +422,7 @@ _ROS_MONITOR_NESTED_MAP: dict[str, type] = {
 
 _SYSTEM_MONITOR_NESTED_MAP: dict[str, type] = {
     "clock": ClockProducerConfig,
+    "process_signals": ProcessSignalsCollectorConfig,
 }
 
 _ANOMALY_NESTED_MAP: dict[str, type] = {

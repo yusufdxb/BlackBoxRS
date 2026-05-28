@@ -21,28 +21,32 @@ from .detectors import (
     ClockSkewDetector,
     DeadTopicDetector,
     FrequencyDetector,
+    ProcessSignalsDetector,
     QoSMismatchDetector,
     ThresholdDetector,
     TfTopologyDetector,
 )
 
-# ProcessSignalsDetector is implemented in `.detectors` and individually
-# unit-tested, but is NOT wired into the live engine yet. It consumes a
-# producer event (`system.process_signals`) that no module in this
-# codebase emits yet. It will be re-added below once the matching
-# collector lands in `system_monitor`.
-# See STATUS_AND_LIMITATIONS_REWRITE.md for tracking.
+# ProcessSignalsDetector is now wired in (commit that lands
+# ProcessSignalsCollector in system_monitor/collectors/process.py).
+# The producer auto-disables in observer mode (it would otherwise sample
+# the observer workstation's processes, not the robot's). The detector
+# itself is NOT gated behind observer_mode — it simply receives no events
+# when the producer is off, which is the correct v1 behaviour.
+# See docs/design/orphan_detector_producers.md §3.5.
 #
-# ClockSkewDetector was re-wired in this commit now that
-# ClockSkewCollector (blackboxrs/system_monitor/collectors/clock.py)
-# ships as the live producer of `system.clock_skew` events. It is
-# partially DDS-bound (ros:/clock source) and observer-mode-compatible
-# — see docs/design/orphan_detector_producers.md §2.5.
+# ClockSkewDetector was re-wired now that ClockSkewCollector
+# (blackboxrs/system_monitor/collectors/clock.py) ships as the live
+# producer of `system.clock_skew` events. It is partially DDS-bound
+# (ros:/clock source) and observer-mode-compatible — see §2.5.
 #
 # TfTopologyDetector was re-wired in commit 1dcd224 now that
 # TfSnapshotter (commits 0ec7a41, 1481949) ships as the live producer
 # of `ros.tf` events. It is DDS-bound and observer-mode-compatible —
-# see docs/design/orphan_detector_producers.md §1.5.
+# see §1.5.
+#
+# All three previously-orphaned detectors are now wired. The orphan set
+# is empty for the first time since the observer-mode pivot.
 
 logger = logging.getLogger(__name__)
 
@@ -110,18 +114,28 @@ class AnomalyEngine:
             # `ros:/clock` source is robot-relative over DDS.  The
             # detector is DDS-compatible and runs in both modes.
             ClockSkewDetector(self._config.clock_skew),
+            # ProcessSignalsDetector is host-bound in v1: the producer
+            # (ProcessSignalsCollector) auto-disables in observer mode so
+            # no `system.process_signals` events reach the bus. The
+            # detector is kept wired in both modes so it fires correctly
+            # when running onboard. In observer mode it is effectively
+            # dormant (no events to consume).
+            ProcessSignalsDetector(self._config.process_signals),
         ]
         if getattr(self._config, "observer_mode", False):
-            # ProcessSignalsDetector (host-bound) is not wired yet.
+            # ProcessSignalsDetector is wired but dormant: its producer
+            # auto-disables in observer mode (psutil would report the
+            # observer workstation's processes, not the robot's).
             # ThresholdDetector checks host CPU/memory — those numbers
             # describe the observer, not the robot — but it is left
             # wired until a separate host-bound gating pass is added.
             # TfTopologyDetector and ClockSkewDetector are DDS-bound
-            # and stay active.
+            # and remain active in both modes.
             logger.info(
                 "anomaly_engine: observer_mode active "
-                "(host-bound detectors: process_signals still unwired; "
-                "tf_topology and clock_skew are DDS-compatible and remain active)."
+                "(process_signals producer auto-disabled; "
+                "detector wired but dormant; "
+                "tf_topology and clock_skew are DDS-compatible and active)."
             )
         if self._config.custom_detectors:
             from .detectors.loader import load_custom_detectors

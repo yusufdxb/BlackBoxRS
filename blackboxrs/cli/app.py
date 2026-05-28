@@ -440,6 +440,16 @@ system_monitor:
     include_ntp: true
     include_ros_clock: "auto"
     ntp_tool: "auto"
+  process_signals:
+    enabled: true
+    sample_hz: 1.0
+    tracked_patterns:
+      - "*ros2*"
+      - "*rclpy*"
+      - "*controller*"
+      - "*nav2*"
+      - "*moveit*"
+    max_tracked: 64
 
 anomaly_engine:
   enabled: true
