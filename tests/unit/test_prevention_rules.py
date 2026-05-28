@@ -43,24 +43,29 @@ def test_runner_no_rules_passes():
     assert report.exit_code == 0
 
 
-def test_runner_unimplemented_kinds_skip_with_exit_zero():
-    """env_var / param_value / resource_threshold / custom_python remain
-    stubbed in v0.4; the runner should treat them as 'skipped' and exit 0
-    so a partial library does not falsely block a launch."""
+def test_runner_all_four_checks_are_implemented():
+    """env_var / param_value / resource_threshold / custom_python are now
+    real implementations (CF-1 fix).  None should return 'skipped' with the
+    old stub message; they should all return a real status (pass/fail/error/skipped
+    for legitimate reasons like rclpy absent, psutil absent, etc.) -- never the
+    old 'not implemented yet' text."""
     rules = [
         make_rule(PreflightCheck(name="env",
                                  kind="env_var", params={"name": "FOO"})),
         make_rule(PreflightCheck(name="param",
-                                 kind="param_value", params={"key": "v"})),
+                                 kind="param_value", params={"node_name": "n",
+                                                             "parameter": "p"})),
         make_rule(PreflightCheck(name="res",
-                                 kind="resource_threshold", params={})),
+                                 kind="resource_threshold",
+                                 params={"metric": "cpu_percent", "max": 99})),
         make_rule(PreflightCheck(name="py",
-                                 kind="custom_python", params={})),
+                                 kind="custom_python",
+                                 params={"callable": "no_such_module:fn"})),
     ]
     runner = PreflightRunner(rules)
     report = runner.run()
-    assert all(r.status == "skipped" for r in report.results)
-    assert report.exit_code == 0
+    for r in report.results:
+        assert "not implemented yet" not in r.message
 
 
 def test_report_exit_code_with_warn_and_block():
