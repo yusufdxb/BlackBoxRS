@@ -81,7 +81,7 @@ class TestProcessSignalsDetector:
 
     def test_cpu_peak_fires_with_worst_offender(self):
         detector = ProcessSignalsDetector(
-            ProcessSignalsConfig(cpu_percent=80.0, rss_mb=10_000.0)
+            ProcessSignalsConfig(cpu_percent=80.0, rss_mb=10_000.0, min_consecutive_samples=1)
         )
         processes = [
             {"pid": 100, "name": "scan_node", "cpu_percent": 12.0, "rss_mb": 80.0},
@@ -108,7 +108,7 @@ class TestProcessSignalsDetector:
     def test_cpu_takes_priority_over_rss(self):
         """A CPU spike and an RSS spike in the same snapshot -> CPU wins."""
         detector = ProcessSignalsDetector(
-            ProcessSignalsConfig(cpu_percent=80.0, rss_mb=100.0)
+            ProcessSignalsConfig(cpu_percent=80.0, rss_mb=100.0, min_consecutive_samples=1)
         )
         processes = [
             # CPU offender
@@ -127,7 +127,7 @@ class TestProcessSignalsDetector:
 
     def test_rss_peak_fires_when_no_cpu_offender(self):
         detector = ProcessSignalsDetector(
-            ProcessSignalsConfig(cpu_percent=99.0, rss_mb=200.0)
+            ProcessSignalsConfig(cpu_percent=99.0, rss_mb=200.0, min_consecutive_samples=1)
         )
         processes = [
             {"pid": 100, "name": "scan_node", "cpu_percent": 5.0, "rss_mb": 80.0},
@@ -156,3 +156,71 @@ class TestProcessSignalsDetector:
 
     def test_name_property(self):
         assert ProcessSignalsDetector().name == "process_signals"
+
+    # -- Hysteresis (min_consecutive_samples) ---------------------------
+
+    def test_process_signals_single_sample_does_not_fire_with_default_min2(self):
+        """First violating snapshot is silent with min_consecutive_samples=2."""
+        detector = ProcessSignalsDetector(
+            ProcessSignalsConfig(cpu_percent=80.0, rss_mb=10_000.0)
+        )
+        processes = [
+            {"pid": 100, "name": "scan_node", "cpu_percent": 195.0, "rss_mb": 100.0},
+        ]
+        assert detector.check(_proc_event(processes=processes)) is None
+
+    def test_process_signals_two_consecutive_violations_fire_on_second(self):
+        """Two consecutive CPU violations fire on the second."""
+        detector = ProcessSignalsDetector(
+            ProcessSignalsConfig(cpu_percent=80.0, rss_mb=10_000.0)
+        )
+        processes = [
+            {"pid": 100, "name": "scan_node", "cpu_percent": 195.0, "rss_mb": 100.0},
+        ]
+        assert detector.check(_proc_event(processes=processes)) is None
+        result = detector.check(_proc_event(processes=processes))
+        assert result is not None
+        assert result.event_type == "anomaly.process_signals"
+
+    def test_process_signals_healthy_snapshot_resets_counter(self):
+        """A healthy snapshot resets the violation counter."""
+        detector = ProcessSignalsDetector(
+            ProcessSignalsConfig(cpu_percent=80.0, rss_mb=10_000.0)
+        )
+        violating = [
+            {"pid": 100, "name": "scan_node", "cpu_percent": 195.0, "rss_mb": 100.0},
+        ]
+        healthy = [
+            {"pid": 100, "name": "scan_node", "cpu_percent": 12.0, "rss_mb": 100.0},
+        ]
+        assert detector.check(_proc_event(processes=violating)) is None
+        # Healthy resets counter.
+        assert detector.check(_proc_event(processes=healthy)) is None
+        # Violation again: counter = 1, not 2. Should not fire.
+        assert detector.check(_proc_event(processes=violating)) is None
+
+    def test_process_signals_sustained_violations_keep_firing(self):
+        """After the initial fire, sustained violations keep firing."""
+        detector = ProcessSignalsDetector(
+            ProcessSignalsConfig(cpu_percent=80.0, rss_mb=10_000.0)
+        )
+        processes = [
+            {"pid": 100, "name": "scan_node", "cpu_percent": 195.0, "rss_mb": 100.0},
+        ]
+        detector.check(_proc_event(processes=processes))  # count=1
+        result2 = detector.check(_proc_event(processes=processes))
+        assert result2 is not None
+        result3 = detector.check(_proc_event(processes=processes))
+        assert result3 is not None
+
+    def test_process_signals_min_consecutive_1_reproduces_v040_behavior(self):
+        """min_consecutive_samples=1 fires on the first violating snapshot."""
+        detector = ProcessSignalsDetector(
+            ProcessSignalsConfig(cpu_percent=80.0, rss_mb=10_000.0, min_consecutive_samples=1)
+        )
+        processes = [
+            {"pid": 100, "name": "scan_node", "cpu_percent": 195.0, "rss_mb": 100.0},
+        ]
+        result = detector.check(_proc_event(processes=processes))
+        assert result is not None
+

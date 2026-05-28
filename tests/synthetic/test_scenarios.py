@@ -46,7 +46,7 @@ class TestCpuSpikeDetected:
             if result is not None:
                 anomalies.append(result)
 
-        assert len(anomalies) == 3
+        assert len(anomalies) == 2
         for a in anomalies:
             assert a.source == "anomaly_engine"
             assert a.event_type == "anomaly.threshold"
@@ -102,8 +102,8 @@ class TestFrequencyDropDetected:
             if result is not None:
                 anomalies.append(result)
 
-        # Floor = 30 * 0.8 = 24 Hz.  22, 18, 12, 5 should fire.
-        assert len(anomalies) == 4
+        # Floor = 30 * 0.8 = 24 Hz.  With min_consecutive_samples=2, 18, 12, 5 fire (22 is count=1).
+        assert len(anomalies) == 3
         for a in anomalies:
             assert a.event_type == "anomaly.frequency"
             assert a.data["value"] < 24.0
@@ -142,11 +142,13 @@ class TestEventBusToAnomalyToLog:
                 ))
                 time.sleep(0.02)
 
-            # Spike that should trigger the threshold detector.
-            bus.publish(BlackBoxEvent.system_event(
-                event_type="system.cpu",
-                data={"cpu_percent": 95.0, "cpu_count": 4, "per_cpu_percent": [95.0]},
-            ))
+            # Two consecutive spikes to satisfy min_consecutive_samples=2.
+            for _ in range(2):
+                bus.publish(BlackBoxEvent.system_event(
+                    event_type="system.cpu",
+                    data={"cpu_percent": 95.0, "cpu_count": 4, "per_cpu_percent": [95.0]},
+                ))
+                time.sleep(0.02)
 
             # Allow detector + writer threads to drain.
             time.sleep(1.0)

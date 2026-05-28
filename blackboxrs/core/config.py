@@ -145,6 +145,7 @@ class AnomalyThresholds:
     cpu_percent: float = 90.0
     memory_percent: float = 85.0
     gpu_temp_c: float = 80.0
+    min_consecutive_samples: int = 2
 
 
 @dataclass
@@ -152,6 +153,7 @@ class FrequencyConfig:
     """Configuration for the topic frequency anomaly detector."""
 
     tolerance_percent: float = 20.0
+    min_consecutive_samples: int = 2
 
 
 @dataclass
@@ -179,6 +181,7 @@ class ProcessSignalsConfig:
 
     cpu_percent: float = 90.0
     rss_mb: float = 1024.0
+    min_consecutive_samples: int = 2
 
 
 @dataclass
@@ -186,6 +189,7 @@ class ClockSkewConfig:
     """Configuration for the NTP/clock-skew detector."""
 
     max_skew_sec: float = 0.1
+    min_consecutive_samples: int = 2
 
 
 @dataclass

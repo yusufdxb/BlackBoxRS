@@ -66,7 +66,7 @@ def _system_event(metric: str, value: float, unit: str = "%") -> BlackBoxEvent:
 
 
 def test_threshold_emits_signature_fields_in_metadata():
-    det = ThresholdDetector(AnomalyThresholds(cpu_percent=50.0))
+    det = ThresholdDetector(AnomalyThresholds(cpu_percent=50.0, min_consecutive_samples=1))
     ev = _system_event("cpu_percent", 95.0)
     out = det.check(ev)
     assert out is not None
@@ -76,7 +76,7 @@ def test_threshold_emits_signature_fields_in_metadata():
 
 
 def test_threshold_gpu_metric_tags_subsystem_gpu():
-    det = ThresholdDetector(AnomalyThresholds(gpu_temp_c=50.0))
+    det = ThresholdDetector(AnomalyThresholds(gpu_temp_c=50.0, min_consecutive_samples=1))
     ev = BlackBoxEvent.system_event(
         event_type="system.gpu",
         data={"gpu_temp_c": 90.0},
@@ -88,7 +88,7 @@ def test_threshold_gpu_metric_tags_subsystem_gpu():
 
 
 def test_threshold_fingerprint_collision_same_metric():
-    det = ThresholdDetector(AnomalyThresholds(cpu_percent=50.0))
+    det = ThresholdDetector(AnomalyThresholds(cpu_percent=50.0, min_consecutive_samples=1))
     a = _trigger_from_anomaly(det.check(_system_event("cpu_percent", 95.0)))
     b = _trigger_from_anomaly(det.check(_system_event("cpu_percent", 99.5)))
     assert compute([a]).fingerprint_id == compute([b]).fingerprint_id
@@ -96,7 +96,7 @@ def test_threshold_fingerprint_collision_same_metric():
 
 def test_threshold_fingerprint_diff_on_different_metrics():
     det = ThresholdDetector(
-        AnomalyThresholds(cpu_percent=50.0, memory_percent=50.0)
+        AnomalyThresholds(cpu_percent=50.0, memory_percent=50.0, min_consecutive_samples=1)
     )
     a = _trigger_from_anomaly(det.check(_system_event("cpu_percent", 95.0)))
     b = _trigger_from_anomaly(det.check(BlackBoxEvent.system_event(
@@ -117,13 +117,15 @@ def _train_and_drop(detector: FrequencyDetector, topic: str,
     """Drive the detector through the 10-sample learning phase, then drop.
 
     Returns the anomaly event the detector emits on the dropped sample.
+    Sends two consecutive drop samples to satisfy min_consecutive_samples=2.
     """
     for _ in range(11):
-        out = detector.check(_ros_freq_event(topic, baseline_hz))
+        detector.check(_ros_freq_event(topic, baseline_hz))
         # Learning phase returns None for the first 10; the 11th sample
-        # is the first monitoring observation. We force the drop on a
-        # subsequent call to keep the contract crisp.
-    out = detector.check(_ros_freq_event(topic, drop_hz))
+        # is the first monitoring observation. We force the drop on
+        # subsequent calls to satisfy the hysteresis counter.
+    detector.check(_ros_freq_event(topic, drop_hz))  # count=1, silent
+    out = detector.check(_ros_freq_event(topic, drop_hz))  # count=2, fires
     assert out is not None, "frequency detector did not fire on drop"
     return out
 

@@ -31,11 +31,16 @@ class FrequencyDetector(BaseDetector):
        ``baseline * (1 - tolerance_percent / 100)``.  If the observed
        frequency falls below the floor, an anomaly event is emitted.
 
+    Hysteresis: an anomaly is only emitted after
+    ``min_consecutive_samples`` consecutive violating samples for the
+    same topic.  A healthy sample resets the counter to zero.
+
     Only ``ros_monitor`` events with ``event_type == "ros.frequency"``
     are inspected.
 
     Args:
-        config: A :class:`FrequencyConfig` holding ``tolerance_percent``.
+        config: A :class:`FrequencyConfig` holding ``tolerance_percent``
+            and ``min_consecutive_samples``.
     """
 
     #: Fingerprint-stable identity. Two frequency-drop incidents on the
@@ -46,8 +51,11 @@ class FrequencyDetector(BaseDetector):
 
     def __init__(self, config: FrequencyConfig) -> None:
         self._tolerance_pct = config.tolerance_percent
+        self._min_consecutive = config.min_consecutive_samples
         self._samples: dict[str, list[float]] = defaultdict(list)
         self._baselines: dict[str, float] = {}
+        # Per-topic violation counter.
+        self._violation_counts: dict[str, int] = {}
 
     @property
     def name(self) -> str:
@@ -65,7 +73,8 @@ class FrequencyDetector(BaseDetector):
 
         Returns:
             An anomaly event if the frequency dropped below the
-            tolerance floor, else ``None``.
+            tolerance floor for ``min_consecutive_samples`` consecutive
+            samples, else ``None``.
         """
         if event.source != "ros_monitor" or event.event_type != "ros.frequency":
             return None
@@ -96,6 +105,15 @@ class FrequencyDetector(BaseDetector):
         floor = baseline * (1 - self._tolerance_pct / 100.0)
 
         if frequency_hz >= floor:
+            # Healthy sample: reset violation counter for this topic.
+            self._violation_counts[topic] = 0
+            return None
+
+        # Violating sample: increment counter.
+        count = self._violation_counts.get(topic, 0) + 1
+        self._violation_counts[topic] = count
+
+        if count < self._min_consecutive:
             return None
 
         anomaly = AnomalyData(

@@ -88,7 +88,7 @@ class TestClockProducerToDetector:
         except queue.Empty:
             return None
 
-        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=max_skew_sec))
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=max_skew_sec, min_consecutive_samples=1))
         return detector.check(event)
 
     def test_large_skew_fires_anomaly(self):
@@ -137,7 +137,7 @@ class TestClockProducerToDetector:
         bus = EventBus()
         fake_proc = MagicMock()
         fake_proc.stdout = CHRONYC_LARGE_OFFSET
-        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1))
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1, min_consecutive_samples=1))
 
         anomalies = []
         with (

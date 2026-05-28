@@ -52,6 +52,10 @@ class ThresholdDetector(BaseDetector):
     the detector emits at most one anomaly per ``check()`` call (the
     first rule whose value exceeds its limit).
 
+    Hysteresis: an anomaly is only emitted after
+    ``min_consecutive_samples`` consecutive violating samples for the
+    same metric key.  A healthy sample resets the counter to zero.
+
     Args:
         thresholds: An :class:`AnomalyThresholds` dataclass holding the
             upper-bound values for each metric.
@@ -70,6 +74,9 @@ class ThresholdDetector(BaseDetector):
 
     def __init__(self, thresholds: AnomalyThresholds) -> None:
         self._thresholds = thresholds
+        self._min_consecutive = thresholds.min_consecutive_samples
+        # Per-metric violation counter: key is rule.data_key (e.g. "cpu_percent").
+        self._violation_counts: dict[str, int] = {}
 
     @property
     def name(self) -> str:
@@ -83,7 +90,8 @@ class ThresholdDetector(BaseDetector):
             event: The incoming pipeline event.
 
         Returns:
-            An anomaly event if any rule is violated, else ``None``.
+            An anomaly event if any rule is violated for
+            ``min_consecutive_samples`` consecutive samples, else ``None``.
         """
         if event.source != "system_monitor":
             return None
@@ -95,7 +103,17 @@ class ThresholdDetector(BaseDetector):
             if value is None:
                 continue
             threshold = getattr(self._thresholds, rule.threshold_attr)
+
             if not isinstance(value, (int, float)) or value <= threshold:
+                # Healthy sample: reset counter for this metric.
+                self._violation_counts[rule.data_key] = 0
+                continue
+
+            # Violating sample: increment counter.
+            count = self._violation_counts.get(rule.data_key, 0) + 1
+            self._violation_counts[rule.data_key] = count
+
+            if count < self._min_consecutive:
                 continue
 
             anomaly = AnomalyData(

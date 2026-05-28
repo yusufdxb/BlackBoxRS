@@ -51,6 +51,10 @@ class ClockSkewDetector(BaseDetector):
     skew exceeds :attr:`ClockSkewConfig.max_skew_sec`. Single-source
     snapshots are silently ignored because there is no pair to compare.
 
+    Hysteresis: an anomaly is only emitted after
+    ``min_consecutive_samples`` consecutive violating snapshots for the
+    same worst pair.  A healthy snapshot resets the counter.
+
     Args:
         config: A :class:`ClockSkewConfig` with the maximum tolerated
             pairwise skew.
@@ -67,6 +71,10 @@ class ClockSkewDetector(BaseDetector):
     def __init__(self, config: ClockSkewConfig | None = None) -> None:
         cfg = config or ClockSkewConfig()
         self._max_skew_sec = cfg.max_skew_sec
+        self._min_consecutive = cfg.min_consecutive_samples
+        # Per source-pair violation counter: key is "{source_a}|{source_b}"
+        # with sources in lexical order for stability.
+        self._violation_counts: dict[str, int] = {}
 
     @property
     def name(self) -> str:
@@ -130,6 +138,18 @@ class ClockSkewDetector(BaseDetector):
                         worst_pair = (b_name, a_name)
 
         if worst_pair is None or worst_skew <= self._max_skew_sec:
+            # Healthy snapshot: clear all violation counters so a
+            # subsequent violation starts from zero. This handles the
+            # common case where all sources are within tolerance (including
+            # perfectly synchronised sources where worst_pair is None).
+            self._violation_counts.clear()
+            return None
+
+        pair_key = f"{worst_pair[0]}|{worst_pair[1]}"
+        count = self._violation_counts.get(pair_key, 0) + 1
+        self._violation_counts[pair_key] = count
+
+        if count < self._min_consecutive:
             return None
 
         return self._emit(
