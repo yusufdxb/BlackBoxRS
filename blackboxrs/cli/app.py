@@ -434,6 +434,12 @@ system_monitor:
   enabled: true
   interval_sec: 1.0
   gpu_backend: "auto"
+  clock:
+    enabled: true
+    sample_hz: 1.0
+    include_ntp: true
+    include_ros_clock: "auto"
+    ntp_tool: "auto"
 
 anomaly_engine:
   enabled: true

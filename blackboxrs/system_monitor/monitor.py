@@ -17,6 +17,7 @@ from blackboxrs.core.schemas import BlackBoxEvent
 from blackboxrs.core.event_bus import EventBus
 from blackboxrs.core.session import Session
 
+from blackboxrs.system_monitor.collectors.clock import ClockSkewCollector
 from blackboxrs.system_monitor.collectors.cpu import CpuCollector
 from blackboxrs.system_monitor.collectors.disk import DiskCollector
 from blackboxrs.system_monitor.collectors.gpu import GpuCollector
@@ -55,6 +56,7 @@ class SystemMonitor:
         self._config = config
         self._session = session
         self._collectors: list[tuple[str, Any]] = self._init_collectors()
+        self._clock_collector: ClockSkewCollector | None = self._init_clock_collector()
         self._running = False
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -89,6 +91,43 @@ class SystemMonitor:
             logger.info("No GPU backend available — GPU metrics disabled")
 
         return collectors
+
+    def _init_clock_collector(self) -> ClockSkewCollector | None:
+        """Initialise the clock-skew producer if configured.
+
+        The clock-skew producer is kept separate from the regular
+        ``(name, collector)`` list because it publishes directly to the
+        event bus (its event shape is detector-specific) rather than
+        returning a plain dict for the generic ``system.<name>`` wrapper.
+
+        The producer runs in both onboard and observer mode.  In observer
+        mode the ``system`` and ``ntp:*`` sources describe the observer
+        workstation's clock; ``ros:/clock`` describes the robot's sim
+        clock.  See ``docs/design/orphan_detector_producers.md`` §2.5.
+        """
+        clock_cfg = getattr(self._config, "clock", None)
+        if clock_cfg is None or not getattr(clock_cfg, "enabled", True):
+            logger.info("ClockSkewCollector: disabled by configuration")
+            return None
+
+        # Derive the read-window budget from the anomaly detector config.
+        # We import lazily to avoid a heavy dependency chain at module load.
+        try:
+            from blackboxrs.core.config import ClockSkewConfig
+
+            max_skew_sec = ClockSkewConfig().max_skew_sec
+        except Exception:
+            max_skew_sec = 0.1  # safe fallback
+        budget_sec = max_skew_sec / 2.0
+
+        collector = ClockSkewCollector(
+            config=clock_cfg,
+            event_bus=self._event_bus,
+            session_meta=self._session.metadata(),
+        )
+        collector.set_window_budget(budget_sec)
+        logger.info("ClockSkewCollector: initialised (budget=%.1f ms)", budget_sec * 1000)
+        return collector
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -134,6 +173,9 @@ class SystemMonitor:
         if self._thread is not None:
             self._thread.join(timeout=self._config.interval_sec + 2)
             self._thread = None
+
+        if self._clock_collector is not None:
+            self._clock_collector.close()
 
         logger.info("System monitor stopped")
 
@@ -208,6 +250,8 @@ class SystemMonitor:
                 events = self._collect_once()
                 for event in events:
                     self._event_bus.publish(event)
+                if self._clock_collector is not None:
+                    self._clock_collector.tick()
             except Exception:
                 logger.exception("Unhandled error in monitor run loop")
 
