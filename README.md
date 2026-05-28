@@ -6,15 +6,14 @@
 ![ROS 2 Humble (verified)](https://img.shields.io/badge/ROS%202-Humble%20(verified)-brightgreen)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 
-> Status: **alpha (v0.4.0.dev0)**. The incident-bundle pipeline, report
-> generator, fingerprinting, prevention runner, and observer-mode
-> (off-board capture) are working. Three evidence-breadth detectors
-> (`tf_topology`, `clock_skew`, `process_signals`) are scaffolded and
-> tested but **not wired into the live engine until their producers
-> ship** — see "What is planned" below. The single source of truth for
-> the package version is `pyproject.toml`; `blackboxrs.__version__`
-> reads it via `importlib.metadata`. See `STATUS_AND_LIMITATIONS_REWRITE.md`
-> for the full verified-vs-planned breakdown.
+> Status: **v0.4.0**. Incident-bundle pipeline, report generator,
+> fingerprinting, prevention runner, and observer-mode (off-board
+> capture) all work. All seven anomaly detectors are live with
+> producers in `system_monitor/` and `ros_monitor/`. The single
+> source of truth for the package version is `pyproject.toml`;
+> `blackboxrs.__version__` reads it via `importlib.metadata`. See
+> `STATUS_AND_LIMITATIONS_REWRITE.md` for the verified-vs-planned
+> breakdown.
 
 When a ROS 2 robot fails, BlackBoxRS produces a reproducible incident
 bundle: timeline, evidence, config and version signatures, a likely-cause
@@ -52,12 +51,13 @@ that feeds them is auto-disabled. Every incident bundle records both
 `observer_host` and `observed_host` so reports name the two sides
 explicitly.
 
-Three additional detectors (`tf_topology`, `clock_skew`,
-`process_signals`) are implemented and unit-tested but not wired into
-the live engine: they consume producer events (`ros.tf`,
-`system.clock_skew`, `system.process_signals`) that no module emits
-yet. When their producers ship the detectors come back online — see
-`STATUS_AND_LIMITATIONS_REWRITE.md`.
+All seven anomaly detectors are live: `threshold`, `frequency`,
+`dead_topic`, `qos_mismatch` (DDS-bound, work in both onboard and
+observer mode), plus `tf_topology`, `clock_skew`, and
+`process_signals`. `process_signals` auto-disables in observer
+mode because it reads the local process table; `tf_topology` and
+`clock_skew` stay active because they consume DDS-visible events
+or local NTP state.
 
 See `docs/QUICKSTART_REMOTE.md` for a 5-minute walkthrough from
 `pip install` to the first remote-captured bundle.
@@ -214,8 +214,7 @@ bundle.
   `node_running` are real rclpy-coupled graph queries. On a host with
   no `rclpy` installed they return `skipped` (and say so) rather than
   failing the launch.
-- **384 tests pass** (363 unit + 21 integration/synthetic; run
-  `pytest -q`). CI exercises Python 3.10 / 3.11 / 3.12 plus a live
+- **466 tests pass**. CI exercises Python 3.10 / 3.11 / 3.12 plus a live
   ROS 2 Humble Docker job on every main commit.
 
 ## What is planned (not yet built)
