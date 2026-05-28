@@ -64,7 +64,7 @@ class TestThresholdDetector:
         )
 
     def test_fires_on_high_cpu(self):
-        detector = ThresholdDetector(AnomalyThresholds(cpu_percent=90.0))
+        detector = ThresholdDetector(AnomalyThresholds(cpu_percent=90.0, min_consecutive_samples=1))
         result = detector.check(self._make_cpu_event(95.0))
         assert result is not None
         assert result.source == "anomaly_engine"
@@ -82,13 +82,13 @@ class TestThresholdDetector:
         assert detector.check(self._make_cpu_event(90.0)) is None
 
     def test_fires_on_high_memory(self):
-        detector = ThresholdDetector(AnomalyThresholds(memory_percent=85.0))
+        detector = ThresholdDetector(AnomalyThresholds(memory_percent=85.0, min_consecutive_samples=1))
         result = detector.check(self._make_memory_event(90.0))
         assert result is not None
         assert result.data["metric"] == "memory_percent"
 
     def test_fires_on_high_gpu_temp(self):
-        detector = ThresholdDetector(AnomalyThresholds(gpu_temp_c=80.0))
+        detector = ThresholdDetector(AnomalyThresholds(gpu_temp_c=80.0, min_consecutive_samples=1))
         result = detector.check(self._make_gpu_event(95.0))
         assert result is not None
         assert result.data["metric"] == "gpu_temp_c"
@@ -123,6 +123,46 @@ class TestThresholdDetector:
         assert ThresholdDetector(AnomalyThresholds()).name == "threshold"
 
 
+    # -- Hysteresis (min_consecutive_samples) ---------------------------
+
+    def test_threshold_single_sample_does_not_fire_with_default_min2(self):
+        """With min_consecutive_samples=2, the first violating sample is silent."""
+        detector = ThresholdDetector(AnomalyThresholds(cpu_percent=90.0))
+        assert detector.check(self._make_cpu_event(95.0)) is None
+
+    def test_threshold_two_consecutive_violations_fire_on_second(self):
+        """Two consecutive violations must fire on exactly the second."""
+        detector = ThresholdDetector(AnomalyThresholds(cpu_percent=90.0))
+        assert detector.check(self._make_cpu_event(95.0)) is None
+        result = detector.check(self._make_cpu_event(95.0))
+        assert result is not None
+        assert result.event_type == "anomaly.threshold"
+
+    def test_threshold_healthy_sample_resets_counter(self):
+        """A healthy reading between two violations resets the counter."""
+        detector = ThresholdDetector(AnomalyThresholds(cpu_percent=90.0))
+        assert detector.check(self._make_cpu_event(95.0)) is None
+        # Healthy: resets counter.
+        assert detector.check(self._make_cpu_event(50.0)) is None
+        # Violating again: counter = 1 again, not 2.
+        assert detector.check(self._make_cpu_event(95.0)) is None
+
+    def test_threshold_sustained_violations_keep_firing_after_first(self):
+        """After the first fire, sustained violations continue to fire."""
+        detector = ThresholdDetector(AnomalyThresholds(cpu_percent=90.0))
+        detector.check(self._make_cpu_event(95.0))  # count=1, silent
+        result2 = detector.check(self._make_cpu_event(95.0))  # count=2, fires
+        assert result2 is not None
+        result3 = detector.check(self._make_cpu_event(95.0))  # count=3, fires
+        assert result3 is not None
+
+    def test_threshold_min_consecutive_1_reproduces_v040_behavior(self):
+        """min_consecutive_samples=1 fires on the very first violation."""
+        detector = ThresholdDetector(AnomalyThresholds(cpu_percent=90.0, min_consecutive_samples=1))
+        result = detector.check(self._make_cpu_event(95.0))
+        assert result is not None
+
+
 # ---------------------------------------------------------------------------
 # FrequencyDetector
 # ---------------------------------------------------------------------------
@@ -143,7 +183,7 @@ class TestFrequencyDetector:
             assert detector.check(self._make_freq_event("/cmd_vel", 10.0)) is None
 
     def test_fires_on_frequency_drop_after_learning(self):
-        detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
+        detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0, min_consecutive_samples=1))
         for _ in range(10):
             detector.check(self._make_freq_event("/cmd_vel", 10.0))
         result = detector.check(self._make_freq_event("/cmd_vel", 5.0))
@@ -175,7 +215,7 @@ class TestFrequencyDetector:
         assert detector.check(event) is None
 
     def test_independent_baselines_per_topic(self):
-        detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
+        detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0, min_consecutive_samples=1))
         for _ in range(10):
             detector.check(self._make_freq_event("/cmd_vel", 10.0))
         for _ in range(10):
@@ -186,6 +226,56 @@ class TestFrequencyDetector:
 
     def test_name_property(self):
         assert FrequencyDetector(FrequencyConfig()).name == "frequency"
+
+
+    # -- Hysteresis (min_consecutive_samples) ---------------------------
+
+    def test_frequency_single_drop_does_not_fire_with_default_min2(self):
+        """First violation is silent with min_consecutive_samples=2 (default)."""
+        detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
+        for _ in range(10):
+            detector.check(self._make_freq_event("/cmd_vel", 10.0))
+        assert detector.check(self._make_freq_event("/cmd_vel", 5.0)) is None
+
+    def test_frequency_two_consecutive_drops_fire_on_second(self):
+        """Two consecutive drops must fire on the second."""
+        detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
+        for _ in range(10):
+            detector.check(self._make_freq_event("/cmd_vel", 10.0))
+        assert detector.check(self._make_freq_event("/cmd_vel", 5.0)) is None
+        result = detector.check(self._make_freq_event("/cmd_vel", 5.0))
+        assert result is not None
+        assert result.event_type == "anomaly.frequency"
+
+    def test_frequency_healthy_between_drops_resets_counter(self):
+        """A healthy reading between two drops resets the violation counter."""
+        detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
+        for _ in range(10):
+            detector.check(self._make_freq_event("/cmd_vel", 10.0))
+        assert detector.check(self._make_freq_event("/cmd_vel", 5.0)) is None
+        # Healthy reset.
+        assert detector.check(self._make_freq_event("/cmd_vel", 10.0)) is None
+        # Violation again: counter = 1, should not fire.
+        assert detector.check(self._make_freq_event("/cmd_vel", 5.0)) is None
+
+    def test_frequency_sustained_drops_keep_firing(self):
+        """After the initial fire, sustained drops continue to fire."""
+        detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
+        for _ in range(10):
+            detector.check(self._make_freq_event("/cmd_vel", 10.0))
+        detector.check(self._make_freq_event("/cmd_vel", 5.0))  # count=1
+        result2 = detector.check(self._make_freq_event("/cmd_vel", 5.0))
+        assert result2 is not None
+        result3 = detector.check(self._make_freq_event("/cmd_vel", 5.0))
+        assert result3 is not None
+
+    def test_frequency_min_consecutive_1_reproduces_v040_behavior(self):
+        """min_consecutive_samples=1 fires on the first drop."""
+        detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0, min_consecutive_samples=1))
+        for _ in range(10):
+            detector.check(self._make_freq_event("/cmd_vel", 10.0))
+        result = detector.check(self._make_freq_event("/cmd_vel", 5.0))
+        assert result is not None
 
 
 # ---------------------------------------------------------------------------

@@ -463,10 +463,19 @@ anomaly_engine:
     cpu_percent: 90.0
     memory_percent: 85.0
     gpu_temp_c: 80.0
+    min_consecutive_samples: 2
   frequency:
     tolerance_percent: 20.0
+    min_consecutive_samples: 2
   dead_topic:
     timeout_sec: 5.0
+  process_signals:
+    cpu_percent: 90.0
+    rss_mb: 1024.0
+    min_consecutive_samples: 2
+  clock_skew:
+    max_skew_sec: 0.1
+    min_consecutive_samples: 2
 
 rosbag2:
   enabled: false

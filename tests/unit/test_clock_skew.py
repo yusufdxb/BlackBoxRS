@@ -82,7 +82,7 @@ class TestClockSkewDetector:
     # -- Anomaly: worst pair fires --------------------------------------
 
     def test_fires_on_worst_pair(self):
-        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1))
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1, min_consecutive_samples=1))
         sources = [
             {"name": "system", "epoch_sec": 1_000.000},
             {"name": "ntp:pool", "epoch_sec": 1_000.050},
@@ -105,7 +105,7 @@ class TestClockSkewDetector:
 
     def test_pair_order_is_lexical_for_fingerprint_stability(self):
         """(a, b) and (b, a) must yield the same source_a/source_b ordering."""
-        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1))
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1, min_consecutive_samples=1))
         # Submit b before a; expect lexical ordering in the output.
         sources = [
             {"name": "zeta", "epoch_sec": 100.0},
@@ -118,7 +118,7 @@ class TestClockSkewDetector:
 
     def test_negative_skew_is_absolute(self):
         """Skew is always a positive magnitude regardless of who's ahead."""
-        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.5))
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.5, min_consecutive_samples=1))
         sources = [
             {"name": "a", "epoch_sec": 100.0},
             {"name": "b", "epoch_sec": 95.0},  # b is behind by 5s
@@ -131,3 +131,67 @@ class TestClockSkewDetector:
 
     def test_name_property(self):
         assert ClockSkewDetector().name == "clock_skew"
+
+    # -- Hysteresis (min_consecutive_samples) ---------------------------
+
+    def test_clock_skew_single_sample_does_not_fire_with_default_min2(self):
+        """First violating snapshot is silent with min_consecutive_samples=2."""
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1))
+        sources = [
+            {"name": "system", "epoch_sec": 1_000.0},
+            {"name": "ntp", "epoch_sec": 1_002.5},
+        ]
+        assert detector.check(_skew_event(sources=sources)) is None
+
+    def test_clock_skew_two_consecutive_violations_fire_on_second(self):
+        """Two consecutive violations fire on the second sample."""
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1))
+        sources = [
+            {"name": "system", "epoch_sec": 1_000.0},
+            {"name": "ntp", "epoch_sec": 1_002.5},
+        ]
+        assert detector.check(_skew_event(sources=sources)) is None
+        result = detector.check(_skew_event(sources=sources))
+        assert result is not None
+        assert result.event_type == "anomaly.clock_skew"
+
+    def test_clock_skew_healthy_snapshot_resets_counter(self):
+        """A within-tolerance snapshot resets the violation counter."""
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=1.0))
+        violating = [
+            {"name": "system", "epoch_sec": 1_000.0},
+            {"name": "ntp", "epoch_sec": 1_002.5},
+        ]
+        healthy = [
+            {"name": "system", "epoch_sec": 1_000.0},
+            {"name": "ntp", "epoch_sec": 1_000.0},
+        ]
+        assert detector.check(_skew_event(sources=violating)) is None
+        # Healthy resets counter.
+        assert detector.check(_skew_event(sources=healthy)) is None
+        # Violating again: counter = 1, should not fire.
+        assert detector.check(_skew_event(sources=violating)) is None
+
+    def test_clock_skew_sustained_violations_keep_firing(self):
+        """After the first fire, sustained violations keep firing."""
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1))
+        sources = [
+            {"name": "system", "epoch_sec": 1_000.0},
+            {"name": "ntp", "epoch_sec": 1_002.5},
+        ]
+        detector.check(_skew_event(sources=sources))  # count=1
+        result2 = detector.check(_skew_event(sources=sources))
+        assert result2 is not None
+        result3 = detector.check(_skew_event(sources=sources))
+        assert result3 is not None
+
+    def test_clock_skew_min_consecutive_1_reproduces_v040_behavior(self):
+        """min_consecutive_samples=1 fires on the first violating snapshot."""
+        detector = ClockSkewDetector(ClockSkewConfig(max_skew_sec=0.1, min_consecutive_samples=1))
+        sources = [
+            {"name": "system", "epoch_sec": 1_000.0},
+            {"name": "ntp", "epoch_sec": 1_002.5},
+        ]
+        result = detector.check(_skew_event(sources=sources))
+        assert result is not None
+

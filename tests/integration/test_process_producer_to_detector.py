@@ -78,7 +78,7 @@ def _run_pipeline(
         return None
 
     detector = ProcessSignalsDetector(
-        ProcessSignalsConfig(cpu_percent=cpu_threshold, rss_mb=rss_threshold)
+        ProcessSignalsConfig(cpu_percent=cpu_threshold, rss_mb=rss_threshold, min_consecutive_samples=1)
     )
     return detector.check(event)
 

@@ -60,6 +60,11 @@ class ProcessSignalsDetector(BaseDetector):
     travels in ``data["all_processes"]`` so the report can render the
     full picture.
 
+    Hysteresis: an anomaly is only emitted after
+    ``min_consecutive_samples`` consecutive violating snapshots for the
+    same (process_name, metric) pair.  A healthy snapshot resets the
+    counter for the previously-offending key.
+
     Args:
         config: A :class:`ProcessSignalsConfig` with CPU and RSS limits.
     """
@@ -76,6 +81,10 @@ class ProcessSignalsDetector(BaseDetector):
         cfg = config or ProcessSignalsConfig()
         self._cpu_limit = cfg.cpu_percent
         self._rss_limit = cfg.rss_mb
+        self._min_consecutive = cfg.min_consecutive_samples
+        # Per-(process_name, metric) violation counter.
+        # Key: "{process_name}:{metric}" e.g. "scan_node:cpu_percent".
+        self._violation_counts: dict[str, int] = {}
 
     @property
     def name(self) -> str:
@@ -129,32 +138,48 @@ class ProcessSignalsDetector(BaseDetector):
         )
         worst_cpu_value = float(worst_cpu.get("cpu_percent", 0.0))
         if worst_cpu_value > self._cpu_limit:
-            return self._emit(
-                event,
-                proc=worst_cpu,
-                metric="cpu_percent",
-                value=worst_cpu_value,
-                threshold=self._cpu_limit,
-                unit="%",
-                all_processes=candidates,
-            )
+            process_name = worst_cpu.get("name") or f"pid:{worst_cpu.get('pid', '?')}"
+            vkey = f"{process_name}:cpu_percent"
+            count = self._violation_counts.get(vkey, 0) + 1
+            self._violation_counts[vkey] = count
+            if count >= self._min_consecutive:
+                return self._emit(
+                    event,
+                    proc=worst_cpu,
+                    metric="cpu_percent",
+                    value=worst_cpu_value,
+                    threshold=self._cpu_limit,
+                    unit="%",
+                    all_processes=candidates,
+                )
+            return None
 
+        # No CPU offender: check RSS.
         worst_rss = max(
             candidates,
             key=lambda p: float(p.get("rss_mb") or 0.0),
         )
         worst_rss_value = float(worst_rss.get("rss_mb") or 0.0)
         if worst_rss_value > self._rss_limit:
-            return self._emit(
-                event,
-                proc=worst_rss,
-                metric="rss_mb",
-                value=worst_rss_value,
-                threshold=self._rss_limit,
-                unit="MB",
-                all_processes=candidates,
-            )
+            process_name = worst_rss.get("name") or f"pid:{worst_rss.get('pid', '?')}"
+            vkey = f"{process_name}:rss_mb"
+            count = self._violation_counts.get(vkey, 0) + 1
+            self._violation_counts[vkey] = count
+            if count >= self._min_consecutive:
+                return self._emit(
+                    event,
+                    proc=worst_rss,
+                    metric="rss_mb",
+                    value=worst_rss_value,
+                    threshold=self._rss_limit,
+                    unit="MB",
+                    all_processes=candidates,
+                )
+            return None
 
+        # Healthy snapshot: reset any active violation counters.
+        # We reset the counters for all keys since nothing is offending.
+        self._violation_counts.clear()
         return None
 
     # -- Helpers --------------------------------------------------------
