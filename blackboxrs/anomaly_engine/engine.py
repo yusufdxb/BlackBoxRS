@@ -22,15 +22,21 @@ from .detectors import (
     FrequencyDetector,
     QoSMismatchDetector,
     ThresholdDetector,
+    TfTopologyDetector,
 )
 
-# ClockSkewDetector, ProcessSignalsDetector, and TfTopologyDetector are
-# implemented in `.detectors` and individually unit-tested, but are NOT
-# wired into the live engine. They each consume a producer event
-# (`system.clock_skew`, `system.process_signals`, `ros.tf`) that no
-# module in this codebase emits yet. They will be re-added below once
-# the matching collectors land in `system_monitor` / `ros_monitor`.
+# ClockSkewDetector and ProcessSignalsDetector are implemented in
+# `.detectors` and individually unit-tested, but are NOT wired into the
+# live engine yet. They each consume a producer event
+# (`system.clock_skew`, `system.process_signals`) that no module in
+# this codebase emits yet. They will be re-added below once the
+# matching collectors land in `system_monitor`.
 # See STATUS_AND_LIMITATIONS_REWRITE.md for tracking.
+#
+# TfTopologyDetector was re-wired in this commit now that TfSnapshotter
+# (commits 0ec7a41, 1481949) ships as the live producer of `ros.tf`
+# events. It is DDS-bound and observer-mode-compatible — see
+# docs/design/orphan_detector_producers.md §1.5.
 
 logger = logging.getLogger(__name__)
 
@@ -79,22 +85,30 @@ class AnomalyEngine:
             A list of ready-to-use detector instances.
         """
         # Only detectors with live producers in this codebase are wired
-        # in. See the comment at the top of the file for the three that
+        # in. See the comment at the top of the file for the two that
         # are intentionally absent until their producers ship.
         detectors: list[BaseDetector] = [
             ThresholdDetector(self._config.thresholds),
             FrequencyDetector(self._config.frequency),
             QoSMismatchDetector(),
             DeadTopicDetector(self._config.dead_topic),
+            # TfTopologyDetector is DDS-bound (consumes `ros.tf` events
+            # emitted by TfSnapshotter over the shared EventBus) and is
+            # therefore observer-mode-compatible — no host-bound
+            # resources are read. It runs in both onboard and observer
+            # mode with the same detector instance.
+            TfTopologyDetector(self._config.tf_topology),
         ]
         if getattr(self._config, "observer_mode", False):
-            # Once host-bound detectors (process_signals, host-cpu
-            # threshold) are wired back in, this is where they would
-            # be skipped. Today's wired set is DDS-bound only, so the
-            # observer-mode branch is a no-op log line.
+            # ProcessSignalsDetector (host-bound) is not wired yet.
+            # ThresholdDetector checks host CPU/memory — those numbers
+            # describe the observer, not the robot — but it is left
+            # wired until a separate host-bound gating pass is added.
+            # TfTopologyDetector is DDS-bound and stays active.
             logger.info(
                 "anomaly_engine: observer_mode active "
-                "(no host-bound detectors are currently wired)."
+                "(host-bound detectors: process_signals still unwired; "
+                "tf_topology is DDS-bound and remains active)."
             )
         if self._config.custom_detectors:
             from .detectors.loader import load_custom_detectors

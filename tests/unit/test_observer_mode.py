@@ -170,7 +170,7 @@ class TestAnomalyEngineObserverMode:
     must skip them; the test here will grow at that point.
     """
 
-    _CURRENTLY_WIRED = {"threshold", "frequency", "dead_topic", "qos_mismatch"}
+    _CURRENTLY_WIRED = {"threshold", "frequency", "dead_topic", "qos_mismatch", "tf_topology"}
 
     def _make_engine(self, observer_mode: bool) -> AnomalyEngine:
         cfg = BlackBoxConfig.default()
@@ -194,14 +194,16 @@ class TestAnomalyEngineObserverMode:
     def test_orphan_detectors_not_wired(self):
         # Guard against silent re-introduction of detectors without
         # producers. If you wire a producer, add the detector name here
-        # AND to _CURRENTLY_WIRED.
-        for orphan in ("process_signals", "tf_topology", "clock_skew"):
+        # AND to _CURRENTLY_WIRED above.
+        # tf_topology has been removed from this list because TfSnapshotter
+        # (commits 0ec7a41, 1481949) now ships as its live producer.
+        for orphan in ("process_signals", "clock_skew"):
             for mode in (False, True):
                 engine = self._make_engine(observer_mode=mode)
                 names = {d.name for d in engine._detectors}
                 assert orphan not in names, (
                     f"{orphan} re-introduced into engine without a producer "
-                    f"in system_monitor / ros_monitor — see engine.py header."
+                    f"in system_monitor — see engine.py header."
                 )
 
 
