@@ -115,6 +115,19 @@ class _FakeRos2Process:
     def terminate(self):
         self.returncode = -signal.SIGTERM
 
+    # Context-manager protocol so unrelated stdlib subprocess.run() calls
+    # (e.g. system_monitor's GPU collector probing nvidia-smi) do not
+    # explode while this fake is patched in for rosbag2. subprocess.run
+    # uses ``with Popen(...) as p:`` internally and requires __enter__ /
+    # __exit__ to exist even when the fake is unused.
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.returncode is None:
+            self.returncode = 0
+        return False
+
 
 def _fake_killpg(pid: int, sig: int) -> None:
     proc = _FakeRos2Process.by_pid[pid]
@@ -333,7 +346,9 @@ class TestRosbagRecorderIntegration:
             system_monitor=SystemMonitorConfig(enabled=True, interval_sec=0.1),
             anomaly_engine=AnomalyEngineConfig(
                 enabled=True,
-                thresholds=AnomalyThresholds(cpu_percent=0.0),
+                thresholds=AnomalyThresholds(
+                    cpu_percent=0.0, min_consecutive_samples=1
+                ),
             ),
             rosbag2=Rosbag2RecorderConfig(
                 enabled=True,
