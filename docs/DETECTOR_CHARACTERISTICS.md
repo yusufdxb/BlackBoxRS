@@ -45,7 +45,7 @@ below detector thresholds), and the hysteresis introduced in `5d3ab4f`
 collapses single-sample jitter below the fire condition.
 
 `dead_topic` reports `n/a`: its trigger condition is wall-clock-based
-(`Clock.now()` inside `dead_topic.py:60`), and the accelerated synthetic
+(`Clock.now()` inside `dead_topic.py:77`), and the accelerated synthetic
 stream runs all 86,400 samples in roughly 3 seconds of real wall time, so
 no event ever exceeds the 5s silence threshold. This detector requires a
 real-time measurement and is exercised live in
