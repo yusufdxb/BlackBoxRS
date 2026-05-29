@@ -52,7 +52,12 @@ def _make_config(log_dir: Path, *, cpu_threshold: float = 0.0) -> BlackBoxConfig
         system_monitor=SystemMonitorConfig(enabled=True, interval_sec=0.1),
         anomaly_engine=AnomalyEngineConfig(
             enabled=True,
-            thresholds=AnomalyThresholds(cpu_percent=cpu_threshold),
+            # min_consecutive_samples=1 keeps the v0.4.0 single-sample firing
+            # behavior the pipeline-shape tests rely on. Hysteresis itself is
+            # covered in tests/unit/test_threshold_detector.py.
+            thresholds=AnomalyThresholds(
+                cpu_percent=cpu_threshold, min_consecutive_samples=1
+            ),
         ),
     )
 
