@@ -48,6 +48,12 @@ jobs:
         run: |
           python -m pytest -q
 
+      - name: Detector characteristics (smoke)
+        # Exercises scripts/measure_detector_fpr.py so the FPR/TPR harness
+        # stays alive. No regression gate yet; just verify it runs.
+        run: |
+          python scripts/measure_detector_fpr.py --hours 1 --json-output artifacts/detector_characteristics.json
+
   benchmark:
     name: Benchmark regression gate
     runs-on: ubuntu-22.04
