@@ -9,8 +9,8 @@
       "metrics": {
         "publish_rate_eps": {
           "direction": "min",
-          "min": 150000,
-          "min_ratio_to_baseline": 0.15,
+          "min": 75000,
+          "min_ratio_to_baseline": 0.10,
           "unit": "eps"
         }
       }

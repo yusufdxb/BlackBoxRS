@@ -76,9 +76,10 @@ def _make_observer_config(tmp_path: Path) -> BlackBoxConfig:
     cfg.ros_monitor = RosMonitorConfig(
         enabled=True, poll_interval_sec=0.5, track_latency=False, topic_filters=[]
     )
-    # Tight timeout so the test does not block 5+ seconds waiting for a
-    # dead_topic anomaly.
-    cfg.anomaly_engine.dead_topic = DeadTopicConfig(timeout_sec=2.0)
+    # Tight timeout so the test does not block 10+ seconds waiting for a
+    # dead_topic anomaly. The 1.5s value gives the daemon room to register
+    # the topic during Docker startup but still keeps the test under 15s.
+    cfg.anomaly_engine.dead_topic = DeadTopicConfig(timeout_sec=1.5)
     cfg.apply_runtime_role()
     return cfg
 
@@ -122,9 +123,11 @@ def test_observer_fires_dead_topic_on_live_dds(tmp_path: Path) -> None:
         )
         publisher = publisher_node.create_publisher(String, topic, 10)
 
-        # Phase 1: keep publishing for ~3 seconds so RosMonitor discovers
-        # the topic and the dead_topic detector learns it is alive.
-        phase1_deadline = time.monotonic() + 3.0
+        # Phase 1: keep publishing for ~5 seconds so RosMonitor discovers
+        # the topic, the FrequencyTracker locks the rate, and the
+        # dead_topic detector learns it is alive. Docker startup can eat a
+        # second or two before subscriptions are wired.
+        phase1_deadline = time.monotonic() + 5.0
         while time.monotonic() < phase1_deadline:
             msg = String()
             msg.data = "alive"
@@ -133,9 +136,12 @@ def test_observer_fires_dead_topic_on_live_dds(tmp_path: Path) -> None:
             time.sleep(0.1)
 
         # Phase 2: stop publishing and wait for the dead_topic timeout
-        # (configured to 2.0s above) plus a 1.5s safety margin.
+        # (configured to 1.5s above) plus a generous safety margin since
+        # the daemon's poll cadence (0.5s) plus frequency emission cadence
+        # (1.0s) plus the 1.5s timeout means realistic time-to-fire is
+        # 3-4s in the best case. 8s deadline absorbs Docker scheduler jitter.
         dead_topic_event = None
-        phase2_deadline = time.monotonic() + 5.0
+        phase2_deadline = time.monotonic() + 8.0
         while time.monotonic() < phase2_deadline:
             # Continue spinning the publisher node to keep its executor
             # responsive, but do not publish.
