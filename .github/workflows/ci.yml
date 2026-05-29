@@ -111,4 +111,6 @@ jobs:
           docker run --rm --init \
             -e ROS_LOCALHOST_ONLY=1 \
             blackboxrs:humble-ci \
-            python3 -m pytest -q tests/integration/test_ros_live.py
+            python3 -m pytest -q \
+              tests/integration/test_ros_live.py \
+              tests/integration/test_observer_live.py
