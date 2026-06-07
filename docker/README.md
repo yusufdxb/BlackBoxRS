@@ -1,6 +1,6 @@
 # BlackBoxRS container
 
-A single Dockerfile, pinned to **ROS 2 Humble** — the only distro
+A single Dockerfile, pinned to **ROS 2 Humble**: the only distro
 this project currently claims to support end-to-end.
 
 ## Why this exists

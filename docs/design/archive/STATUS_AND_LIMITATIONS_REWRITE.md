@@ -199,7 +199,7 @@ the v0.4 pivot work began.
   (KBs to a few MB without attachments). With a rosbag2
   attachment, sizes scale with the bag (often hundreds of MB).
   We document this; we do not auto-truncate.
-- **Incident library.** We expect 10–1000 bundles per team. At
+- **Incident library.** We expect 10-1000 bundles per team. At
   10K+ bundles the current "directory of directories" layout
   becomes inefficient; a SQLite index is reserved for v0.5.
 - **Prevention library.** O(N) preflight checks at launch. With

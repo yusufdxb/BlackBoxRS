@@ -83,7 +83,7 @@ Not the ICP yet:
 Today, when a ROS 2 robot fails on a field test:
 
 1. Engineer SSHs in, `ros2 topic list`, `ros2 node list`, scrolls journalctl,
-   greps. Time spent: 20–90 minutes per incident.
+   greps. Time spent: 20-90 minutes per incident.
 2. They paste log fragments into Slack. Three other engineers compare notes
    from memory.
 3. The "fix" is a one-line config change with no record of *why* and no test.

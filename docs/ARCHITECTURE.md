@@ -1,4 +1,4 @@
-# BlackBoxRS — Architecture
+# BlackBoxRS: Architecture
 
 ## System Overview
 
@@ -6,14 +6,14 @@ BlackBoxRS is a single-process observability daemon for ROS 2 robots.
 It passively observes a running ROS 2 graph, collects system telemetry,
 runs a small set of built-in anomaly detectors, and streams every event
 into a structured JSONL log on disk. There is no out-of-process queue,
-no message broker, no remote storage — everything runs in one Python
+no message broker, no remote storage, everything runs in one Python
 process and writes to local files.
 
 The daemon supports two runtime roles (see *Runtime roles* below):
 
-- `onboard` (default) — the daemon runs on the same host as the ROS 2
+- `onboard` (default), the daemon runs on the same host as the ROS 2
   node graph it watches.
-- `observer` — the daemon runs on a separate workstation that reaches
+- `observer`: the daemon runs on a separate workstation that reaches
   the robot's topic graph over DDS. Host-bound collectors and
   detectors auto-disable; DDS-bound detectors keep running.
 
@@ -50,8 +50,8 @@ two sides of the capture are never confused.
 
 ## Module Responsibilities
 
-### `core/` — Shared infrastructure
-- **event_bus.py** — Thread-safe in-process pub/sub for `BlackBoxEvent`.
+### `core/`: Shared infrastructure
+- **event_bus.py**: Thread-safe in-process pub/sub for `BlackBoxEvent`.
   Backed by `queue.Queue`. Subscribers may listen on a specific channel
   (matched against `event.source`) or globally with `channel=None`.
   Every subscriber queue is **bounded** (default capacity
@@ -62,19 +62,19 @@ two sides of the capture are never confused.
   Slow consumers cannot back-pressure or memory-bomb the producers.
   Critical internal consumers (logger, anomaly engine, recorder) ask
   for larger protected queue capacities than the bus default.
-- **schemas.py** — Pydantic v2 models for the event envelope and a few
+- **schemas.py**: Pydantic v2 models for the event envelope and a few
   typed payloads. The envelope enforces a fixed `source` Literal
   (`ros_monitor | system_monitor | anomaly_engine | rosbag_recorder`)
   and `severity` Literal (`debug | info | warning | error | critical`).
-- **config.py** — Dataclass-based YAML config. Unknown keys are
+- **config.py**: Dataclass-based YAML config. Unknown keys are
   warned on by default and raised in strict mode; missing keys fall
   back to dataclass defaults.
-- **clock.py** — Centralised UTC-now and ISO formatting. There is no
+- **clock.py**: Centralised UTC-now and ISO formatting. There is no
   ROS sim-time integration today.
-- **session.py** — Per-run identifier (UUID prefix), hostname, and
+- **session.py**: Per-run identifier (UUID prefix), hostname, and
   start time. Attached as metadata to every emitted event.
 
-### `ros_monitor/` — ROS 2 graph observer
+### `ros_monitor/`: ROS 2 graph observer
 - Stands up as an rclpy node `/blackbox/blackbox_ros_monitor`.
 - Polls the graph on a timer, dynamically subscribes to discovered
   topics with a permissive best-effort QoS profile, records each
@@ -85,9 +85,9 @@ two sides of the capture are never confused.
   `publisher_qos_profiles` and `subscriber_qos_profiles` lists). The
   QoS-mismatch detector pairs each pub × sub combination.
 - If `rclpy` is not importable, the monitor logs a warning at
-  `start()` and stays inactive — the rest of the daemon runs unaffected.
+  `start()` and stays inactive, the rest of the daemon runs unaffected.
 
-### `system_monitor/` — Host telemetry
+### `system_monitor/`: Host telemetry
 - Pure-Python, no ROS dependency.
 - Per-collector classes: `CpuCollector`, `MemoryCollector`,
   `DiskCollector`, `ThermalCollector`, `GpuCollector`. Each returns
@@ -100,14 +100,14 @@ two sides of the capture are never confused.
 - One thread per `SystemMonitor`. Polls every `interval_sec`, publishes
   events to the bus, sleeps the remainder of the interval.
 
-### `anomaly_engine/` — Detection layer
+### `anomaly_engine/`: Detection layer
 - Subscribes globally to the bus (`channel=None`) and runs every event
   through every registered detector. Anomaly events are republished to
   the bus; the engine skips events whose `source == "anomaly_engine"`
   to avoid feedback loops.
 - Four built-in detectors are always loaded. Additional user-supplied
   detectors can be registered via `anomaly_engine.custom_detectors` in
-  `config.yaml` — each entry specifies a dotted import path to a
+  `config.yaml`: each entry specifies a dotted import path to a
   `BaseDetector` subclass plus optional `params` kwargs. The loader
   (`detectors/loader.py`) imports, validates, and instantiates them at
   startup; errors are logged and skipped.
@@ -116,11 +116,11 @@ two sides of the capture are never confused.
 |---|---|---|
 | `ThresholdDetector` | `system.cpu` (`cpu_percent`), `system.memory` (`memory_percent`), `system.gpu` (`gpu_temp_c`) | `anomaly.threshold` |
 | `FrequencyDetector` | `ros.frequency` | `anomaly.frequency` (auto-learned baseline + tolerance floor) |
-| `DeadTopicDetector` | `ros.frequency` | `anomaly.dead_topic` (only fires when *another* event arrives — driven by the bus, not by an internal heartbeat) |
+| `DeadTopicDetector` | `ros.frequency` | `anomaly.dead_topic` (only fires when *another* event arrives, driven by the bus, not by an internal heartbeat) |
 | `QoSMismatchDetector` | `ros.qos` | `anomaly.qos_mismatch` (one event per topic with at least one incompatible pub × sub pair) |
 | Custom detectors | User-defined | User-defined (should use `anomaly.` prefix by convention) |
 
-### `recording/` — Anomaly-triggered rosbag2 capture
+### `recording/`: Anomaly-triggered rosbag2 capture
 - `Rosbag2Recorder` subscribes to `channel="anomaly_engine"` and
   reacts only to configured anomaly types (default: all four built-in
   anomaly event types, overrideable in config).
@@ -133,7 +133,7 @@ two sides of the capture are never confused.
   `rosbag_recorder` source so detached/background mode remains
   debuggable through the normal JSONL log.
 
-### `logging/` — Structured persistence
+### `logging/`: Structured persistence
 - `LoggingPipeline` subscribes globally and drains events to a
   `RotatingJsonlWriter`.
 - The writer rotates by **size** (`log_rotation_mb`) and prunes by
@@ -142,13 +142,13 @@ two sides of the capture are never confused.
   (`blackboxrs_YYYYMMDD_HHMMSS_uuuuuu.jsonl`); lexicographic order
   matches chronological order. Microseconds + exclusive-create on open
   guarantee that multiple rotations within the same wall-clock second
-  always land in distinct files — a previous second-resolution naming
+  always land in distinct files, a previous second-resolution naming
   scheme silently collided under high rotation rates.
 - `LogReader` provides streaming time-range queries, tail, and source/
-  severity filters. There is no separate index file — readers scan in
+  severity filters. There is no separate index file, readers scan in
   order.
 
-### `cli/` — User interface
+### `cli/`: User interface
 - Built with `click`. The `BlackBoxDaemon` orchestrates every component
   and writes a PID file at `~/.blackboxrs/blackboxrs.pid`.
 - `start` runs in the background by default, spawning
@@ -159,7 +159,7 @@ two sides of the capture are never confused.
   carrying `{pid, starttime, cmdline}`. `starttime` is field 22 of
   `/proc/<pid>/stat` (boot-relative jiffies); it is re-checked on every
   `is_running()` call so a recycled PID from an unrelated process is
-  rejected. `stop_running()` relies on this verification — it never
+  rejected. `stop_running()` relies on this verification, it never
   signals an unverified PID. The pidfile is written atomically via
   `mkstemp + os.replace` so concurrent readers never observe a partial
   write. Legacy plain-integer pidfiles (from releases before v0.2) are
@@ -257,7 +257,7 @@ and again, idempotently, from `BlackBoxDaemon.__init__`. When
 | `report.md` header | shows `Host:` | shows `Observer:` + `Observed:` |
 
 The bundle layout, schema version, and serialisation are identical
-across roles — observer-mode bundles are valid input to every existing
+across roles, observer-mode bundles are valid input to every existing
 reader.
 
 ## Configuration

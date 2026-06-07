@@ -117,7 +117,7 @@ raw `BlackBoxEvent` because it carries derivation metadata and ordering.
 - `kind: Literal["raw","derived","trigger","snapshot","external"]`.
 - `subsystem: Literal["ros","system","gpu","anomaly","recorder","config","external"]`.
 - `summary: str`: short label, e.g. `"frequency drop on /scan"`.
-- `confidence: float` (0.0–1.0): 1.0 for raw, lower for derived.
+- `confidence: float` (0.0-1.0): 1.0 for raw, lower for derived.
 - `evidence_ref: str`: pointer like `events.jsonl#L42` or
   `triggers.json#trigger_id`. Always resolvable inside the bundle.
 
@@ -609,7 +609,7 @@ markdown for the report, optional rosbag2 directories under
 `attachments/`. Optional `bundle.tar.gz` companion via `incident pack`.
 
 Why: maximum portability, no DB lock-in, hand-readable, diffable in
-git, attachable to JIRA. Trade-off: many small files. Acceptable ,
+git, attachable to JIRA. Trade-off: many small files. Acceptable,
 bundles are not high-frequency artifacts.
 
 ### B. Timeline model
@@ -630,7 +630,7 @@ Grounded approach. We rank `LikelyCauseHypothesis` objects via:
 
 Each hypothesis carries:
 - `cause: str`: human-readable label.
-- `confidence: float` (0.0–1.0).
+- `confidence: float` (0.0-1.0).
 - `evidence_refs: list[str]`: every source that contributed.
 - `caveat: str | None`: explicit note when confidence < 0.5.
 

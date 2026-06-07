@@ -18,7 +18,7 @@ python scripts/benchmark.py --json-output out.json
 python scripts/benchmark.py --help              # all knobs
 ```
 
-The script measures three things in isolation — it does **not** give
+The script measures three things in isolation, it does **not** give
 you end-to-end numbers under a live ROS 2 graph:
 
 | Benchmark   | What it measures                                            | What it does NOT measure |
@@ -27,7 +27,7 @@ you end-to-end numbers under a live ROS 2 graph:
 | `writer`    | `RotatingJsonlWriter.write()` per-call latency and sustained events/sec | fsync under disk contention, large-payload tail |
 | `pipeline`  | Producer → EventBus → consumer thread → writer pathway      | A real SystemMonitor cadence (1 Hz), rclpy hop |
 
-All three runs use a realistic event payload — the `system.cpu`
+All three runs use a realistic event payload, the `system.cpu`
 record the SystemMonitor actually emits (24 per-CPU values, metadata
 envelope, ~560 bytes of JSON on disk).
 
@@ -64,7 +64,7 @@ workstation numbers below are still the reference narrative.
 - Disk: NVMe SSD, ext4, no fsync pressure
 - Date: 2026-04-16
 
-### `event_bus` — bus-only throughput
+### `event_bus`: bus-only throughput
 
 Single producer loop, single consumer thread, no consumer delay.
 
@@ -79,14 +79,14 @@ Single producer loop, single consumer thread, no consumer delay.
 | drop rate            | 79.75 %   |
 
 **Interpretation.**  A 1k-deep queue cannot absorb a ~935k events/sec
-burst from a single thread driven by a pure-Python consumer — a
+burst from a single thread driven by a pure-Python consumer, a
 majority of events drop, exactly as the backpressure contract
 advertises.  The real SystemMonitor publishes at 1 Hz, so the daemon
 sees **zero drops in normal operation**; this benchmark exists to
 verify the drop *path* is fast and accounted for, not that producers
 always keep up.
 
-### `writer` — RotatingJsonlWriter throughput
+### `writer`: RotatingJsonlWriter throughput
 
 50,000 writes of a realistic `system.cpu` event, one call at a time.
 
@@ -108,7 +108,7 @@ of wall time.  The 118 µs max likely corresponds to a rotation / file
 handle operation; it is still well below one ROS control loop at
 typical rates.
 
-### `pipeline` — end-to-end
+### `pipeline`: end-to-end
 
 100,000 events through producer → EventBus → consumer thread →
 RotatingJsonlWriter.  Deliberately overrun to exercise drop

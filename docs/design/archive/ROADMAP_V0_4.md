@@ -256,7 +256,7 @@ URDF / parameter files via `robot-blackbox attach-launch <path>`.
 
 **Implementation.**
 - `blackboxrs/core/signatures/config.py`: `ConfigSignatureCollector`.
-- `blackboxrs/core/signatures/versions.py` ,
+- `blackboxrs/core/signatures/versions.py`,
   `VersionSignatureCollector` (apt + pip + os-release + nvidia-smi).
 - Daemon hook: write signatures once at session start to a small
   cache (`~/.blackboxrs/state/session_<id>/signatures/`). Builder
@@ -390,13 +390,13 @@ add `docs/incident-anatomy.md`, record the demo screencast.
 
 | Week (from 2026-05-07) | Milestone |
 |---|---|
-| 1–2  | M1 |
+| 1-2  | M1 |
 | 3    | M2 |
-| 4–5  | M3 (incl. M3.5 snapshotter) |
+| 4-5  | M3 (incl. M3.5 snapshotter) |
 | 5    | M4 (parallel with late M3) |
 | 6    | M5 |
 | 7    | M8 (docs + screencast for MVP cut) |
-| 8    | v0.4-rc1 (M1–M5 + M8) |
+| 8    | v0.4-rc1 (M1-M5 + M8) |
 | 9    | M6 if time |
 | 10   | M7 if time |
 | 11   | v0.4.0 ship |

@@ -82,7 +82,7 @@ Progress key:
   **Deps:** 0.1. **Verify:** invalid hashes rejected.
 
 - [ ] **1.9** Add `tests/unit/test_incident_models.py` covering all
-  models. **Priority:** P0. **Deps:** 1.1–1.8. **Verify:** tests
+  models. **Priority:** P0. **Deps:** 1.1-1.8. **Verify:** tests
   green; coverage ≥ 90% on `models.py`.
 
 ---
@@ -230,7 +230,7 @@ Progress key:
   `ConfigSignatureCollector.collect() -> ConfigSignature`. Hashes
   ROS distro, ROS_DOMAIN_ID, RMW impl, env subset, attached
   launch/param/URDF files. **Priority:** P0. **Deps:** 1.8.
-  **Verify:** `tests/unit/test_config_signature.py` ,
+  **Verify:** `tests/unit/test_config_signature.py`,
   determinism, missing-file handling.
 
 - [ ] **8.2** Implement `core/signatures/versions.py` with
@@ -304,7 +304,7 @@ Progress key:
 ## 10. CLI: incident commands (M2)
 
 - [x] **10.1** `robot-blackbox incident build [--since DURATION]
-  [--start ISO] [--end ISO] [--note TEXT] [--tag TAG]` ,
+  [--start ISO] [--end ISO] [--note TEXT] [--tag TAG]`,
   produces a bundle. **Priority:** P0. **Deps:** 3.x. **Verify:**
   manual run on fixture session.
 
@@ -395,7 +395,7 @@ Progress key:
 ## 13. Documentation
 
 - [x] **13.1** Rewrite `README.md` per `PIVOT_BRIEF.md` §6
-  requirements. **Priority:** P0. **Deps:** all of M1–M5.
+  requirements. **Priority:** P0. **Deps:** all of M1-M5.
   **Verify:** README links resolve; sample bundle reference works.
 
 - [ ] **13.2** Add `docs/incident-anatomy.md` walking through
@@ -440,15 +440,15 @@ Progress key:
   **Verify:** `pyproject.toml`, `__init__.py`, README badge.
 
 - [ ] **16.2** Bump version to `0.4.0` once MVP criteria pass.
-  **Priority:** P1. **Deps:** M1–M5 + M8. **Verify:** all MVP
+  **Priority:** P1. **Deps:** M1-M5 + M8. **Verify:** all MVP
   criteria from `ROADMAP_V0_4.md` §4 met.
 
 ---
 
 ## Summary at end of this session
 
-Completed in this session: 0.1, 0.2, 0.3, 1.1–1.8, 2.1–2.2,
-3.1–3.2, 4.1–4.2, 7.1, 10.1–10.3, 11.1–11.2, 11.6, 12.1, 13.1.
+Completed in this session: 0.1, 0.2, 0.3, 1.1-1.8, 2.1-2.2,
+3.1-3.2, 4.1-4.2, 7.1, 10.1-10.3, 11.1-11.2, 11.6, 12.1, 13.1.
 
 Next 10 highest-leverage tasks (in order):
 1. 0.6: fixtures (unblocks builder tests on real-shaped data)
@@ -456,10 +456,10 @@ Next 10 highest-leverage tasks (in order):
 3. 2.3: bundle layout test
 4. 5.1 + 5.2: snapshotter projection
 5. 6.1: timeline ordering
-6. 6.2–6.4: derived event detectors
+6. 6.2-6.4: derived event detectors
 7. 8.1 + 8.2: signature collectors
 8. 8.4: daemon session-start hook
-9. 9.1–9.5: fingerprint
+9. 9.1-9.5: fingerprint
 10. 7.2: full likely-cause ranking
 
 These ten tasks land the MVP. Anything beyond is upside.

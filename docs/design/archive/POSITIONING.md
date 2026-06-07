@@ -36,7 +36,7 @@ BlackBoxRS. Cut it.
 
 ### ICP 1: Robotics platform / reliability engineer
 
-- 5–50 robots in the field. Pixel-counted release process.
+- 5-50 robots in the field. Pixel-counted release process.
 - They own the launch readiness review and the postmortem.
 - Their day involves Slack pings about "robot 14 is acting weird."
 - Procurement: usually sneaks BlackBoxRS into the standard image
@@ -44,9 +44,9 @@ BlackBoxRS. Cut it.
 - Pricing posture: per-fleet or per-host self-hosted; "cloud SaaS
   observability" pricing is poison here.
 
-### ICP 2: Field robotics startup (Series Seed–B)
+### ICP 2: Field robotics startup (Series Seed-B)
 
-- 1–20 engineers. ROS 2 Humble or Iron.
+- 1-20 engineers. ROS 2 Humble or Iron.
 - One person does "DevOps + reliability" in their copious spare
   time.
 - Active customers exist but the robot is still misbehaving in
