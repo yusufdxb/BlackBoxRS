@@ -248,9 +248,10 @@ and again, idempotently, from `BlackBoxDaemon.__init__`. When
 | Subsystem | Onboard | Observer |
 |---|---|---|
 | `system_monitor` (CPU / memory / disk / GPU / thermal) | enabled | **disabled** (would describe the observer host) |
-| `anomaly_engine.ProcessSignalsDetector` (per-process `/proc`) | not currently wired (no producer yet); would be skipped in observer mode when re-added | n/a |
-| `frequency`, `dead_topic`, `qos_mismatch` detectors (live today) | enabled | enabled (DDS-bound, valid remotely) |
-| `tf_topology`, `clock_skew` detectors | not currently wired (no producer yet); DDS-bound when re-added | n/a |
+| `anomaly_engine.ProcessSignalsDetector` (per-process `/proc`) | enabled (producer: `ProcessSignalsCollector`) | wired but dormant: producer auto-disables (would sample observer host, not robot) |
+| `frequency`, `dead_topic`, `qos_mismatch` detectors | enabled | enabled (DDS-bound, valid remotely) |
+| `tf_topology` detector | enabled (producer: `TfSnapshotter`, emits `ros.tf` events via DDS) | enabled (DDS-bound, observer-mode-compatible) |
+| `clock_skew` detector | enabled (producer: `ClockSkewCollector`, emits `system.clock_skew`; `ros:/clock` source is DDS-bound) | enabled (DDS-compatible, active in both modes) |
 | `Session.observed_host` / `Incident.observed_host` | `None` | populated from config |
 | `Session.role` | `"onboard"` | `"observer"` (surfaces in event metadata) |
 | `Incident.observer_host` | `None` | local hostname |
