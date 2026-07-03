@@ -386,6 +386,115 @@ def replay(log_file: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# replay-bag
+# ---------------------------------------------------------------------------
+
+
+def _resolve_bag(bag: Path) -> Path:
+    """Resolve BAG (a bag file or a rosbag2 directory) to a bag file.
+
+    Accepts a ``.mcap`` or ``.db3`` file directly, or a rosbag2 directory
+    containing one (``.mcap`` preferred when both are present).
+    """
+    if bag.is_file():
+        return bag
+    for pattern in ("*.mcap", "*.db3"):
+        hits = sorted(bag.glob(pattern))
+        if hits:
+            return hits[0]
+    raise click.ClickException(f"No .mcap or .db3 file found under {bag}")
+
+
+@cli.command("replay-bag")
+@click.argument("bag", type=click.Path(exists=True, path_type=Path))
+@click.option("--out", "incidents_dir", type=click.Path(path_type=Path),
+              default=None, help="Directory to write the incident bundle into.")
+@click.option("--timeout", "timeout_sec", default=3.0, show_default=True,
+              help="Dead-topic silence threshold in seconds.")
+@click.option("--drop-topic", default=None,
+              help="Inject a fault: silence this topic after --drop-after.")
+@click.option("--drop-after", "drop_after", type=float, default=None,
+              help="Seconds after bag start at which --drop-topic goes silent.")
+@click.option("--title", default=None, help="Incident title.")
+@click.option("--tag", "tags", multiple=True, help="Bundle tag (repeatable).")
+def replay_bag_cmd(
+    bag: Path,
+    incidents_dir: Path | None,
+    timeout_sec: float,
+    drop_topic: str | None,
+    drop_after: float | None,
+    title: str | None,
+    tags: tuple[str, ...],
+) -> None:
+    """Replay a recorded rosbag2 (.mcap or .db3) through the detectors offline.
+
+    Reads BAG (a ``.mcap``/``.db3`` file or a rosbag2 directory), replays
+    every message as a topic-arrival event stamped at bag time, runs the
+    real dead-topic detector, and builds an incident bundle from any anomaly
+    it finds.  Use --drop-topic/--drop-after to inject a sensor dropout into
+    an otherwise-healthy bag.
+    """
+    import tempfile
+
+    from blackboxrs.incident.api import build_incident
+    from blackboxrs.recording.bag_replay import replay_bag
+
+    mcap = _resolve_bag(bag)
+    work = Path(tempfile.mkdtemp(prefix="bbrs_replay_"))
+    log_dir = work / "logs"
+    log_file = log_dir / "blackboxrs_replay.jsonl"
+    session_id = f"replay_{mcap.stem}"
+
+    click.echo(click.style(f"Replaying {mcap.name} through the detectors...",
+                           fg="cyan"))
+    result = replay_bag(
+        mcap,
+        log_file,
+        session_id=session_id,
+        dead_topic_timeout_sec=timeout_sec,
+        drop_topic=drop_topic,
+        drop_after_sec=drop_after,
+    )
+
+    click.echo(
+        f"  {result.event_count} arrival events across "
+        f"{len(result.topics)} topics "
+        f"({result.window_start.isoformat()} -> {result.window_end.isoformat()})"
+    )
+    if drop_topic:
+        click.echo(click.style(
+            f"  Injected dropout: {drop_topic} silenced at "
+            f"{result.drop_time.isoformat()}", fg="yellow"))
+    for a in result.anomalies:
+        click.echo(click.style(
+            f"  ANOMALY {a.event_type}: {a.data.get('topic')} "
+            f"silent {a.data.get('value'):.1f}s", fg="red"))
+
+    if not result.anomalies:
+        click.echo(click.style("No anomalies detected; no bundle built.",
+                               fg="yellow"))
+        return
+
+    cfg = BlackBoxConfig.default()
+    cfg.log_dir = str(log_dir)
+    bundle = build_incident(
+        window_start=result.window_start,
+        window_end=result.window_end,
+        config=cfg,
+        incidents_dir=incidents_dir,
+        title=title or f"Replay of {mcap.name}",
+        notes=(
+            f"Offline replay of recorded bag {mcap.name}. "
+            + (f"Injected dropout of {drop_topic} at "
+               f"{result.drop_time.isoformat()} into otherwise-real data."
+               if drop_topic else "No fault injected.")
+        ),
+        tags=tags or ("replay",),
+    )
+    click.echo(click.style(f"Incident bundle: {bundle}", fg="green"))
+
+
+# ---------------------------------------------------------------------------
 # config
 # ---------------------------------------------------------------------------
 

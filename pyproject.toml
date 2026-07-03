@@ -53,6 +53,12 @@ dev = [
 prometheus = [
     "prometheus_client>=0.17",
 ]
+# Offline replay of recorded rosbag2 .mcap files through the detectors
+# (blackboxrs.recording.bag_replay).  Reads only topic + timestamp, so it
+# needs the storage reader but none of the ROS message packages.
+replay = [
+    "mcap>=1.0",
+]
 
 [project.scripts]
 robot-blackbox = "blackboxrs.cli.app:cli"

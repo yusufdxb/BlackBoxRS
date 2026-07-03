@@ -1,0 +1,23 @@
+{
+  "algorithm_version": "v1",
+  "cluster_id": null,
+  "fingerprint_id": "fpr_f2e0c1de554d1078",
+  "human_label": null,
+  "payload": {
+    "detector_classes": [
+      "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector"
+    ],
+    "signature_fields": {
+      "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector": [
+        [
+          "topic",
+          "/source/utlidar/robot_odom"
+        ]
+      ]
+    },
+    "subsystems": [
+      "ros"
+    ],
+    "topology_signature": "c68caae3"
+  }
+}
