@@ -195,3 +195,125 @@ def test_db3_injected_dropout_fires_detector(tmp_path):
     assert len(result.anomalies) == 1
     assert result.anomalies[0].data["topic"] == "/die"
     assert not Clock.is_virtual()
+
+
+# -- split rosbag2 directories ----------------------------------------------
+#
+# ``ros2 bag record`` chunks a long/large recording into several
+# sequentially-numbered .db3 files under one metadata.yaml. A real GO2
+# hardware bag (94325 msgs, 329.6 s) recorded during hardware evaluation
+# split this way: file 0 held ~91% of messages, file 1 the trailing ~9%.
+# Reading only the first split silently truncates the bag, so these tests
+# pin the merge behavior with synthetic multi-file bags.
+
+
+def _write_metadata_yaml(dir_path: Path, relative_file_paths: list[str]) -> None:
+    import yaml
+
+    metadata = {
+        "rosbag2_bagfile_information": {
+            "version": 5,
+            "storage_identifier": "sqlite3",
+            "relative_file_paths": relative_file_paths,
+        }
+    }
+    with open(dir_path / "metadata.yaml", "w", encoding="utf-8") as fh:
+        yaml.safe_dump(metadata, fh)
+
+
+def test_read_bag_arrivals_merges_split_db3_files(tmp_path):
+    bag_dir = tmp_path / "split_bag"
+    bag_dir.mkdir()
+    _write_db3(bag_dir / "split_bag_0.db3", [("/a", 100), ("/a", 200)])
+    _write_db3(bag_dir / "split_bag_1.db3", [("/a", 50), ("/b", 300)])
+    _write_metadata_yaml(bag_dir, ["split_bag_0.db3", "split_bag_1.db3"])
+
+    arrivals = read_bag_arrivals(bag_dir)
+
+    # All 4 messages across both split files are present, sorted by time,
+    # not just the 2 from the first file.
+    assert arrivals == [("/a", 50), ("/a", 100), ("/a", 200), ("/b", 300)]
+
+
+def test_read_bag_arrivals_directory_falls_back_to_glob_without_metadata(tmp_path):
+    bag_dir = tmp_path / "no_metadata_bag"
+    bag_dir.mkdir()
+    _write_db3(bag_dir / "bag_0.db3", [("/a", 10)])
+    _write_db3(bag_dir / "bag_1.db3", [("/a", 20)])
+
+    arrivals = read_bag_arrivals(bag_dir)
+
+    assert arrivals == [("/a", 10), ("/a", 20)]
+
+
+def test_replay_bag_reads_full_split_directory(tmp_path):
+    bag_dir = tmp_path / "split_bag"
+    bag_dir.mkdir()
+    step = 100_000_000  # 0.1 s in ns
+    rows_0 = [("/keep", i * step) for i in range(60)]
+    rows_1 = [("/keep", i * step) for i in range(60, 90)]
+    _write_db3(bag_dir / "split_bag_0.db3", rows_0)
+    _write_db3(bag_dir / "split_bag_1.db3", rows_1)
+    _write_metadata_yaml(bag_dir, ["split_bag_0.db3", "split_bag_1.db3"])
+
+    result = replay_bag(
+        bag_dir, tmp_path / "log.jsonl", session_id="split",
+        dead_topic_timeout_sec=2.0,
+    )
+
+    # 90 messages total: reading only split_bag_0.db3 would report 60.
+    assert result.event_count == 90
+    assert result.topics == {"/keep": 90}
+
+
+def test_replay_bag_max_duration_trims_window(tmp_path):
+    db3 = tmp_path / "bag_0.db3"
+    step = 1_000_000_000  # 1 s in ns
+    rows = [("/keep", i * step) for i in range(20)]
+    _write_db3(db3, rows)
+
+    result = replay_bag(
+        db3, tmp_path / "log.jsonl", session_id="trimmed",
+        dead_topic_timeout_sec=2.0, max_duration_sec=5.0,
+    )
+
+    # Messages at t=0..5s inclusive survive the 5s cutoff; t=6..19s do not.
+    assert result.event_count == 6
+    assert result.topics == {"/keep": 6}
+
+
+# -- real GO2 hardware bag (opt-in, local-machine only) ---------------------
+#
+# The real recording this repo's headline claim rests on lives outside the
+# repo (600+ MB, not checked in). This test only runs when a developer sets
+# BLACKBOXRS_REAL_BAG to its local path; it is skipped everywhere else
+# (including CI), which is expected and disclosed in the README rather than
+# silently green.
+
+
+REAL_BAG_ENV = "BLACKBOXRS_REAL_BAG"
+
+
+@pytest.mark.skipif(
+    REAL_BAG_ENV not in __import__("os").environ,
+    reason=(
+        f"set {REAL_BAG_ENV}=<path to a real rosbag2 dir> to exercise the "
+        "real GO2 hardware bag locally; not available in CI"
+    ),
+)
+def test_replay_real_go2_hardware_bag_is_clean_and_full_length():
+    import os
+
+    bag_dir = Path(os.environ[REAL_BAG_ENV])
+    log_file = bag_dir.parent / "_bbrs_real_bag_test.jsonl"
+    result = replay_bag(
+        bag_dir, log_file, session_id="real_bag_ci_check",
+        dead_topic_timeout_sec=3.0,
+    )
+    log_file.unlink(missing_ok=True)
+
+    # The untouched recording is healthy: no injected fault, no anomaly.
+    assert result.anomalies == []
+    # Sanity: this is the real ~330s / ~94k msg recording, not a stub.
+    assert result.event_count > 90_000
+    assert (result.window_end - result.window_start).total_seconds() > 300

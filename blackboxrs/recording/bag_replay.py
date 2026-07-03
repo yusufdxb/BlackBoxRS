@@ -92,34 +92,89 @@ def _read_db3_arrivals(path: Path) -> list[tuple[str, int]]:
     return [(name, int(ts)) for name, ts in rows if name is not None]
 
 
-def read_bag_arrivals(bag_path: str | Path) -> list[tuple[str, int]]:
-    """Return ``(topic, timestamp_ns)`` for every message in a rosbag2 file.
+def _split_db3_files(dir_path: Path) -> list[Path]:
+    """Return the ``.db3`` files that make up a rosbag2 recording directory.
 
-    Supports both storage formats by file extension: ``.mcap`` (needs the
-    optional ``mcap`` dependency) and ``.db3`` (stdlib sqlite3).  Only the
-    topic name and message timestamp are read, so no message
-    deserialization (and no ROS message packages) is required.  The list
-    is sorted ascending by timestamp.
+    A long or large recording is split by ``ros2 bag record`` into several
+    sequentially-numbered ``.db3`` files (``<name>_0.db3``, ``<name>_1.db3``,
+    ...) once a size/duration threshold is hit; all of them belong to the
+    same bag and must be read together or messages are silently dropped.
+    ``metadata.yaml``'s ``relative_file_paths`` is the authoritative list
+    and is preferred; a sorted glob is the fallback when metadata is
+    missing or unreadable.
+    """
+    metadata_path = dir_path / "metadata.yaml"
+    if metadata_path.exists():
+        import yaml
+
+        with open(metadata_path, "r", encoding="utf-8") as fh:
+            metadata = yaml.safe_load(fh)
+        try:
+            rel_paths = metadata["rosbag2_bagfile_information"][
+                "relative_file_paths"
+            ]
+        except (KeyError, TypeError):
+            rel_paths = None
+        if rel_paths:
+            return [dir_path / rel for rel in rel_paths]
+    return sorted(dir_path.glob("*.db3"))
+
+
+def read_bag_arrivals(bag_path: str | Path) -> list[tuple[str, int]]:
+    """Return ``(topic, timestamp_ns)`` for every message in a rosbag2 bag.
+
+    Accepts either a single storage file or a rosbag2 recording directory:
+
+    * ``.mcap`` file: read directly (needs the optional ``mcap``
+      dependency).
+    * ``.db3`` file: read directly with stdlib ``sqlite3``.
+    * Directory: treated as a rosbag2 recording. If it contains an
+      ``.mcap`` file, that is read. Otherwise every ``.db3`` split file
+      listed in ``metadata.yaml`` (or found by glob) is read and merged,
+      so a bag that ``ros2 bag record`` split across multiple ``.db3``
+      files is replayed in full rather than truncated to the first file.
+
+    Only the topic name and message timestamp are read, so no message
+    deserialization (and no ROS message packages) is required. The
+    returned list is sorted ascending by timestamp.
 
     Args:
-        bag_path: Path to a rosbag2 ``.mcap`` or ``.db3`` file.
+        bag_path: Path to a rosbag2 ``.mcap``/``.db3`` file, or a rosbag2
+            recording directory.
 
     Returns:
         Arrival tuples sorted by ``timestamp_ns``.
 
     Raises:
-        ValueError: If the file extension is not a supported storage format.
+        ValueError: If the path is not a supported storage format, or a
+            directory with no readable ``.mcap``/``.db3`` bag files.
     """
     bag_path = Path(bag_path)
-    suffix = bag_path.suffix.lower()
-    if suffix == ".mcap":
-        arrivals = _read_mcap_arrivals(bag_path)
-    elif suffix == ".db3":
-        arrivals = _read_db3_arrivals(bag_path)
+
+    if bag_path.is_dir():
+        mcap_files = sorted(bag_path.glob("*.mcap"))
+        if mcap_files:
+            arrivals = _read_mcap_arrivals(mcap_files[0])
+        else:
+            db3_files = _split_db3_files(bag_path)
+            if not db3_files:
+                raise ValueError(
+                    f"No .mcap or .db3 bag files found under {bag_path}"
+                )
+            arrivals = []
+            for db3_file in db3_files:
+                arrivals.extend(_read_db3_arrivals(db3_file))
     else:
-        raise ValueError(
-            f"Unsupported bag format {suffix!r} (expected .mcap or .db3)"
-        )
+        suffix = bag_path.suffix.lower()
+        if suffix == ".mcap":
+            arrivals = _read_mcap_arrivals(bag_path)
+        elif suffix == ".db3":
+            arrivals = _read_db3_arrivals(bag_path)
+        else:
+            raise ValueError(
+                f"Unsupported bag format {suffix!r} (expected .mcap or .db3)"
+            )
+
     arrivals.sort(key=lambda item: item[1])
     return arrivals
 
@@ -138,11 +193,13 @@ def replay_bag(
     drop_topic: str | None = None,
     drop_after_sec: float | None = None,
     ignore_topics: tuple[str, ...] = ("/parameter_events", "/rosout"),
+    max_duration_sec: float | None = None,
 ) -> ReplayResult:
     """Replay a bag through the real dead-topic detector and write a log.
 
     Args:
-        mcap_path: Path to the recorded ``.mcap`` bag.
+        mcap_path: Path to the recorded bag (``.mcap``/``.db3`` file or a
+            rosbag2 recording directory).
         log_path: Destination JSONL log (created/overwritten).
         session_id: Session id stamped on every emitted event.
         dead_topic_timeout_sec: Silence threshold for the detector.
@@ -153,6 +210,13 @@ def replay_bag(
             goes silent.  Required when ``drop_topic`` is set.
         ignore_topics: Topics not treated as liveness signals (bag/rosout
             bookkeeping), skipped from replay.
+        max_duration_sec: If set, only replay messages within this many
+            seconds of the bag's first message; every later message is
+            dropped from the replay entirely (not just the faulted topic).
+            This trims a long real-world recording down to a short,
+            reviewable window without altering the timing or content of
+            the messages that remain; it is a size/readability cut on the
+            checked-in demo artifact, not a fabrication of any kind.
 
     Returns:
         A :class:`ReplayResult` describing the window and detected anomalies.
@@ -170,6 +234,9 @@ def replay_bag(
         raise ValueError(f"No replayable messages in {mcap_path}")
 
     start_ns = arrivals[0][1]
+    if max_duration_sec is not None:
+        end_cutoff_ns = start_ns + int(max_duration_sec * _NS_PER_SEC)
+        arrivals = [(t, ns) for t, ns in arrivals if ns <= end_cutoff_ns]
     window_start = _ns_to_dt(start_ns)
     drop_dt: datetime | None = None
     cutoff_ns: int | None = None

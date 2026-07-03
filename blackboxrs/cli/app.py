@@ -391,17 +391,19 @@ def replay(log_file: str | None) -> None:
 
 
 def _resolve_bag(bag: Path) -> Path:
-    """Resolve BAG (a bag file or a rosbag2 directory) to a bag file.
+    """Resolve BAG (a bag file or a rosbag2 directory) to something readable.
 
-    Accepts a ``.mcap`` or ``.db3`` file directly, or a rosbag2 directory
-    containing one (``.mcap`` preferred when both are present).
+    Accepts a ``.mcap`` or ``.db3`` file directly. A directory is passed
+    through unchanged: :func:`~blackboxrs.recording.bag_replay.read_bag_arrivals`
+    reads a rosbag2 directory itself, including merging every ``.db3``
+    split file a long recording was chunked into (a single-file glob
+    would silently truncate the bag to its first split).
     """
     if bag.is_file():
         return bag
     for pattern in ("*.mcap", "*.db3"):
-        hits = sorted(bag.glob(pattern))
-        if hits:
-            return hits[0]
+        if sorted(bag.glob(pattern)):
+            return bag
     raise click.ClickException(f"No .mcap or .db3 file found under {bag}")
 
 

@@ -1,0 +1,119 @@
+{
+  "bundle_path": "/tmp/bbrs_realhwbag_g7hl03aa/incidents/inc_2026-04-06T18-13-40_eb8d6333",
+  "created_at": "2026-07-03T15:30:55.484611Z",
+  "fingerprint": {
+    "algorithm_version": "v1",
+    "cluster_id": null,
+    "fingerprint_id": "fpr_a9c8fbf8a4271883",
+    "human_label": null,
+    "payload": {
+      "detector_classes": [
+        "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector"
+      ],
+      "signature_fields": {
+        "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector": [
+          [
+            "topic",
+            "/utlidar/robot_pose"
+          ]
+        ]
+      },
+      "subsystems": [
+        "ros"
+      ],
+      "topology_signature": "61aba542"
+    }
+  },
+  "host": "mewtwo",
+  "incident_id": "inc_2026-04-06T18-13-40_eb8d6333",
+  "likely_causes": [
+    {
+      "cause": "Topic /utlidar/robot_pose stopped emitting messages.",
+      "caveat": null,
+      "confidence": 0.98,
+      "evidence_refs": [
+        "events.jsonl#L2231",
+        "triggers.json#trg_c56eff95",
+        "snapshots.json#1",
+        "snapshots.json#1",
+        "snapshots.json#1",
+        "snapshots.json#1"
+      ],
+      "precursor_chain": [
+        {
+          "evidence_ref": "snapshots.json#1",
+          "gap_sec": 6.993,
+          "kind": "derived",
+          "relevance": 0.153,
+          "subsystem": "ros",
+          "summary": "topic /gnss appeared on the graph",
+          "t": "2026-04-06T18:13:41.497738Z"
+        },
+        {
+          "evidence_ref": "snapshots.json#1",
+          "gap_sec": 6.993,
+          "kind": "derived",
+          "relevance": 0.153,
+          "subsystem": "ros",
+          "summary": "topic /multiplestate appeared on the graph",
+          "t": "2026-04-06T18:13:41.497738Z"
+        },
+        {
+          "evidence_ref": "snapshots.json#1",
+          "gap_sec": 6.993,
+          "kind": "derived",
+          "relevance": 0.153,
+          "subsystem": "ros",
+          "summary": "topic /utlidar/cloud appeared on the graph",
+          "t": "2026-04-06T18:13:41.497738Z"
+        },
+        {
+          "evidence_ref": "snapshots.json#1",
+          "gap_sec": 6.993,
+          "kind": "derived",
+          "relevance": 0.23,
+          "subsystem": "ros",
+          "summary": "topic /utlidar/robot_pose appeared on the graph",
+          "t": "2026-04-06T18:13:41.497738Z"
+        }
+      ],
+      "reasoning": [
+        "base score for DeadTopicDetector: 0.65.",
+        "severity bonus (warning): +0.03.",
+        "precursor bonus: +0.30.",
+        "precursor: topic /gnss appeared on the graph (7.0s before trigger, subsystem=ros, relevance=0.15)",
+        "precursor: topic /multiplestate appeared on the graph (7.0s before trigger, subsystem=ros, relevance=0.15)",
+        "precursor: topic /utlidar/cloud appeared on the graph (7.0s before trigger, subsystem=ros, relevance=0.15)",
+        "precursor: topic /utlidar/robot_pose appeared on the graph (7.0s before trigger, subsystem=ros, relevance=0.23)",
+        "precursor contribution capped at 0.30 (raw sum was 0.69).",
+        "diff bonus: +0.00.",
+        "no prior bundle on this host; signature diff not informative.",
+        "final confidence (clamped): 0.98."
+      ],
+      "recurrence": null,
+      "score": 0.98,
+      "subsystem": "ros"
+    }
+  ],
+  "linked_prevention_rules": [],
+  "notes": "Real-hardware replay. Source data is a genuine rosbag2 recording from a physical Unitree GO2 (extended_5min, full recording ~330s / ~94k messages across /utlidar/robot_pose, /utlidar/imu, /utlidar/cloud, /gnss, /multiplestate; the full recording is not included in this repo due to size). This bundle replays the first 20s of that recording (a size cut on the committed artifact, not a content change). The recording carries no /odom topic; /utlidar/robot_pose is the pose-equivalent liveness signal used here. A dropout of /utlidar/robot_pose was INJECTED at 2026-04-06T18:13:45.497738+00:00 (silenced for the remainder of the window) into otherwise-real data; verified separately that the untouched, full 330s recording produces zero anomalies on its own. The dead-topic anomaly below was produced by the real DeadTopicDetector from bag timing, not hand-seeded. This validates PASSIVE forensic replay only: no control loop or closed-loop robot behavior was exercised. Reproduce with: python scripts/generate_real_hw_bag_incident.py --bag <path>",
+  "observed_host": null,
+  "observer_host": null,
+  "schema_version": "1.0",
+  "session_id": "real_hw_bag_pose_dropout",
+  "sessions": [],
+  "severity": "warning",
+  "summary": "Topic /utlidar/robot_pose stopped emitting messages.",
+  "tags": [
+    "real-hw-bag",
+    "go2",
+    "pose-dropout",
+    "dead-topic"
+  ],
+  "title": "Robot-pose dropout on a real GO2 hardware bag",
+  "triggers": [
+    "trg_c56eff95"
+  ],
+  "window_end": "2026-04-06T18:14:01.496987Z",
+  "window_start": "2026-04-06T18:13:40.497738Z"
+}

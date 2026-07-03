@@ -1,0 +1,1104 @@
+[
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:40.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": null,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:41.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": null,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": null,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.550930432383979,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 217.18526163439728,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 19.297466470362547,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:42.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9992689628063418,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9961695160267702,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.678292475912183,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 223.91090853642427,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.61521906594564,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:43.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9990347615853643,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9969991144195246,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.312532697042474,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 223.30056546402193,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.662230480300682,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:44.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9991959679876756,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9954732377586978,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.315485758734754,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 225.72064136263037,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.88449620819145,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:45.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9993127865870431,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9983614552353781,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.286374558825678,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 221.77177909756625,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:46.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9993282465560238,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9957762239570512,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.263542150393757,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 269.19487312980226,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:47.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9991255323629334,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9954826877094026,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.207434732351429,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 198.55097498456269,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:48.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9993849694953079,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9968400459626596,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.489679497620125,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 228.21546461017147,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:49.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9992978353815865,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9963993316631554,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.516901264886584,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 226.69635179828015,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:50.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.999325053859973,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9965753147732462,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 14.95607102817604,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 567.3411217922533,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:51.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9994325351991369,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9968734698490674,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.408647422303552,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 294.7150518050118,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:52.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9992720882414973,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9956927942742025,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.217640642081562,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 231.429409864262,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:53.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9994644239953646,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9964169762238608,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.502232011364997,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 236.4148352200419,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:54.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9991957163928082,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9970444412219968,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.394927854672622,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 225.88890106179076,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:55.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9983330653108553,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.995766965751349,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.378230816356767,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 280.3284552444408,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:56.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9993548185278681,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9958474327197084,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 14.906438397816649,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 238.84903427364216,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:57.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9985437627196564,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9965943669709867,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.50191599806257,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 165.72924680366287,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:58.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 1.000060146617398,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9970361515108858,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.440699807102426,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 216.61323901126454,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:13:59.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9990834917579194,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9956144676123377,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 14.87919145521364,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 246.85061810160516,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-04-06T18:14:00.497738Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 0.9990861618639832,
+        "msg_type": null,
+        "name": "/gnss",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 0.9962587435627464,
+        "msg_type": null,
+        "name": "/multiplestate",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 15.547221864592933,
+        "msg_type": null,
+        "name": "/utlidar/cloud",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 198.97302065121082,
+        "msg_type": null,
+        "name": "/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 18.83936902130269,
+        "msg_type": null,
+        "name": "/utlidar/robot_pose",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  }
+]

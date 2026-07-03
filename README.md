@@ -6,6 +6,53 @@
 ![ROS 2 Humble (verified)](https://img.shields.io/badge/ROS%202-Humble%20(verified)-brightgreen)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 
+## Works on real GO2 telemetry
+
+The offline bag-replay path has been run against a genuine rosbag2
+recording captured on a physical Unitree GO2 (not simulation): topics
+`/utlidar/robot_pose`, `/utlidar/imu`, `/utlidar/cloud`, `/gnss`, and
+`/multiplestate`, ~94k messages over a 330-second session. The untouched
+recording replays clean end to end (zero anomalies); to exercise the
+detector honestly, a `/utlidar/robot_pose` dropout is injected into an
+otherwise-real window of that same recording, and the real
+`DeadTopicDetector` (not a stand-in) finds it from bag timing alone,
+with no hand-written anomaly. This demonstrates passive, offline
+forensic replay against real hardware data. It is **not** a claim that
+BlackBoxRS has run in a closed control loop on the robot, or that it has
+been validated live on hardware; the loop it closes here is
+record-then-replay, off to the side of the robot's own control stack.
+
+Reproduce against your own recording (the source bag is ~680&nbsp;MB and
+is not checked into this repo):
+
+```
+robot-blackbox replay-bag <path-to-your-rosbag2-dir> \
+  --drop-topic /utlidar/robot_pose --drop-after 60 --timeout 3.0
+```
+
+Real output from the committed example
+(`scripts/generate_real_hw_bag_incident.py`, trimmed to a 20-second
+window of the same recording so the checked-in artifact stays small):
+
+```
+$ python scripts/generate_real_hw_bag_incident.py --bag /path/to/extended_5min
+Dead topic detected: /utlidar/robot_pose silent for 3.0s
+Real-hw-bag bundle: examples/incidents/inc_real_hw_bag_pose_dropout
+  events=5439 topics=['/gnss', '/multiplestate', '/utlidar/cloud', '/utlidar/imu', '/utlidar/robot_pose']
+  anomaly: /utlidar/robot_pose silent 3.0s @ 2026-04-06T18:13:48.490684+00:00
+```
+
+The incident report BlackBoxRS generated from that run:
+
+![Real GO2 hardware-bag incident report](docs/assets/real_go2_bag_incident_report.png)
+
+Full bundle: `examples/incidents/inc_real_hw_bag_pose_dropout/`. The
+sim-bag counterpart lives at
+`examples/incidents/inc_real_bag_odom_dropout/`; both are replayed
+through the same code path documented below.
+
+---
+
 > Status: **v0.4.1**. Incident-bundle pipeline, report generator,
 > fingerprinting, prevention runner, and observer-mode (off-board
 > capture) all work. All seven anomaly detectors are live, with
@@ -230,8 +277,17 @@ bundle.
   a real rclpy publisher and asserts a `runtime.role: observer` daemon
   fires `anomaly.dead_topic` over DDS within 5s of the publisher going
   silent. Runs inside the Docker Humble CI job.
-- **532 tests pass + 1 rclpy-gated skip on hosted runners**. CI runs
-  Python 3.10 / 3.11 / 3.12 lint + unit + integration, a benchmark
+- **Offline rosbag2 replay.** `robot-blackbox replay-bag` (and
+  `blackboxrs.recording.bag_replay`) replay a recorded `.mcap` or
+  `.db3` bag through the real detectors entirely offline, with a
+  virtual clock pinned to bag time. Reads `.db3` split files (the
+  format `ros2 bag record` chunks a long recording into) by merging
+  every file `metadata.yaml` lists, not just the first one. Verified
+  against a real GO2 hardware recording (~94k messages, 330s); see
+  "Works on real GO2 telemetry" above.
+- **547 tests pass + 2 gated skips on hosted runners** (one rclpy-gated,
+  one gated on a local real-hardware bag path not present in CI). CI
+  runs Python 3.10 / 3.11 / 3.12 lint + unit + integration, a benchmark
   regression gate, a detector-FPR smoke run, and a live ROS 2 Humble
   Docker job on every main commit.
 
