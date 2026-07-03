@@ -1,0 +1,96 @@
+{
+  "bundle_path": "/tmp/bbrs_realbag_u4pizd2n/incidents/inc_2026-05-26T05-05-33_3ffbdf62",
+  "created_at": "2026-07-03T02:35:54.117200Z",
+  "fingerprint": {
+    "algorithm_version": "v1",
+    "cluster_id": null,
+    "fingerprint_id": "fpr_f2e0c1de554d1078",
+    "human_label": null,
+    "payload": {
+      "detector_classes": [
+        "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector"
+      ],
+      "signature_fields": {
+        "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector": [
+          [
+            "topic",
+            "/source/utlidar/robot_odom"
+          ]
+        ]
+      },
+      "subsystems": [
+        "ros"
+      ],
+      "topology_signature": "c68caae3"
+    }
+  },
+  "host": "mewtwo",
+  "incident_id": "inc_2026-05-26T05-05-33_3ffbdf62",
+  "likely_causes": [
+    {
+      "cause": "Topic /source/utlidar/robot_odom stopped emitting messages.",
+      "caveat": null,
+      "confidence": 0.98,
+      "evidence_refs": [
+        "events.jsonl#L637",
+        "triggers.json#trg_21d6c9a8",
+        "snapshots.json#1",
+        "snapshots.json#3"
+      ],
+      "precursor_chain": [
+        {
+          "evidence_ref": "snapshots.json#1",
+          "gap_sec": 6.996,
+          "kind": "derived",
+          "relevance": 0.23,
+          "subsystem": "ros",
+          "summary": "topic /source/utlidar/robot_odom appeared on the graph",
+          "t": "2026-05-26T05:05:34.336270Z"
+        },
+        {
+          "evidence_ref": "snapshots.json#3",
+          "gap_sec": 4.996,
+          "kind": "derived",
+          "relevance": 0.167,
+          "subsystem": "ros",
+          "summary": "topic /source/cmd_vel appeared on the graph",
+          "t": "2026-05-26T05:05:36.336270Z"
+        }
+      ],
+      "reasoning": [
+        "base score for DeadTopicDetector: 0.65.",
+        "severity bonus (warning): +0.03.",
+        "precursor bonus: +0.30.",
+        "precursor: topic /source/utlidar/robot_odom appeared on the graph (7.0s before trigger, subsystem=ros, relevance=0.23)",
+        "precursor: topic /source/cmd_vel appeared on the graph (5.0s before trigger, subsystem=ros, relevance=0.17)",
+        "precursor contribution capped at 0.30 (raw sum was 0.40).",
+        "diff bonus: +0.00.",
+        "no prior bundle on this host; signature diff not informative.",
+        "final confidence (clamped): 0.98."
+      ],
+      "recurrence": null,
+      "score": 0.98,
+      "subsystem": "ros"
+    }
+  ],
+  "linked_prevention_rules": [],
+  "notes": "Real-bag replay. Source data is a genuine GO2 recording (go2_sim_odom_imu.mcap: odom, imu, cmd_vel over ~12 s). A dropout of /source/utlidar/robot_odom was INJECTED at 2026-05-26T05:05:38.336270+00:00 (silenced for the remainder of the bag) into otherwise-real data. The dead-topic anomaly below was produced by the real DeadTopicDetector from bag timing, not hand-seeded. Reproduce with: python scripts/generate_real_bag_incident.py",
+  "observed_host": null,
+  "observer_host": null,
+  "schema_version": "1.0",
+  "session_id": "real_bag_odom_dropout",
+  "sessions": [],
+  "severity": "warning",
+  "summary": "Topic /source/utlidar/robot_odom stopped emitting messages.",
+  "tags": [
+    "real-bag",
+    "odom-dropout",
+    "dead-topic"
+  ],
+  "title": "Odometry dropout on /source/utlidar/robot_odom",
+  "triggers": [
+    "trg_21d6c9a8"
+  ],
+  "window_end": "2026-05-26T05:05:43.842968Z",
+  "window_start": "2026-05-26T05:05:33.336270Z"
+}

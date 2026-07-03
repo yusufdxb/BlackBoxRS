@@ -11,16 +11,52 @@ from datetime import datetime, timezone
 
 
 class Clock:
-    """Centralized clock for consistent timestamps across BlackBoxRS."""
+    """Centralized clock for consistent timestamps across BlackBoxRS.
+
+    By default :meth:`now` returns wall-clock UTC.  For offline replay
+    (see :mod:`blackboxrs.recording.bag_replay`) a *virtual* time source
+    can be installed so that time-based detectors (e.g. dead-topic
+    timeouts) compute elapsed intervals against recorded bag timestamps
+    instead of wall time.  The virtual override is process-global and
+    intended for single-threaded replay; production monitoring never
+    touches it and keeps wall-clock behaviour byte-for-byte.
+    """
+
+    _virtual_now: datetime | None = None
 
     @staticmethod
     def now() -> datetime:
         """Return the current UTC datetime.
 
         Returns:
-            A timezone-aware datetime in UTC.
+            The installed virtual time if one is set (see
+            :meth:`set_virtual_time`), otherwise wall-clock UTC.
         """
+        if Clock._virtual_now is not None:
+            return Clock._virtual_now
         return datetime.now(timezone.utc)
+
+    @staticmethod
+    def set_virtual_time(dt: datetime) -> None:
+        """Pin :meth:`now` to a fixed virtual instant (UTC).
+
+        Args:
+            dt: The virtual time to return from :meth:`now`.  A naive
+                datetime is assumed to be UTC.
+        """
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        Clock._virtual_now = dt
+
+    @staticmethod
+    def use_wall_clock() -> None:
+        """Remove any virtual override and restore wall-clock time."""
+        Clock._virtual_now = None
+
+    @staticmethod
+    def is_virtual() -> bool:
+        """Return ``True`` while a virtual time override is installed."""
+        return Clock._virtual_now is not None
 
     @staticmethod
     def monotonic_ns() -> int:

@@ -1,0 +1,24 @@
+[
+  {
+    "data": {
+      "detector": "dead_topic",
+      "message": "Topic /source/utlidar/robot_odom has been silent for 3.0s (timeout 3.0s)",
+      "metric": "dead_topic:/source/utlidar/robot_odom",
+      "threshold": 3.0,
+      "topic": "/source/utlidar/robot_odom",
+      "value": 3.004076
+    },
+    "detector": "dead_topic",
+    "detector_class": "blackboxrs.anomaly_engine.detectors.dead_topic.DeadTopicDetector",
+    "message": "Topic /source/utlidar/robot_odom has been silent for 3.0s (timeout 3.0s)",
+    "severity": "warning",
+    "signature_fields": [
+      "topic"
+    ],
+    "source_event_ref": "events.jsonl#L637",
+    "subject": "/source/utlidar/robot_odom",
+    "subsystem": "ros",
+    "t": "2026-05-26T05:05:41.332176Z",
+    "trigger_id": "trg_21d6c9a8"
+  }
+]

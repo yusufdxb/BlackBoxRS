@@ -1,0 +1,388 @@
+[
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:33.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": null,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:34.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 48.91598269078603,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 48.955473772716864,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:35.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 47.048950998940974,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 47.0425102937245,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:36.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.004276628173011,
+        "msg_type": null,
+        "name": "/source/cmd_vel",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 41.22291741924255,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 41.233115915236425,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:37.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.00971823524023,
+        "msg_type": null,
+        "name": "/source/cmd_vel",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 39.321476466391246,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 39.327120828056124,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:38.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 9.986852907358637,
+        "msg_type": null,
+        "name": "/source/cmd_vel",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 47.35395790772977,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 47.35180530415035,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:39.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.041843962116381,
+        "msg_type": null,
+        "name": "/source/cmd_vel",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 47.67253393199866,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 47.35180530415035,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:40.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.004958957907487,
+        "msg_type": null,
+        "name": "/source/cmd_vel",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 40.1322695392382,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 47.35180530415035,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:41.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.004958957907487,
+        "msg_type": null,
+        "name": "/source/cmd_vel",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 45.93103400127468,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 47.35180530415035,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:42.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.004958957907487,
+        "msg_type": null,
+        "name": "/source/cmd_vel",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 48.14349302899071,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 47.35180530415035,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  },
+  {
+    "cpu_percent": null,
+    "disk_io": null,
+    "disk_percent": null,
+    "gpu": null,
+    "host": "mewtwo",
+    "mem_percent": null,
+    "nodes": [],
+    "processes": null,
+    "t": "2026-05-26T05:05:43.336270Z",
+    "thermal_zones": null,
+    "topics": [
+      {
+        "last_freq_hz": 10.004958957907487,
+        "msg_type": null,
+        "name": "/source/cmd_vel",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 48.67673038596704,
+        "msg_type": null,
+        "name": "/source/utlidar/imu",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      },
+      {
+        "last_freq_hz": 47.35180530415035,
+        "msg_type": null,
+        "name": "/source/utlidar/robot_odom",
+        "pub_count": 0,
+        "qos_summary": null,
+        "sub_count": 0
+      }
+    ]
+  }
+]
