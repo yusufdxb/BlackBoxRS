@@ -75,7 +75,7 @@ the v0.4 pivot work began.
   only verified Humble.
 - Behaviour under heavy ROS DDS traffic (>1000 messages/sec
   aggregate) on resource-constrained Jetson. Performance envelope
-  was characterised on mewtwo (RTX 5070), not Jetson.
+  was characterised on a Blackwell consumer GPU, not Jetson.
 
 ### Not built
 
@@ -161,7 +161,7 @@ the v0.4 pivot work began.
 ## 4. Hardware limitations
 
 - **Verified hardware**: x86_64 desktop Linux (mewtwo, Ubuntu
-  22.04, RTX 5070).
+  22.04, Blackwell consumer GPU).
 - **Inferred hardware**: Jetson Orin NX 16 GB on GO2. Code paths
   for tegrastats / sysfs GPU thermal / Linux thermal zones exist
   and have been exercised in earlier projects (HELIX), but the
