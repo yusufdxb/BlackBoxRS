@@ -34,7 +34,7 @@ def _patch_psutil(fake):
                  create=True)
 
 
-# We need to make psutil importable inside run(); easiest is to patch sys.modules.
+# run() imports psutil lazily; patch sys.modules so it resolves to the fake.
 def _run_with_fake(params, fake):
     import sys
     orig = sys.modules.get("psutil")
