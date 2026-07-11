@@ -37,7 +37,7 @@ USAGE
 OUTPUT
 ------
 The benchmark emits a plain-text report to stdout.  Sample output
-from the author's workstation (mewtwo, AMD Ryzen 9 7900X3D, Python
+from the author's workstation (AMD Ryzen 9 7900X3D, Python
 3.10.12, Ubuntu 22.04) is reproduced in ``docs/BENCHMARKS.md``.
 """
 from __future__ import annotations

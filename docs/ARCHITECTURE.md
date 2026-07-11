@@ -220,7 +220,7 @@ unboundedly. Per-queue drop counters are exposed via
   "data": { "cpu_percent": 6.2, "cpu_count": 24 },
   "metadata": {
     "session_id": "20c8b5f68030",
-    "hostname": "mewtwo",
+    "hostname": "dev-workstation",
     "start_time": "2026-04-16T14:59:53.585415+00:00"
   }
 }

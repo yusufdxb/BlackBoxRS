@@ -4,7 +4,7 @@
 - **Created**: 2026-07-03 02:35:54.117200Z
 - **Window**: 2026-05-26 05:05:33.336270Z → 2026-05-26 05:05:43.842968Z
 - **Session**: `real_bag_odom_dropout`
-- **Host**: `mewtwo`
+- **Host**: `dev-workstation`
 - **Tags**: real-bag, odom-dropout, dead-topic
 - **Schema**: v1.0
 

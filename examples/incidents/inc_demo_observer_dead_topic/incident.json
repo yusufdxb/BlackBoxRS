@@ -24,7 +24,7 @@
       "topology_signature": "926cd3ef"
     }
   },
-  "host": "mewtwo",
+  "host": "dev-workstation",
   "incident_id": "inc_2026-05-17T14-22-00_7c674770",
   "likely_causes": [
     {
@@ -76,7 +76,7 @@
   "linked_prevention_rules": [],
   "notes": "Synthetic demo bundle captured in observer mode. The observer is the machine that ran scripts/generate_sample_incident_observer.py; the observed host is the synthetic robot label 'go2-edu-01'.",
   "observed_host": "go2-edu-01",
-  "observer_host": "mewtwo",
+  "observer_host": "dev-workstation",
   "schema_version": "1.0",
   "session_id": "demo_observer_dead_topic",
   "sessions": [],

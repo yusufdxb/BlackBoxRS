@@ -25,7 +25,7 @@ def _write_bundle(
     incident_id: str,
     fp_id: str,
     *,
-    host: str = "mewtwo",
+    host: str = "dev-workstation",
     window_start: datetime,
     window_end: datetime,
     bundle_path: str | None = None,
@@ -136,7 +136,7 @@ def test_other_host_priors_excluded(tmp_path: Path):
         window_start=_T0 - timedelta(hours=2),
         window_end=_T0 - timedelta(hours=1),
     )
-    idx = FingerprintIndex(tmp_path, host="mewtwo")
+    idx = FingerprintIndex(tmp_path, host="dev-workstation")
     assert idx.lookup(_FP_A) is None
 
 
@@ -184,7 +184,7 @@ def test_unreadable_bundle_does_not_break_lookup(tmp_path: Path):
         '{"incident_id":"inc_no_fp","schema_version":"1.0",'
         '"created_at":"2026-05-07T12:00:00Z","window_start":"2026-05-07T11:00:00Z",'
         '"window_end":"2026-05-07T11:30:00Z","session_id":"s","severity":"warning",'
-        '"title":"t","summary":"","host":"mewtwo","tags":[],"sessions":[],'
+        '"title":"t","summary":"","host":"dev-workstation","tags":[],"sessions":[],'
         '"triggers":[],"fingerprint":null,"likely_causes":[],'
         '"linked_prevention_rules":[],"notes":null,"bundle_path":""}',
         encoding="utf-8",
@@ -207,7 +207,7 @@ def test_build_recurrence_lookup_returns_callable(tmp_path: Path):
         window_end=_T0 - timedelta(hours=1),
     )
     fn = build_recurrence_lookup(
-        tmp_path, host="mewtwo", before=_T0, exclude_id="inc_self",
+        tmp_path, host="dev-workstation", before=_T0, exclude_id="inc_self",
     )
     ctx = fn(_FP_A)
     assert ctx is not None

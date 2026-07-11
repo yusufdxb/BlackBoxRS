@@ -4,7 +4,7 @@
 - **Created**: 2026-07-03 15:30:55.484611Z
 - **Window**: 2026-04-06 18:13:40.497738Z → 2026-04-06 18:14:01.496987Z
 - **Session**: `real_hw_bag_pose_dropout`
-- **Host**: `mewtwo`
+- **Host**: `dev-workstation`
 - **Tags**: real-hw-bag, go2, pose-dropout, dead-topic
 - **Schema**: v1.0
 

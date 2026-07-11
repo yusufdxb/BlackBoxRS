@@ -180,7 +180,7 @@ TF-break incident bundle, committed to the repo. The top of its
 - **Severity**: error
 - **Window**: 2026-05-07 14:22:00.000Z → 2026-05-07 14:22:15.000Z
 - **Session**: `demo_tf_break`
-- **Host**: `mewtwo`
+- **Host**: `dev-workstation`
 
 ## Summary
 

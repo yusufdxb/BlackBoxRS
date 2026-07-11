@@ -24,7 +24,7 @@
       "topology_signature": "61aba542"
     }
   },
-  "host": "mewtwo",
+  "host": "dev-workstation",
   "incident_id": "inc_2026-04-06T18-13-40_eb8d6333",
   "likely_causes": [
     {

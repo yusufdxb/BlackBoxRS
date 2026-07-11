@@ -58,7 +58,7 @@ workstation numbers below are still the reference narrative.
 
 ## Reference results (author's workstation)
 
-- Host: mewtwo (AMD Ryzen 9 7900X3D, 24 logical CPUs, 64 GB RAM)
+- Host: the dev workstation (AMD Ryzen 9 7900X3D, 24 logical CPUs, 64 GB RAM)
 - OS: Ubuntu 22.04.x, kernel 6.8
 - Python: 3.10.12
 - Disk: NVMe SSD, ext4, no fsync pressure

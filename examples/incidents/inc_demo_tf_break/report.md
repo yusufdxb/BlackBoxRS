@@ -4,7 +4,7 @@
 - **Created**: 2026-05-17 23:44:32.674887Z
 - **Window**: 2026-05-07 14:22:00.000000Z → 2026-05-07 14:22:20.000000Z
 - **Session**: `demo_tf_break`
-- **Host**: `mewtwo`
+- **Host**: `dev-workstation`
 - **Tags**: demo, tf-break
 - **Schema**: v1.0
 

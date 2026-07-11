@@ -4,7 +4,7 @@
 - **Created**: 2026-05-17 23:45:05.491247Z
 - **Window**: 2026-05-17 14:22:00.000000Z → 2026-05-17 14:22:15.000000Z
 - **Session**: `demo_observer_dead_topic`
-- **Observer**: `mewtwo`
+- **Observer**: `dev-workstation`
 - **Observed**: `go2-edu-01`
 - **Tags**: demo, observer, dead-topic
 - **Schema**: v1.0
