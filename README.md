@@ -1,38 +1,59 @@
 # BlackBoxRS
 
-**Incident intelligence and prevention for ROS 2 robots.**
+**Incident intelligence for ROS 2 robots.** When something breaks in the field, you get a bundle you can read, not a log you have to excavate.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![ROS 2 Humble (verified)](https://img.shields.io/badge/ROS%202-Humble%20(verified)-brightgreen)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 
-## Works on real GO2 telemetry
+When a ROS 2 robot misbehaves in the field, the honest answer to "what just happened?" is usually an afternoon of SSH, `journalctl`, and Slack archaeology. BlackBoxRS turns that afternoon into a paragraph.
 
-The offline bag-replay path has been run against a genuine rosbag2
-recording captured on a physical Unitree GO2 (not simulation): topics
-`/utlidar/robot_pose`, `/utlidar/imu`, `/utlidar/cloud`, `/gnss`, and
-`/multiplestate`, ~94k messages over a 330-second session. The untouched
-recording replays clean end to end (zero anomalies); to exercise the
-detector honestly, a `/utlidar/robot_pose` dropout is injected into an
-otherwise-real window of that same recording, and the real
-`DeadTopicDetector` (not a stand-in) finds it from bag timing alone,
-with no hand-written anomaly. This demonstrates passive, offline
-forensic replay against real hardware data. It is **not** a claim that
-BlackBoxRS has run in a closed control loop on the robot, or that it has
-been validated live on hardware; the loop it closes here is
-record-then-replay, off to the side of the robot's own control stack.
+It runs a lightweight daemon that watches the ROS 2 graph, host, and (optionally) an off-board observer. When a failure fires, one command builds a reproducible **incident bundle**: a timeline, the raw evidence, config and version signatures, a likely-cause narrative grounded in that evidence, and a preflight rule you can adopt so the same failure blocks the next launch instead of recurring on a different robot two weeks later.
 
-Reproduce against your own recording (the source bag is ~680&nbsp;MB and
-is not checked into this repo):
+The bundle is the artifact. Everything else is plumbing.
+
+---
+
+## The problem, concretely
+
+A ROS 2 robot fails on a field test. Today that costs you:
+
+1. Engineer SSHs in, runs `ros2 topic list`, scrolls `journalctl`, greps. Twenty to ninety minutes per incident.
+2. Log fragments get pasted into Slack; three engineers reconstruct the timeline from memory.
+3. The "fix" is a one-line config change with no record of *why*.
+4. The same failure recurs on a different robot two weeks later, and nobody connects the two.
+
+With BlackBoxRS the daemon is already running, so the failure is already captured:
+
+```
+robot-blackbox incident build --since 5m
+# -> ~/.blackboxrs/incidents/inc_2026-05-07T14-22-00_a3f2/
+#    ├── report.md
+#    ├── incident.json
+#    ├── timeline.json
+#    ├── fingerprint.json
+#    ├── signatures/{config.json, versions.json}
+#    └── evidence/{events.jsonl, triggers.json, snapshots.json}
+```
+
+You read `report.md`. The likely cause is named with a confidence score, and every claim in it links straight to the evidence file that backs it (`events.jsonl#L11`, `triggers.json#trg_df6aa081`). One command converts the incident into a `PreventionRule`, and `robot-blackbox preflight` fires that rule before the next launch.
+
+---
+
+## It runs on real GO2 data
+
+The offline replay path has been run against a genuine `rosbag2` recording from a physical Unitree GO2 (not simulation): `/utlidar/robot_pose`, `/utlidar/imu`, `/utlidar/cloud`, `/gnss`, `/multiplestate`, about 94k messages over a 330-second session. Played untouched, it replays clean end to end (zero anomalies), which is the point: the detectors aren't inventing failures. Inject a `/utlidar/robot_pose` dropout into an otherwise-real window and the real `DeadTopicDetector` finds it from bag timing alone.
+
+One honest boundary: BlackBoxRS has **not** run in a closed control loop on a live robot. The loop it closes here is record-then-replay, off to the side of the robot's own stack. A live onboard capture during a real field failure is the one thing still owed (see [What's next](#whats-next)).
+
+Reproduce it against your own recording (the source bag is ~680&nbsp;MB and is not checked in):
 
 ```
 robot-blackbox replay-bag <path-to-your-rosbag2-dir> \
   --drop-topic /utlidar/robot_pose --drop-after 60 --timeout 3.0
 ```
 
-Real output from the committed example
-(`scripts/generate_real_hw_bag_incident.py`, trimmed to a 20-second
-window of the same recording so the checked-in artifact stays small):
+The committed example trims that same recording to a 20-second window so the checked-in artifact stays small:
 
 ```
 $ python scripts/generate_real_hw_bag_incident.py --bag /path/to/extended_5min
@@ -42,49 +63,24 @@ Real-hw-bag bundle: examples/incidents/inc_real_hw_bag_pose_dropout
   anomaly: /utlidar/robot_pose silent 3.0s @ 2026-04-06T18:13:48.490684+00:00
 ```
 
-The incident report BlackBoxRS generated from that run:
+The incident report it generated:
 
 ![Real GO2 hardware-bag incident report](docs/assets/real_go2_bag_incident_report.png)
 
-Full bundle: `examples/incidents/inc_real_hw_bag_pose_dropout/`. The
-sim-bag counterpart lives at
-`examples/incidents/inc_real_bag_odom_dropout/`; both are replayed
-through the same code path documented below.
+Full bundle: `examples/incidents/inc_real_hw_bag_pose_dropout/`. Its sim-bag sibling (`inc_real_bag_odom_dropout/`) runs through the exact same code path.
 
 ---
 
-> Status: **v0.4.1**. Incident-bundle pipeline, report generator,
-> fingerprinting, prevention runner, and observer-mode (off-board
-> capture) all work. All seven anomaly detectors are live, with
-> hysteresis (`min_consecutive_samples`) to suppress single-sample
-> noise. All seven `PreflightCheck` kinds (`topic_present`,
-> `qos_match`, `node_running`, `env_var`, `param_value`,
-> `resource_threshold`, `custom_python`) have real implementations;
-> unknown kinds fail loudly at rule-load. Detector FPR/TPR is
-> measured on a synthetic stream and published in
-> `docs/DETECTOR_CHARACTERISTICS.md`. Observer-mode is exercised
-> end-to-end against real DDS in the Docker Humble CI job.
-
-When a ROS 2 robot fails, BlackBoxRS produces a reproducible incident
-bundle: timeline, evidence, config and version signatures, a likely-cause
-narrative grounded in the evidence, and a recommended preflight rule the
-next launch can run to keep the same failure from happening again.
-
-The bundle is the artifact. Postmortems collapse from an afternoon to a
-paragraph.
-
----
-
-## Where to run it
+## Where it runs
 
 BlackBoxRS does not need to live on the robot.
 
 | Mode | Where it runs | When to use |
 |---|---|---|
-| **Onboard** (default) | Same host as the ROS 2 node graph (Jetson, NUC, on-robot workstation). | You have shell access to the robot and want host metrics (CPU, memory, per-process CPU/RSS) in the bundle. |
-| **Observer** | Any workstation that can `ros2 topic list` against the robot over DDS. No SSH, no per-robot install. | You're debugging a robot from a laptop, the robot's compute is locked down, or a whole team needs to capture bundles without each user setting up a daemon on the robot. |
+| **Onboard** (default) | Same host as the ROS 2 graph (Jetson, NUC, on-robot workstation). | You have shell access and want host metrics (CPU, memory, per-process CPU/RSS) in the bundle. |
+| **Observer** | Any workstation that can `ros2 topic list` against the robot over DDS. No SSH, no per-robot install. | You're debugging from a laptop, the robot's compute is locked down, or a whole team needs to capture bundles without each person installing a daemon on the robot. |
 
-Observer mode is a single config flag:
+Observer mode is one config flag:
 
 ```yaml
 # ~/.blackboxrs/config.yaml
@@ -93,59 +89,9 @@ runtime:
   observed_host: go2-edu-01     # free-form label, ends up in every bundle
 ```
 
-DDS-bound detectors that are live today (frequency, dead topic, QoS
-mismatch) keep running because they observe the robot's published
-graph. Host-bound thresholds (CPU / memory on the local machine)
-describe the observer, not the robot, so the system-monitor pipeline
-that feeds them is auto-disabled. Every incident bundle records both
-`observer_host` and `observed_host` so reports name the two sides
-explicitly.
+The DDS-bound detectors keep working because they watch the robot's published graph. Host thresholds (CPU, memory) would describe the observer laptop rather than the robot, so the system-monitor pipeline that feeds them auto-disables, and `process_signals` disables with it. Every bundle records both `observer_host` and `observed_host`, so the report names the two sides instead of quietly conflating them.
 
-All seven anomaly detectors are live: `threshold`, `frequency`,
-`dead_topic`, `qos_mismatch` (DDS-bound, work in both onboard and
-observer mode), plus `tf_topology`, `clock_skew`, and
-`process_signals`. `process_signals` auto-disables in observer
-mode because it reads the local process table; `tf_topology` and
-`clock_skew` stay active because they consume DDS-visible events
-or local NTP state.
-
-See `docs/QUICKSTART_REMOTE.md` for a 5-minute walkthrough from
-`pip install` to the first remote-captured bundle.
-
----
-
-## What problem this solves
-
-Field robotics teams running ROS 2 lose hours per week to "why isn't
-this running like yesterday?" Logs are not an answer; they are raw
-material. Today, when a robot fails on a field test:
-
-1. Engineer SSHs in, `ros2 topic list`, scrolls journalctl, greps. 20 to
-   90 minutes per incident.
-2. They paste log fragments into Slack. Three other engineers compare
-   notes from memory.
-3. The "fix" is a one-line config change with no record of *why*.
-4. The same failure recurs on a different robot two weeks later.
-
-After BlackBoxRS:
-
-```
-robot-blackbox start                   # already running on the robot
-# robot fails
-robot-blackbox incident build --since 5m
-# → ~/.blackboxrs/incidents/inc_2026-05-07T14-22-00_a3f2/
-#   ├── report.md
-#   ├── incident.json
-#   ├── timeline.json
-#   ├── fingerprint.json
-#   ├── signatures/{config.json, versions.json}
-#   └── evidence/{events.jsonl, triggers.json, snapshots.json}
-```
-
-Engineer reads `report.md`, the likely cause is named with confidence
-and the supporting evidence is hyperlinked into the bundle. They convert
-it to a `PreventionRule` with one command. The next launch runs
-`robot-blackbox preflight` and the rule fires before the failure.
+All seven detectors ship live: `threshold`, `frequency`, `dead_topic`, `qos_mismatch`, `tf_topology`, `clock_skew`, and `process_signals`. See `docs/QUICKSTART_REMOTE.md` for the five-minute walkthrough from `pip install` to a first remote-captured bundle.
 
 ---
 
@@ -157,28 +103,25 @@ graph LR
     E --> R[replay]
     R --> P[prevent]
 
-    O --> Od["daemon captures events,<br/>anomalies, host + GPU"]
-    E --> Ed["incident builder produces<br/>bundle with timeline + fingerprint"]
+    O --> Od["daemon captures events,<br/>anomalies, host telemetry"]
+    E --> Ed["incident builder produces a<br/>bundle: timeline + fingerprint"]
     R --> Rd["bundle is portable;<br/>another engineer<br/>re-renders the report"]
-    P --> Pd["preflight rule blocks<br/>next launch when the<br/>precursor reappears"]
+    P --> Pd["preflight rule blocks the<br/>next launch when the<br/>precursor reappears"]
 ```
 
-`observe` was the v0.3 wedge. `explain → replay → prevent` is what makes
-this a product.
+`observe` was the v0.3 wedge. `explain -> replay -> prevent` is what turns a recorder into a tool.
 
 ---
 
-## Sample incident
+## A sample bundle
 
-`examples/incidents/inc_demo_tf_break/` is a synthetic but realistic
-TF-break incident bundle, committed to the repo. The top of its
-`report.md`:
+`examples/incidents/inc_demo_tf_break/` is a synthetic-but-realistic TF-break incident, committed to the repo and generated by real code. The top of its `report.md`:
 
 ```
 # Incident `inc_2026-05-07T14-22-00_04ca9c43`
 
 - **Severity**: error
-- **Window**: 2026-05-07 14:22:00.000Z → 2026-05-07 14:22:15.000Z
+- **Window**: 2026-05-07 14:22:00.000Z -> 2026-05-07 14:22:15.000Z
 - **Session**: `demo_tf_break`
 - **Host**: `dev-workstation`
 
@@ -207,102 +150,42 @@ Topic /tf_static stopped emitting messages.
 
 ## Recommended preflight rule
 
-```yaml
 check: topic_present
 params:
   topic: '/tf_static'
   min_publishers: 1
 severity_on_fail: block
 ```
-```
 
-Open `examples/incidents/inc_demo_tf_break/report.md` for the full
-bundle.
+Read the whole thing without running anything:
+
+```bash
+robot-blackbox incident show examples/incidents/inc_demo_tf_break/
+```
 
 ---
 
-## What works today (verified)
+## What works today
 
-- **Existing v0.3 capture path** continues to work. ROS 2 topic
-  introspection, host telemetry, GPU telemetry, four anomaly detectors
-  (threshold, frequency drop, dead topic, QoS mismatch), JSONL logging
-  with size + age rotation, optional anomaly-triggered rosbag2
-  recording.
-- **Incident bundle pipeline.** `IncidentBuilder` slices the JSONL log
-  into a typed bundle: events, triggers, signatures, timeline,
-  fingerprint, report.
-- **Markdown report generator.** Every claim in `report.md` resolves to
-  a file in the bundle (`events.jsonl#Ln`, `triggers.json#<id>`).
-- **Config + version signatures.** Deterministic sha256 hashes of ROS
-  distro, RMW, env subset, attached files, and OS / Python / NVIDIA
-  driver state. Same inputs produce the same hash.
-- **Failure fingerprinting (algorithm v1).** Stable id from detector
-  classes, subsystems, signature fields, and topic-set topology. Two
-  bundles seeded the same way collide; perturb any input and the id
-  changes.
-- **Likely-cause ranking.** Heuristic: detector-class weight + severity
-  bonus. Confidence below 0.5 carries an explicit caveat. Confidence
-  ≥ 0.7 is promoted to the bundle summary. Weights are hand-calibrated;
-  see `blackboxrs/incident/cause.py:8-18` for the calibration
-  philosophy.
-- **Detector hysteresis.** All four threshold-based detectors
-  (`threshold`, `frequency`, `clock_skew`, `process_signals`) require
-  `min_consecutive_samples` (default 2) violating samples before firing.
-  Single-sample noise is suppressed without changing the v0.4.0 wire
-  format. See `docs/DETECTOR_CHARACTERISTICS.md` for the measured FPR/TPR.
-- **Prevention rules.** `PreventionRule` + `PreflightCheck` YAML I/O,
-  `PreflightRunner` with 0/1/2 exit codes (pass / block / warn).
-  All seven check kinds ship: `topic_present`, `qos_match`,
-  `node_running` are real rclpy graph queries; `env_var`,
-  `param_value`, `resource_threshold`, `custom_python` are real
-  implementations against `os.environ`, the ROS 2 parameter API,
-  `psutil`, and a user-supplied import path respectively. Unknown
-  kinds raise at rule-load (no silent `skipped`).
-- **CLI.** `robot-blackbox incident build / show / list / attach`,
-  `preflight`, `prevention adopt --from-incident / list`.
-- **Sample bundle.** Reproducibly generated by
-  `python scripts/generate_sample_incident.py`.
-- **Runs onboard or off-board.** Same daemon, same bundle format. In
-  observer mode the daemon attaches over DDS from any workstation that
-  can already see the robot's topics, auto-disables host-bound
-  collectors, and tags each bundle with both `observer_host` and
-  `observed_host` so reports name the two sides explicitly.
-- **Derived timeline events.** `timeline.json` folds silence-interval,
-  resource-excursion, and graph-delta rows in alongside the raw and
-  trigger rows; the cause ranker scores them as precursors.
-- **Snapshot projection.** `SystemSnapshotter` projects the event
-  stream into a typed `snapshots.json` series used by the derivers and
-  the fingerprint topology signature.
-- **Observer-mode E2E.** `tests/integration/test_observer_live.py` boots
-  a real rclpy publisher and asserts a `runtime.role: observer` daemon
-  fires `anomaly.dead_topic` over DDS within 5s of the publisher going
-  silent. Runs inside the Docker Humble CI job.
-- **Offline rosbag2 replay.** `robot-blackbox replay-bag` (and
-  `blackboxrs.recording.bag_replay`) replay a recorded `.mcap` or
-  `.db3` bag through the real detectors entirely offline, with a
-  virtual clock pinned to bag time. Reads `.db3` split files (the
-  format `ros2 bag record` chunks a long recording into) by merging
-  every file `metadata.yaml` lists, not just the first one. Verified
-  against a real GO2 hardware recording (~94k messages, 330s); see
-  "Works on real GO2 telemetry" above.
-- **547 tests pass + 2 gated skips on hosted runners** (one rclpy-gated,
-  one gated on a local real-hardware bag path not present in CI). CI
-  runs Python 3.10 / 3.11 / 3.12 lint + unit + integration, a benchmark
-  regression gate, a detector-FPR smoke run, and a live ROS 2 Humble
-  Docker job on every main commit.
+- **Capture.** ROS 2 topic introspection and host telemetry feed seven anomaly detectors (`threshold`, `frequency`, `dead_topic`, `qos_mismatch`, `tf_topology`, `clock_skew`, `process_signals`), all with hysteresis (`min_consecutive_samples`, default 2) so a single noisy sample can't trip a false alarm. JSONL logging with size and age rotation; optional anomaly-triggered `rosbag2` recording. Measured FPR/TPR per detector is published in `docs/DETECTOR_CHARACTERISTICS.md`.
+- **Incident bundles.** `IncidentBuilder` slices the JSONL log into a typed bundle: events, triggers, signatures, timeline, fingerprint, report.
+- **Grounded reports.** Every claim in `report.md` resolves to a file in the bundle (`events.jsonl#Ln`, `triggers.json#<id>`). No orphan assertions.
+- **Deterministic signatures.** sha256 over ROS distro, RMW, an env subset, attached files, and OS / Python / driver state. Same inputs, same hash.
+- **Failure fingerprinting (v1).** A stable id from detector classes, subsystems, signature fields, and topic-set topology. Seed two bundles identically and they collide; perturb any input and the id moves.
+- **Likely-cause ranking.** Detector-class weight plus a severity bonus. Confidence below 0.5 carries an explicit caveat; at or above 0.7 the cause is promoted to the summary. Weights are hand-calibrated (`blackboxrs/incident/cause.py:8-18`).
+- **Prevention.** `PreventionRule` + `PreflightCheck` YAML I/O and a `PreflightRunner` with 0/1/2 exit codes (pass / block / warn). All seven check kinds are real: `topic_present`, `qos_match`, `node_running` are live rclpy graph queries; `env_var`, `param_value`, `resource_threshold`, `custom_python` run against `os.environ`, the ROS 2 parameter API, `psutil`, and a user-supplied import path. Unknown kinds raise at load time, never silently skip.
+- **Observer mode, end to end.** `tests/integration/test_observer_live.py` boots a real rclpy publisher and asserts an observer-role daemon fires `anomaly.dead_topic` over DDS within 5s of the publisher going quiet, inside the Docker Humble CI job.
+- **Offline bag replay.** `robot-blackbox replay-bag` replays a recorded `.mcap` or `.db3` through the real detectors, entirely offline, with a virtual clock pinned to bag time. It reads `.db3` split files (the chunks `ros2 bag record` produces on a long session) by merging every file `metadata.yaml` lists, not just the first one, a bug that had been silently dropping ~9% of messages.
+- **CLI.** `robot-blackbox incident build / show / list / attach`, `preflight`, `prevention adopt --from-incident / list`, `replay-bag`.
+- **547 tests pass**, plus 2 gated skips on hosted runners (one rclpy-gated, one gated on a local real-hardware bag not present in CI). CI runs lint + unit + integration on Python 3.10 / 3.11 / 3.12, a benchmark regression gate, a detector-FPR smoke run, and a live ROS 2 Humble Docker job on every commit to `main`.
 
-## What is planned (not yet built)
+## What's next
 
-- **Real-robot capture.** Every bundle in `examples/incidents/` is
-  synthetic-but-real-code-output, produced by
-  `scripts/generate_sample_incident.py`. A captured CaresLab GO2
-  session bundle is owed; it is the single largest remaining gap.
-- Cross-incident clustering (`cluster_id` reserved on
-  `FailureFingerprint`; v0.5).
-- `incident pack` / `unpack` for portable tarballs (M7).
-- Web dashboard. Out of scope for v0.4. The bundle is the artifact.
-- Multi-host capture. Single-host first; the bundle format is
-  forward-compatible.
+- **Live onboard capture.** The committed real-hardware evidence is offline replay of a real GO2 bag. A bundle captured live, on the robot, during an actual field failure is the single largest remaining gap and the next thing to land.
+- **Cross-incident clustering.** `cluster_id` is already reserved on `FailureFingerprint`; targeted for v0.5.
+- **`incident pack` / `unpack`** for portable tarballs.
+
+Deliberately out of scope for now: a web dashboard and multi-host capture. Single-host first, and the bundle is the artifact. The bundle format is forward-compatible when multi-host arrives.
 
 ---
 
@@ -314,43 +197,22 @@ cd BlackBoxRS
 ./setup.sh
 source .venv/bin/activate
 
-# 1. Initialise.
-robot-blackbox init
-
-# 2. Run the daemon (foreground for the demo; -f shows live output).
-robot-blackbox start --foreground &
-
-# 3. ... your robot does its thing, anomalies fire and get logged ...
-
-# 4. Build an incident bundle from the last 5 minutes.
-robot-blackbox incident build --since 5m
-
-# 5. Read the report.
-robot-blackbox incident show ~/.blackboxrs/incidents/inc_*
-
-# 6. Adopt a prevention rule from the incident.
-robot-blackbox prevention adopt --from-incident ~/.blackboxrs/incidents/inc_*
-
-# 7. On the next launch, run preflight.
-robot-blackbox preflight
+robot-blackbox init                    # 1. initialise
+robot-blackbox start --foreground &    # 2. run the daemon (-f shows live output)
+                                       # 3. ... your robot runs, anomalies fire and get logged ...
+robot-blackbox incident build --since 5m                                    # 4. build a bundle
+robot-blackbox incident show ~/.blackboxrs/incidents/inc_*                  # 5. read the report
+robot-blackbox prevention adopt --from-incident ~/.blackboxrs/incidents/inc_*  # 6. adopt a rule
+robot-blackbox preflight               # 7. next launch: the rule fires first
 ```
 
-For the sample bundle without running anything:
+### Observer mode (from a laptop)
+
+The steps above run the daemon on the robot. To capture incidents from a workstation that already sees the robot's topics over DDS:
 
 ```bash
-robot-blackbox incident show examples/incidents/inc_demo_tf_break/
-```
-
-### Observer mode (remote workstation)
-
-The quick start above runs the daemon on the robot. To capture
-incidents from a laptop that already sees the robot's topics over
-DDS:
-
-```bash
-# On your workstation. Robot is on the same DDS domain
-# (e.g. ROS_DOMAIN_ID matches, RMW_IMPLEMENTATION matches).
-ros2 topic list                                # must return the robot's topics
+# Robot on the same DDS domain (ROS_DOMAIN_ID and RMW_IMPLEMENTATION match).
+ros2 topic list                        # must return the robot's topics
 
 robot-blackbox init
 cat > ~/.blackboxrs/config.yaml <<'YAML'
@@ -365,22 +227,18 @@ robot-blackbox incident build --since 5m
 robot-blackbox incident show ~/.blackboxrs/incidents/inc_*
 ```
 
-The bundle's `report.md` header shows both sides:
+The bundle's `report.md` names both sides:
 
 ```
 - **Observer**: `my-laptop`
 - **Observed**: `go2-edu-01`
 ```
 
-Host-bound collectors (per-process CPU / RSS, host CPU / memory
-thresholds) are skipped automatically because their values would
-describe the observer laptop, not the robot. See
-`docs/QUICKSTART_REMOTE.md` for DDS setup, troubleshooting, and what
-each detector measures in observer mode.
+Host-bound collectors skip themselves automatically, because per-process CPU/RSS and host thresholds would describe the observer laptop rather than the robot. See `docs/QUICKSTART_REMOTE.md` for DDS setup, troubleshooting, and what each detector measures in observer mode.
 
 ---
 
-## Architecture (high-level)
+## Architecture
 
 ```mermaid
 graph TD
@@ -402,7 +260,7 @@ graph TD
         Events["events.jsonl"]
         Triggers["triggers"]
         Signatures["signatures"]
-        Snapshots["snapshots (M3.5)"]
+        Snapshots["snapshots"]
         Timeline["timeline"]
         Fingerprint["fingerprint"]
         Cause["likely-cause"]
@@ -434,8 +292,6 @@ graph TD
 ```
 
 See `docs/ARCHITECTURE.md` for the full system design.
-
----
 
 ---
 
