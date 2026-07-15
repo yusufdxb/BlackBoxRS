@@ -479,6 +479,7 @@ def replay_bag_cmd(
 
     cfg = BlackBoxConfig.default()
     cfg.log_dir = str(log_dir)
+    cfg.anomaly_engine.dead_topic.timeout_sec = timeout_sec
     bundle = build_incident(
         window_start=result.window_start,
         window_end=result.window_end,
