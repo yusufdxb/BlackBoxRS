@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import hashlib
 
 from blackboxrs.incident.bundle import BundleReader
 from blackboxrs.incident.models import DetectorTrigger, Incident
 
 from .rules import PreflightCheck, PreventionRule, make_rule
+from .telemetry_health import (
+    TelemetryHealthContract,
+    derive_thresholds,
+    load_telemetry_evidence,
+    verify_evidence_sources,
+)
 
 
 class PreventionDerivationError(ValueError):
@@ -101,6 +109,156 @@ def derive_rule_from_incident(
         rule=rule,
         source_trigger=trigger,
         reason=f"{_short_detector_class(trigger)} -> {check.kind}",
+    )
+
+
+def derive_telemetry_health_rule(
+    reader: BundleReader,
+    evidence_path: Path,
+    *,
+    min_confidence: float = 0.70,
+) -> RuleDerivation:
+    """Strengthen one dead-topic incident into a bounded runtime contract.
+
+    The incident must be finalized and must explicitly reference a
+    DeadTopicDetector trigger. The healthy evidence is independently
+    content-addressed and its thresholds must exactly match the fixed v1
+    derivation method.
+    """
+    result = reader.validate(require_finalized=True)
+    if result.errors:
+        details = "; ".join(
+            f"{issue.code}:{issue.path or '-'}:{issue.message}"
+            for issue in result.errors
+        )
+        raise PreventionDerivationError(
+            f"Incident bundle failed integrity validation: {details}"
+        )
+
+    incident = reader.load_incident()
+    triggers = reader.load_triggers()
+    if not incident.likely_causes:
+        raise PreventionDerivationError("No likely causes; nothing to adopt.")
+    top = incident.likely_causes[0]
+    if top.confidence < min_confidence:
+        raise PreventionDerivationError(
+            f"Top hypothesis confidence {top.confidence:.2f} below threshold "
+            f"{min_confidence:.2f}; refuse to auto-adopt."
+        )
+    trigger = _select_supported_trigger(top.evidence_refs, triggers, top.cause)
+    if trigger is None or _short_detector_class(trigger) != "DeadTopicDetector":
+        raise PreventionDerivationError(
+            "Telemetry-health derivation requires an evidence-linked "
+            "DeadTopicDetector trigger."
+        )
+    if not trigger.source_event_ref:
+        raise PreventionDerivationError("Source trigger has no event evidence reference.")
+    if incident.fingerprint is None:
+        raise PreventionDerivationError(
+            "Telemetry-health derivation requires a source incident fingerprint."
+        )
+
+    try:
+        evidence = load_telemetry_evidence(Path(evidence_path))
+    except (OSError, ValueError) as exc:
+        raise PreventionDerivationError(str(exc)) from exc
+    try:
+        verify_evidence_sources(evidence)
+    except ValueError as exc:
+        raise PreventionDerivationError(str(exc)) from exc
+    event_ref = trigger.source_event_ref
+    if not event_ref.startswith("events.jsonl#L"):
+        raise PreventionDerivationError("Source event reference is not a stable events.jsonl line reference")
+    try:
+        line_no = int(event_ref.rsplit("L", 1)[1])
+        event_lines = (reader.path / "evidence" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line_no < 1 or line_no > len(event_lines) or not event_lines[line_no - 1].strip():
+            raise ValueError
+    except (OSError, ValueError) as exc:
+        raise PreventionDerivationError("Source event reference does not resolve") from exc
+    if evidence.topic != trigger.subject:
+        raise PreventionDerivationError(
+            f"Healthy evidence topic {evidence.topic!r} does not match "
+            f"incident topic {trigger.subject!r}."
+        )
+    if evidence.statistics.message_count < 1000:
+        raise PreventionDerivationError(
+            "Healthy telemetry evidence has fewer than 1000 messages."
+        )
+    expected_thresholds = derive_thresholds(evidence.statistics)
+    if evidence.thresholds != expected_thresholds:
+        raise PreventionDerivationError(
+            "Selected thresholds do not match dead_topic_telemetry_health_v1."
+        )
+
+    thresholds = evidence.thresholds
+    contract = TelemetryHealthContract(
+        topic=evidence.topic,
+        expected_type=evidence.message_type,
+        expected_qos=evidence.offered_qos,
+        graph_context=evidence.graph_context,
+        startup_grace_sec=thresholds.startup_grace_sec,
+        stale_timeout_sec=thresholds.stale_timeout_sec,
+        minimum_rate_hz=thresholds.minimum_rate_hz,
+        rate_window_sec=thresholds.rate_window_sec,
+        header_progress_timeout_sec=thresholds.header_progress_timeout_sec,
+        require_header_progress=True,
+        lifecycle_stages=["startup", "runtime"],
+    )
+    check = PreflightCheck(
+        name=f"runtime telemetry healthy: {trigger.subject}",
+        kind="telemetry_health",
+        params=contract.model_dump(mode="json"),
+        severity_on_fail="block",
+        applies_to=[evidence.graph_context],
+    )
+    rationale = (
+        f"{top.cause} Require evidence-derived startup and sustained "
+        f"telemetry health for {trigger.subject}."
+    )
+    rule = make_rule(
+        check,
+        rationale=rationale,
+        source_incident_id=incident.incident_id,
+        source_fingerprint_id=(
+            incident.fingerprint.fingerprint_id if incident.fingerprint else None
+        ),
+        source_trigger_ids=[trigger.trigger_id],
+        derivation={
+            "strategy": "dead_topic_telemetry_health_v1",
+            "source_detector_class": trigger.detector_class,
+            "source_trigger_id": trigger.trigger_id,
+            "source_event_ref": trigger.source_event_ref,
+            "source_topic": trigger.subject,
+            "hypothesis_confidence": top.confidence,
+            "healthy_evidence_ref": f"{Path(evidence_path).resolve()}#statistics",
+            "healthy_evidence_fingerprint": evidence.evidence_fingerprint,
+            "source_bag_sha256": evidence.source_bag_sha256,
+            "source_incident_ref": str(reader.path.resolve()),
+            "source_incident_manifest_sha256": hashlib.sha256((reader.path / "manifest.json").read_bytes()).hexdigest(),
+            "healthy_statistics": {
+                "message_count": evidence.statistics.message_count,
+                "mean_rate_hz": evidence.statistics.mean_rate_hz,
+                "median_rate_hz": evidence.statistics.median_rate_hz,
+                "p95_inter_arrival_sec": (
+                    evidence.statistics.inter_arrival_sec["p95"]
+                ),
+                "p99_inter_arrival_sec": (
+                    evidence.statistics.inter_arrival_sec["p99"]
+                ),
+                "max_healthy_gap_sec": (
+                    evidence.statistics.inter_arrival_sec["max"]
+                ),
+            },
+            "selected_thresholds": thresholds.model_dump(mode="json"),
+            "threshold_derivation": evidence.derivation_method,
+            "confidence_bounds": evidence.confidence_bounds,
+        },
+    )
+    return RuleDerivation(
+        rule=rule,
+        source_trigger=trigger,
+        reason="DeadTopicDetector + genuine healthy telemetry -> telemetry_health",
     )
 
 

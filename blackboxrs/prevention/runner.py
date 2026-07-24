@@ -61,6 +61,11 @@ _CHECK_REGISTRY: dict[str, CheckFn] = {
     "param_value": _adapt(_param_value_check.run),
     "resource_threshold": _adapt(_resource_threshold_check.run),
     "custom_python": _adapt(_custom_python_check.run),
+    "telemetry_health": lambda _check: (
+        "fail",
+        "runtime telemetry-health rules require `prevention guard`; "
+        "preflight cannot guarantee sustained freshness",
+    ),
 }
 
 
@@ -109,9 +114,11 @@ class PreflightRunner:
                 logger.exception("Check %s raised", rule.rule_id)
                 status, message = "error", f"{type(exc).__name__}: {exc}"
 
-            # If the underlying check failed and the rule says "block",
-            # promote the status accordingly. Skipped/error stay as-is.
+            # Active rules fail closed. A blocking rule whose check cannot
+            # execute must not silently pass the launch gate.
             if status == "fail":
+                status = rule.check.severity_on_fail  # "warn" or "block"
+            elif status == "skipped":
                 status = rule.check.severity_on_fail  # "warn" or "block"
 
             if kind_known:
@@ -142,3 +149,4 @@ class PreflightRunner:
         return PreflightReport(
             started_at=started, finished_at=finished, results=results
         )
+

@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -28,13 +29,19 @@ import click
 from blackboxrs.core.config import BlackBoxConfig
 from blackboxrs.incident.api import build_incident, render_report
 from blackboxrs.incident.bundle import BundleReader
+from blackboxrs.prevention.derivation import (
+    PreventionDerivationError,
+    derive_telemetry_health_rule,
+)
 from blackboxrs.prevention.rules import (
     PreflightCheck,
+    load_rule,
     load_rules,
     make_rule,
     save_rule,
 )
 from blackboxrs.prevention.runner import PreflightRunner
+from blackboxrs.prevention.telemetry_guard import run_ros_telemetry_guard
 
 
 _DEFAULT_INCIDENTS_DIR = Path("~/.blackboxrs/incidents").expanduser()
@@ -380,6 +387,59 @@ def prevention_adopt(incident_dir: str, rules_dir: str | None) -> None:
     )
     target = save_rule(rule, rdir)
     click.echo(click.style(f"Adopted: {target}", fg="green"))
+
+
+@prevention_group.command("adopt-telemetry-health")
+@click.option("--from-incident", "incident_dir", required=True,
+              type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--healthy-evidence", "evidence_path", required=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--rules-dir", "rules_dir", default=None,
+              type=click.Path(file_okay=False, path_type=Path))
+def prevention_adopt_telemetry_health(
+    incident_dir: Path, evidence_path: Path, rules_dir: Path | None
+) -> None:
+    """Adopt a bounded runtime-health rule for one dead topic."""
+    rdir = rules_dir.expanduser() if rules_dir else _DEFAULT_RULES_DIR
+    reader = BundleReader(incident_dir, strict=False)
+    try:
+        derivation = derive_telemetry_health_rule(reader, evidence_path)
+    except PreventionDerivationError as exc:
+        click.echo(click.style(str(exc), fg="yellow"))
+        sys.exit(1)
+    target = save_rule(derivation.rule, rdir)
+    click.echo(click.style(f"Adopted: {target}", fg="green"))
+    click.echo(f"  derived: {derivation.reason}")
+    click.echo(f"  trigger: {derivation.source_trigger.trigger_id}")
+    click.echo(f"  fingerprint: {derivation.rule.rule_fingerprint}")
+
+
+@prevention_group.command("guard", context_settings={"ignore_unknown_options": True})
+@click.option("--rule", "rule_path", required=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--result", "result_path", default=None,
+              type=click.Path(dir_okay=False, path_type=Path))
+@click.option("--monitor-duration", type=float, default=None)
+@click.option("--context", "runtime_context", required=True)
+@click.option("--trusted-rule-fingerprint", required=True)
+@click.argument("command", nargs=-1, type=click.UNPROCESSED)
+def prevention_guard(
+    rule_path: Path, result_path: Path | None, monitor_duration: float | None,
+    runtime_context: str, trusted_rule_fingerprint: str, command: tuple[str, ...]
+) -> None:
+    """Hold COMMAND until healthy, then supervise its health."""
+    try:
+        result = run_ros_telemetry_guard(
+            load_rule(rule_path), command,
+            monitor_duration_sec=monitor_duration, result_path=result_path,
+            runtime_context=runtime_context,
+            trusted_rule_fingerprint=trusted_rule_fingerprint,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        click.echo(click.style(f"Telemetry guard refused: {exc}", fg="red"))
+        sys.exit(1)
+    click.echo(json.dumps(result.model_dump(mode="json"), sort_keys=True))
+    sys.exit(0 if result.status == "passed" else 1)
 
 
 __all__ = [
