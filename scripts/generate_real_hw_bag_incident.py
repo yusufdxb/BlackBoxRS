@@ -37,6 +37,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -64,6 +65,15 @@ def main() -> Path:
                         help="Trim the replay to this many seconds from "
                              "the bag's first message (bundle-size cut "
                              "only; default: %(default)s s).")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help=(
+            "Optional unique output directory. The command refuses to "
+            "replace an existing path when this option is used."
+        ),
+    )
     args = parser.parse_args()
 
     work = Path(tempfile.mkdtemp(prefix="bbrs_realhwbag_"))
@@ -116,16 +126,29 @@ def main() -> Path:
         tags=["real-hw-bag", "go2", "pose-dropout", "dead-topic"],
     )
 
-    EXAMPLES_DIR.mkdir(parents=True, exist_ok=True)
-    if TARGET.exists():
-        shutil.rmtree(TARGET)
-    shutil.copytree(bundle, TARGET)
-    print(f"Real-hw-bag bundle: {TARGET}")
+    target = args.output.resolve() if args.output is not None else TARGET
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if args.output is not None and target.exists():
+        raise SystemExit(f"Refusing to replace existing output: {target}")
+    if args.output is not None:
+        staging = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        try:
+            shutil.copytree(bundle, staging)
+            os.replace(staging, target)
+        except BaseException:
+            if staging.exists():
+                shutil.rmtree(staging)
+            raise
+    else:
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(bundle, target)
+    print(f"Real-hw-bag bundle: {target}")
     print(f"  events={result.event_count} topics={sorted(result.topics)}")
     for a in result.anomalies:
         print(f"  anomaly: {a.data.get('topic')} silent "
               f"{a.data.get('value'):.1f}s @ {a.timestamp.isoformat()}")
-    return TARGET
+    return target
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -68,9 +69,17 @@ def _feed_rate(
     return state.last_received_at or 0.0
 
 
-def validate(bag: Path, rule_path: Path) -> dict:
+def validate(
+    bag: Path,
+    rule_path: Path,
+    *,
+    trusted_rule_fingerprint: str,
+) -> dict:
     rule = load_rule(rule_path)
-    contract = contract_from_rule(rule)
+    contract = contract_from_rule(
+        rule,
+        trusted_rule_fingerprint=trusted_rule_fingerprint,
+    )
     bag_start_ns, trace = _read_pose_trace(bag, contract.topic)
 
     healthy = TelemetryHealthState(contract, started_at=0.0)
@@ -172,19 +181,28 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("bag", type=Path)
     parser.add_argument("--rule", type=Path, required=True)
+    parser.add_argument("--trusted-rule-fingerprint", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    result = validate(args.bag, args.rule)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(result, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    result = validate(
+        args.bag,
+        args.rule,
+        trusted_rule_fingerprint=args.trusted_rule_fingerprint,
     )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = args.output.with_name(f".{args.output.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, args.output)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

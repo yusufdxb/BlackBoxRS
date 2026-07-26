@@ -8,6 +8,7 @@ import bisect
 import hashlib
 import json
 import math
+import os
 import random
 import statistics
 import sys
@@ -308,9 +309,22 @@ def main() -> int:
         graph_context=args.graph_context,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output, "w", encoding="utf-8") as fh:
-        json.dump(evidence.model_dump(mode="json"), fh, indent=2, sort_keys=True)
-        fh.write("\n")
+    temporary = args.output.with_name(f".{args.output.name}.{os.getpid()}.tmp")
+    try:
+        with open(temporary, "w", encoding="utf-8") as fh:
+            json.dump(
+                evidence.model_dump(mode="json"),
+                fh,
+                indent=2,
+                sort_keys=True,
+            )
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temporary, args.output)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
     print(args.output)
     print(json.dumps(evidence.thresholds.model_dump(), sort_keys=True))
     return 0
@@ -318,4 +332,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

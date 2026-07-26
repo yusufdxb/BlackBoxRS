@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import platform
 import signal
 import subprocess
 import sys
@@ -33,6 +35,66 @@ from blackboxrs.prevention.telemetry_health import (  # noqa: E402
 
 PUBLISHER = REPO_ROOT / "scripts" / "telemetry_health_publisher.py"
 TOPIC = "/utlidar/robot_pose"
+
+
+def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with open(temporary, "w", encoding="utf-8") as output:
+            json.dump(payload, output, indent=2, sort_keys=True)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _repository_context(
+    *,
+    evidence_path: Path,
+    rule_fingerprint: str,
+) -> dict[str, Any]:
+    from rclpy.utilities import get_rmw_implementation_identifier
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1"],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        check=True,
+    ).stdout
+    source_diff = subprocess.run(
+        ["git", "diff", "--binary", "HEAD", "--", "."],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        check=True,
+    ).stdout
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        check=True,
+    ).stdout.strip()
+    evidence = load_telemetry_evidence(evidence_path)
+    return {
+        "git_commit": commit,
+        "source_diff_sha256": hashlib.sha256(source_diff).hexdigest(),
+        "clean_status": not bool(status),
+        "git_status_porcelain": status.splitlines(),
+        "python_version": platform.python_version(),
+        "ros_distro": os.environ.get("ROS_DISTRO"),
+        "rmw_implementation": get_rmw_implementation_identifier(),
+        "kernel": platform.release(),
+        "source_bag_sha256": evidence.source_bag_sha256,
+        "metadata_sha256": evidence.metadata_sha256,
+        "command_record": [sys.executable, *sys.argv],
+        "working_directory": str(REPO_ROOT),
+        "trusted_rule_fingerprint": rule_fingerprint,
+    }
 
 
 def _terminate(process: subprocess.Popen[Any]) -> None:
@@ -111,6 +173,7 @@ def _run_guard(
     publisher_settle_sec: float = 0.05,
 ) -> dict[str, Any]:
     processes: list[subprocess.Popen[Any]] = []
+    rule = load_rule(rule_path)
     try:
         processes.append(
             _start_wrong_type_publisher(domain)
@@ -135,7 +198,7 @@ def _run_guard(
             "--monitor-duration",
             str(monitor_duration),
             "--context",
-            rule.graph_context if hasattr(rule, "graph_context") else rule.check.params["graph_context"],
+            rule.check.params["graph_context"],
             "--trusted-rule-fingerprint",
             rule.rule_fingerprint or "",
             "--",
@@ -284,6 +347,7 @@ def _tampered_rule_control(
     out_dir: Path,
     domain: int,
 ) -> dict[str, Any]:
+    rule = load_rule(rule_path)
     data = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
     data["check"]["params"]["minimum_rate_hz"] = 1.0
     tampered_path = out_dir / "tampered_rule.yaml"
@@ -336,6 +400,8 @@ def run(
     out_dir: Path,
     domain_start: int,
 ) -> dict[str, Any]:
+    if out_dir.exists() and any(out_dir.iterdir()):
+        raise ValueError(f"Experiment output directory is not empty: {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
     empty_rules = out_dir / "no_rules"
     empty_rules.mkdir(exist_ok=True)
@@ -550,9 +616,15 @@ def run(
         for result in invalid.values()
         if result["enforcement_latency_sec"] is not None
     ]
+    loaded_rule = load_rule(rule_path)
+    assert loaded_rule.rule_fingerprint is not None
     summary = {
         "schema_version": "telemetry-health-experiment-v1",
-        "rule": load_rule(rule_path).model_dump(mode="json"),
+        "reproduction_context": _repository_context(
+            evidence_path=evidence_path,
+            rule_fingerprint=loaded_rule.rule_fingerprint,
+        ),
+        "rule": loaded_rule.model_dump(mode="json"),
         "baseline_no_rule": baseline,
         "topic_presence_rule": presence,
         "telemetry_health_valid": valid,
@@ -570,9 +642,6 @@ def run(
             "true_blocks": true_blocks,
             "false_blocks": false_blocks,
             "false_admits": false_admits,
-            "true_block_rate": true_blocks / invalid_count,
-            "false_block_rate": false_blocks / valid_count,
-            "false_admit_rate": false_admits / invalid_count,
             "detection_latency_sec": {
                 "minimum": min(detection_latencies),
                 "maximum": max(detection_latencies),
@@ -586,10 +655,7 @@ def run(
         },
     }
     target = out_dir / "experiment_summary.json"
-    target.write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    _atomic_json(target, summary)
     return summary
 
 
@@ -601,13 +667,24 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--domain-start", type=int, default=170)
     args = parser.parse_args()
-    summary = run(
-        rule_path=args.rule,
-        evidence_path=args.healthy_evidence,
-        incident_dir=args.incident,
-        out_dir=args.out,
-        domain_start=args.domain_start,
-    )
+    try:
+        summary = run(
+            rule_path=args.rule,
+            evidence_path=args.healthy_evidence,
+            incident_dir=args.incident,
+            out_dir=args.out,
+            domain_start=args.domain_start,
+        )
+    except BaseException:
+        args.out.mkdir(parents=True, exist_ok=True)
+        _atomic_json(
+            args.out / "INCOMPLETE.json",
+            {
+                "complete": False,
+                "command_record": [sys.executable, *sys.argv],
+            },
+        )
+        raise
     print(json.dumps(summary["metrics"], indent=2, sort_keys=True))
     return 0
 

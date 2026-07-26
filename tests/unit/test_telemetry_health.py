@@ -2,60 +2,30 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
-from types import SimpleNamespace
-
 import pytest
 
-from blackboxrs.incident.models import (
-    DetectorTrigger,
-    FailureFingerprint,
-    Incident,
-    LikelyCauseHypothesis,
-)
+from blackboxrs.incident.bundle import BundleReader
 from blackboxrs.prevention.derivation import (
     PreventionDerivationError,
     derive_telemetry_health_rule,
 )
-from blackboxrs.prevention.rules import PreflightCheck, make_rule
 from blackboxrs.prevention.telemetry_health import (
     HealthyTelemetryStatistics,
     TelemetryHealthContract,
-    TelemetryHealthEvidence,
     TelemetryHealthState,
-    compute_evidence_fingerprint,
     contract_from_rule,
     derive_thresholds,
+)
+from tests.telemetry_fixtures import (
+    build_telemetry_provenance_fixture,
+    healthy_statistics,
+    write_evidence,
+    write_finalized_incident,
 )
 
 
 def _statistics() -> HealthyTelemetryStatistics:
-    return HealthyTelemetryStatistics(
-        message_count=6177,
-        startup_delay_sec=0.158142077,
-        observed_duration_sec=329.443225884,
-        mean_rate_hz=18.746780976988813,
-        median_rate_hz=18.756079021048965,
-        inter_arrival_sec={
-            "minimum": 0.045329218,
-            "mean": 0.053342491237694294,
-            "median": 0.0533160475,
-            "p90": 0.0544107025,
-            "p95": 0.0559826245,
-            "p99": 0.05693549725,
-            "p99_5": 0.057507992125,
-            "p99_9": 0.06031294775,
-            "max": 0.070847572,
-        },
-        rolling_rate_hz={"2s": {"minimum": 18.5}},
-        header_nonprogressing_deltas=0,
-        header_frozen_deltas=0,
-        header_negative_deltas=0,
-        payload_nonfinite_values=0,
-        consecutive_exact_pose_repeats=0,
-        unique_pose_vectors=6177,
-    )
+    return healthy_statistics()
 
 
 def _contract() -> TelemetryHealthContract:
@@ -195,148 +165,51 @@ def test_zero_messages_fails_startup():
     assert result.reason == "startup_timeout"
 
 
-def test_runtime_rule_requires_complete_provenance_and_valid_fingerprint():
-    contract = _contract()
-    rule = make_rule(
-        PreflightCheck(
-            name="runtime telemetry",
-            kind="telemetry_health",
-            params=contract.model_dump(mode="json"),
-            applies_to=[contract.graph_context],
-        ),
-        source_incident_id="inc_2026-07-23T00-00-00_12345678",
-        source_fingerprint_id="fpr_1234567890abcdef",
-        source_trigger_ids=["trg_12345678"],
-        derivation={
-            "strategy": "dead_topic_telemetry_health_v1",
-            "source_detector_class": "pkg.DeadTopicDetector",
-            "source_trigger_id": "trg_12345678",
-            "source_event_ref": "events.jsonl#L2",
-            "source_topic": contract.topic,
-            "hypothesis_confidence": 0.98,
-            "healthy_evidence_ref": "/tmp/evidence.json#statistics",
-            "healthy_evidence_fingerprint": "a" * 64,
-            "source_bag_sha256": "b" * 64,
-            "threshold_derivation": {"method": "test"},
-        },
-    )
+def test_runtime_rule_requires_complete_provenance_and_valid_fingerprint(tmp_path):
+    fixture = build_telemetry_provenance_fixture(tmp_path)
+    rule = fixture.rule
 
-    assert contract_from_rule(rule) == contract
+    assert contract_from_rule(
+        rule, trusted_rule_fingerprint=rule.rule_fingerprint
+    ) == fixture.contract
 
     tampered = rule.model_copy(
         update={"derivation": {**rule.derivation, "source_topic": "/other"}}
     )
-    try:
-        contract_from_rule(tampered)
-    except ValueError as exc:
-        assert "fingerprint" in str(exc)
-    else:
-        raise AssertionError("tampered rule was admitted")
-
-
-def _incident_and_trigger() -> tuple[Incident, DetectorTrigger]:
-    now = datetime(2026, 7, 23, tzinfo=timezone.utc)
-    trigger = DetectorTrigger(
-        trigger_id="trg_12345678",
-        detector="dead_topic",
-        detector_class="pkg.DeadTopicDetector",
-        t=now,
-        subsystem="ros",
-        subject="/utlidar/robot_pose",
-        severity="error",
-        message="stopped",
-        data={"topic": "/utlidar/robot_pose"},
-        source_event_ref="events.jsonl#L2231",
-    )
-    incident = Incident(
-        incident_id="inc_2026-07-23T00-00-00_12345678",
-        created_at=now,
-        window_start=now,
-        window_end=now,
-        session_id="s",
-        title="dead pose",
-        bundle_path="/tmp/incident",
-        fingerprint=FailureFingerprint(
-            fingerprint_id="fpr_1234567890abcdef"
-        ),
-        likely_causes=[
-            LikelyCauseHypothesis(
-                cause="Topic /utlidar/robot_pose stopped emitting messages.",
-                confidence=0.98,
-                evidence_refs=[
-                    "events.jsonl#L2231",
-                    "triggers.json#trg_12345678",
-                ],
-            )
-        ],
-    )
-    return incident, trigger
-
-
-def _write_evidence(tmp_path, *, message_count: int = 6177):
-    stats = _statistics().model_copy(update={"message_count": message_count})
-    evidence = TelemetryHealthEvidence(
-        schema_version="telemetry-health-evidence-v1",
-        evidence_id="evh_123456789abc",
-        source_bag_path="/data/go2",
-        source_bag_sha256="a" * 64,
-        metadata_sha256="b" * 64,
-        source_bag_size_bytes=651_000_000,
-        source_bag_duration_sec=329.6,
-        source_bag_message_count=94_325,
-        topic="/utlidar/robot_pose",
-        message_type="geometry_msgs/msg/PoseStamped",
-        offered_qos={
-            "history": "keep_last",
-            "depth": 1,
-            "reliability": "reliable",
-            "durability": "volatile",
-        },
-        graph_context="go2_utlidar_hardware_eval_20260406",
-        statistics=stats,
-        thresholds=derive_thresholds(stats),
-        derivation_method={"method": "test"},
-        confidence_bounds={"descriptive": True},
-    )
-    evidence = evidence.model_copy(
-        update={"evidence_fingerprint": compute_evidence_fingerprint(evidence)}
-    )
-    path = tmp_path / "healthy.json"
-    path.write_text(
-        json.dumps(evidence.model_dump(mode="json")),
-        encoding="utf-8",
-    )
-    return path
+    with pytest.raises(ValueError, match="fingerprint"):
+        contract_from_rule(
+            tampered, trusted_rule_fingerprint=rule.rule_fingerprint
+        )
 
 
 def test_telemetry_rule_derivation_binds_incident_and_healthy_evidence(tmp_path):
-    incident, trigger = _incident_and_trigger()
-    reader = SimpleNamespace(
-        validate=lambda require_finalized: SimpleNamespace(errors=[]),
-        load_incident=lambda: incident,
-        load_triggers=lambda: [trigger],
+    fixture = build_telemetry_provenance_fixture(tmp_path)
+    derivation = derive_telemetry_health_rule(
+        BundleReader(fixture.bundle_path), fixture.evidence_path
     )
 
-    derivation = derive_telemetry_health_rule(reader, _write_evidence(tmp_path))
-
     assert derivation.rule.check.kind == "telemetry_health"
-    assert derivation.rule.source_trigger_ids == ["trg_12345678"]
-    assert derivation.rule.derivation["source_event_ref"] == "events.jsonl#L2231"
+    assert derivation.rule.source_trigger_ids == [fixture.trigger.trigger_id]
+    assert (
+        derivation.rule.derivation["source_event_ref"]
+        == fixture.trigger.source_event_ref
+    )
     assert derivation.rule.derivation["healthy_evidence_fingerprint"]
-    assert contract_from_rule(derivation.rule).minimum_rate_hz == 15.0
+    assert (
+        contract_from_rule(
+            derivation.rule,
+            trusted_rule_fingerprint=derivation.rule.rule_fingerprint,
+        ).minimum_rate_hz
+        == 15.0
+    )
 
 
 def test_telemetry_rule_derivation_refuses_insufficient_healthy_evidence(tmp_path):
-    incident, trigger = _incident_and_trigger()
-    reader = SimpleNamespace(
-        validate=lambda require_finalized: SimpleNamespace(errors=[]),
-        load_incident=lambda: incident,
-        load_triggers=lambda: [trigger],
-    )
+    bundle_path, _, _, _ = write_finalized_incident(tmp_path)
+    evidence_path, _ = write_evidence(tmp_path, message_count=10)
 
     with pytest.raises(PreventionDerivationError, match="fewer than 1000"):
         derive_telemetry_health_rule(
-            reader,
-            _write_evidence(tmp_path, message_count=10),
+            BundleReader(bundle_path),
+            evidence_path,
         )
-

@@ -303,6 +303,11 @@ class IncidentBuilder:
         # itself does not exist yet at this point in the build pipeline.
         report_text = report_mod.render(BundleReader(bundle_dir, strict=False))
         writer.write_report(report_text)
+        manifest = writer.build_manifest(
+            incident_id=incident.incident_id,
+            created_at=incident.created_at,
+        )
+        writer.write_manifest(manifest)
 
         logger.info("Built incident %s at %s", incident_id, bundle_dir)
         return bundle_dir

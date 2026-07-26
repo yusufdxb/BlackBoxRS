@@ -9,6 +9,7 @@ import os
 import signal
 import subprocess
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Sequence
@@ -54,9 +55,82 @@ class TelemetryGuardResult(BaseModel):
     guard_runtime_sec: float = Field(..., ge=0.0)
     dependent_launch_offset_sec: float | None = None
     dependent_supervision_sec: float | None = None
+    guard_started_at: datetime
+    qualification_started_at: datetime
+    qualification_completed_at: datetime | None = None
+    dependent_launched_at: datetime | None = None
+    supervision_started_at: datetime | None = None
+    supervision_ended_at: datetime | None = None
+    dependent_exited_at: datetime | None = None
+    enforcement_at: datetime | None = None
     structural: dict[str, Any] = Field(default_factory=dict)
     transitions: list[dict[str, Any]] = Field(default_factory=list)
     completed_at: datetime
+
+
+@dataclass
+class _GuardTiming:
+    """Paired monotonic and UTC event times for one guard run."""
+
+    guard_started_mono: float
+    guard_started_at: datetime
+    qualification_completed_mono: float | None = None
+    qualification_completed_at: datetime | None = None
+    dependent_launched_mono: float | None = None
+    dependent_launched_at: datetime | None = None
+    supervision_started_mono: float | None = None
+    supervision_started_at: datetime | None = None
+    supervision_ended_mono: float | None = None
+    supervision_ended_at: datetime | None = None
+    dependent_exited_mono: float | None = None
+    dependent_exited_at: datetime | None = None
+    enforcement_mono: float | None = None
+    enforcement_at: datetime | None = None
+    completed_mono: float | None = None
+    completed_at: datetime | None = None
+
+    @classmethod
+    def start(cls) -> "_GuardTiming":
+        return cls(
+            guard_started_mono=time.monotonic(),
+            guard_started_at=datetime.now(timezone.utc),
+        )
+
+    def mark_qualification_completed(self, mono: float) -> None:
+        if self.qualification_completed_mono is None:
+            self.qualification_completed_mono = mono
+            self.qualification_completed_at = datetime.now(timezone.utc)
+
+    def mark_dependent_launched(self) -> None:
+        mono = time.monotonic()
+        wall = datetime.now(timezone.utc)
+        self.dependent_launched_mono = mono
+        self.dependent_launched_at = wall
+        self.supervision_started_mono = mono
+        self.supervision_started_at = wall
+
+    def mark_enforcement(self, mono: float | None = None) -> None:
+        if self.enforcement_mono is None:
+            self.enforcement_mono = mono if mono is not None else time.monotonic()
+            self.enforcement_at = datetime.now(timezone.utc)
+
+    def mark_dependent_exit(self) -> None:
+        mono = time.monotonic()
+        wall = datetime.now(timezone.utc)
+        self.dependent_exited_mono = mono
+        self.dependent_exited_at = wall
+        self.supervision_ended_mono = mono
+        self.supervision_ended_at = wall
+
+    def finish(self) -> None:
+        self.completed_mono = time.monotonic()
+        self.completed_at = datetime.now(timezone.utc)
+        if (
+            self.supervision_started_mono is not None
+            and self.supervision_ended_mono is None
+        ):
+            self.supervision_ended_mono = self.completed_mono
+            self.supervision_ended_at = self.completed_at
 
 
 def run_ros_telemetry_guard(
@@ -83,8 +157,8 @@ def run_ros_telemetry_guard(
         )
     if not command:
         raise ValueError("A dependent command is required")
-    if monitor_duration_sec is not None and monitor_duration_sec <= 0:
-        raise ValueError("monitor_duration_sec must be positive")
+    if monitor_duration_sec is not None and monitor_duration_sec < 0:
+        raise ValueError("monitor_duration_sec must be non-negative")
 
     try:
         import rclpy
@@ -107,12 +181,15 @@ def run_ros_telemetry_guard(
         ReliabilityPolicy=ReliabilityPolicy,
         DurabilityPolicy=DurabilityPolicy,
     )
-    guard_started = time.monotonic()
+    timing = _GuardTiming.start()
+    guard_started = timing.guard_started_mono
     state = TelemetryHealthState(contract, started_at=guard_started)
     transitions: list[dict[str, Any]] = []
     message_count = 0
     last_state: str | None = None
     child: subprocess.Popen[bytes] | None = None
+    child_ready_fd: int | None = None
+    dependent_pid: int | None = None
     structural: dict[str, Any] = {
         "topic_seen": False,
         "publisher_count": 0,
@@ -120,6 +197,8 @@ def run_ros_telemetry_guard(
         "observed_types": [],
         "expected_qos": contract.expected_qos,
     }
+
+    child_started_at: float | None = None
 
     init_here = not rclpy.ok()
     if init_here:
@@ -129,6 +208,12 @@ def run_ros_telemetry_guard(
     def on_message(msg: Any) -> None:
         nonlocal message_count
         now = time.monotonic()
+        if (
+            child_started_at is not None
+            and monitor_duration_sec is not None
+            and now > child_started_at + monitor_duration_sec
+        ):
+            return
         header_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
         state.observe(received_at=now, header_stamp_ns=header_ns)
         message_count += 1
@@ -138,26 +223,90 @@ def run_ros_telemetry_guard(
     structural["resolved_topic"] = resolved_topic
     if resolved_topic != contract.topic:
         raise RuntimeError(f"Resolved subscription topic {resolved_topic!r} differs from contract")
-    child_started_at: float | None = None
     try:
         while True:
             rclpy.spin_once(node, timeout_sec=spin_slice_sec)
             now = time.monotonic()
-            structural = _inspect_graph(
-                node,
-                contract,
-                qos,
-                qos_check_compatible=qos_check_compatible,
-                QoSCompatibility=QoSCompatibility,
+
+            if child is not None and child_ready_fd is not None:
+                ready_pid, ready_closed = _read_dependent_pid(child_ready_fd)
+                if ready_closed:
+                    os.close(child_ready_fd)
+                    child_ready_fd = None
+                if ready_pid is not None:
+                    dependent_pid = ready_pid
+                    timing.mark_dependent_launched()
+                    child_started_at = timing.dependent_launched_mono
+                    assert child_started_at is not None
+                    transitions.append(
+                        {
+                            "state": "dependent_started",
+                            "at_sec": child_started_at - guard_started,
+                            "pid": dependent_pid,
+                        }
+                    )
+
+            if child is not None:
+                child_code = child.poll()
+                if child_code is not None:
+                    timing.mark_dependent_exit()
+                    timing.finish()
+                    evaluation = state.evaluate(
+                        min(now, timing.supervision_ended_mono or now)
+                    )
+                    result = _result(
+                        rule,
+                        contract,
+                        state,
+                        status="passed" if child_code == 0 else "dependent_failed",
+                        reason=None if child_code == 0 else "dependent_exit",
+                        detail=f"dependent exited with code {child_code}",
+                        messages=message_count,
+                        evaluation=evaluation,
+                        dependent_pid=dependent_pid,
+                        child_exit_code=child_code,
+                        detection_latency=None,
+                        enforcement_latency=None,
+                        structural=structural,
+                        transitions=transitions,
+                        timing=timing,
+                    )
+                    return _persist(result, result_path)
+
+            supervision_deadline = (
+                child_started_at + monitor_duration_sec
+                if child_started_at is not None
+                and monitor_duration_sec is not None
+                else None
             )
-            evaluation = state.evaluate(now)
+            deadline_reached = (
+                supervision_deadline is not None and now >= supervision_deadline
+            )
+            evaluation_at = (
+                supervision_deadline if deadline_reached else now
+            )
+            if not deadline_reached:
+                structural = _inspect_graph(
+                    node,
+                    contract,
+                    qos,
+                    qos_check_compatible=qos_check_compatible,
+                    QoSCompatibility=QoSCompatibility,
+                )
+            evaluation = state.evaluate(evaluation_at)
             if evaluation.state == "healthy" and not _graph_consistent(structural, contract, resolved_topic):
-                evaluation = state.fail(now, "graph_inconsistent", "resolved topic or compatible graph does not match contract")
+                evaluation = state.fail(
+                    evaluation_at,
+                    "graph_inconsistent",
+                    "resolved topic or compatible graph does not match contract",
+                )
+            if evaluation.state == "healthy":
+                timing.mark_qualification_completed(evaluation_at)
             if evaluation.state != last_state:
                 transitions.append(
                     {
                         "state": evaluation.state,
-                        "at_sec": now - guard_started,
+                        "at_sec": evaluation_at - guard_started,
                         "reason": evaluation.reason,
                         "detail": evaluation.detail,
                     }
@@ -168,10 +317,13 @@ def run_ros_telemetry_guard(
                 reason, detail = _specific_failure(evaluation, structural)
                 detection_latency = _detection_latency(state, evaluation)
                 enforcement_started = time.monotonic()
+                timing.mark_enforcement(enforcement_started)
                 exit_code = None
                 if child is not None:
                     exit_code = _terminate_process_group(child)
+                    timing.mark_dependent_exit()
                 enforcement_latency = time.monotonic() - enforcement_started
+                timing.finish()
                 result = _result(
                     rule,
                     contract,
@@ -181,62 +333,24 @@ def run_ros_telemetry_guard(
                     detail=detail,
                     messages=message_count,
                     evaluation=evaluation,
-                    child=child,
+                    dependent_pid=dependent_pid,
                     child_exit_code=exit_code,
                     detection_latency=detection_latency,
                     enforcement_latency=enforcement_latency,
-                    started_at=guard_started,
                     structural=structural,
                     transitions=transitions,
-                    child_started_at=child_started_at,
+                    timing=timing,
                 )
                 return _persist(result, result_path)
 
-            if evaluation.state == "healthy" and child is None:
-                supervisor = [__import__("sys").executable, "-m", "blackboxrs.prevention.process_supervisor", "--", *command]
-                parent_pid = os.getpid()
-                child_env = os.environ.copy()
-                child_env["BLACKBOXRS_OWNER_PID"] = str(parent_pid)
-                child = subprocess.Popen(supervisor, start_new_session=True, preexec_fn=lambda: _set_parent_death_signal(parent_pid), env=child_env)
-                child_started_at = time.monotonic()
-                transitions.append(
-                    {
-                        "state": "dependent_started",
-                        "at_sec": time.monotonic() - guard_started,
-                        "pid": child.pid,
-                    }
-                )
-
-            if child is None:
-                continue
-            child_code = child.poll()
-            if child_code is not None:
-                result = _result(
-                    rule,
-                    contract,
-                    state,
-                    status="passed" if child_code == 0 else "dependent_failed",
-                    reason=None if child_code == 0 else "dependent_exit",
-                    detail=f"dependent exited with code {child_code}",
-                    messages=message_count,
-                    evaluation=evaluation,
-                    child=child,
-                    child_exit_code=child_code,
-                    detection_latency=None,
-                    enforcement_latency=None,
-                    started_at=guard_started,
-                    structural=structural,
-                    transitions=transitions,
-                    child_started_at=child_started_at,
-                )
-                return _persist(result, result_path)
-
-            if (
-                monitor_duration_sec is not None
-                and child_started_at is not None
-                and now - child_started_at >= monitor_duration_sec
-            ):
+            if deadline_reached:
+                assert child is not None
+                enforcement_started = time.monotonic()
+                timing.mark_enforcement(enforcement_started)
                 exit_code = _terminate_process_group(child)
+                timing.mark_dependent_exit()
+                enforcement_latency = time.monotonic() - enforcement_started
+                timing.finish()
                 result = _result(
                     rule,
                     contract,
@@ -246,17 +360,44 @@ def run_ros_telemetry_guard(
                     detail="monitor duration completed with healthy telemetry",
                     messages=message_count,
                     evaluation=evaluation,
-                    child=child,
+                    dependent_pid=dependent_pid,
                     child_exit_code=exit_code,
                     detection_latency=None,
-                    enforcement_latency=None,
-                    started_at=guard_started,
+                    enforcement_latency=enforcement_latency,
                     structural=structural,
                     transitions=transitions,
-                    child_started_at=child_started_at,
+                    timing=timing,
                 )
                 return _persist(result, result_path)
+
+            if evaluation.state == "healthy" and child is None:
+                supervisor = [__import__("sys").executable, "-m", "blackboxrs.prevention.process_supervisor", "--", *command]
+                parent_pid = os.getpid()
+                child_env = os.environ.copy()
+                child_env["BLACKBOXRS_OWNER_PID"] = str(parent_pid)
+                child_ready_fd, ready_write_fd = os.pipe()
+                os.set_blocking(child_ready_fd, False)
+                child_env["BLACKBOXRS_READY_FD"] = str(ready_write_fd)
+                try:
+                    child = subprocess.Popen(
+                        supervisor,
+                        start_new_session=True,
+                        preexec_fn=lambda: _set_parent_death_signal(parent_pid),
+                        env=child_env,
+                        pass_fds=(ready_write_fd,),
+                    )
+                except BaseException:
+                    os.close(child_ready_fd)
+                    child_ready_fd = None
+                    raise
+                finally:
+                    os.close(ready_write_fd)
+
+            if child is None:
+                continue
     finally:
+        if child_ready_fd is not None:
+            os.close(child_ready_fd)
         if child is not None and child.poll() is None:
             _terminate_process_group(child)
         node.destroy_subscription(subscription)
@@ -339,6 +480,20 @@ def _set_parent_death_signal(parent_pid: int) -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
 
+def _read_dependent_pid(ready_fd: int) -> tuple[int | None, bool]:
+    """Read one atomic dependent-launch acknowledgement from the supervisor."""
+    try:
+        payload = os.read(ready_fd, 64)
+    except BlockingIOError:
+        return None, False
+    if not payload:
+        return None, True
+    try:
+        return int(payload.strip()), True
+    except ValueError as exc:
+        raise RuntimeError("Process supervisor returned an invalid dependent PID") from exc
+
+
 def _specific_failure(
     evaluation: TelemetryHealthEvaluation,
     structural: dict[str, Any],
@@ -401,18 +556,19 @@ def _result(
     detail: str,
     messages: int,
     evaluation: TelemetryHealthEvaluation,
-    child: subprocess.Popen[bytes] | None,
+    dependent_pid: int | None,
     child_exit_code: int | None,
     detection_latency: float | None,
     enforcement_latency: float | None,
-    started_at: float,
     structural: dict[str, Any],
     transitions: list[dict[str, Any]],
-    child_started_at: float | None,
+    timing: _GuardTiming,
 ) -> TelemetryGuardResult:
     assert rule.rule_fingerprint is not None
     assert rule.source_incident_id is not None
     assert rule.source_fingerprint_id is not None
+    assert timing.completed_mono is not None
+    assert timing.completed_at is not None
     return TelemetryGuardResult(
         rule_id=rule.rule_id,
         rule_fingerprint=rule.rule_fingerprint,
@@ -435,17 +591,34 @@ def _result(
             else None
         ),
         maximum_observed_gap_sec=state.maximum_observed_gap_sec,
-        dependent_started=child is not None,
-        dependent_pid=child.pid if child is not None else None,
+        dependent_started=timing.dependent_launched_mono is not None,
+        dependent_pid=dependent_pid,
         dependent_exit_code=child_exit_code,
         detection_latency_sec=detection_latency,
         enforcement_latency_sec=enforcement_latency,
-        guard_runtime_sec=time.monotonic() - started_at,
-        dependent_launch_offset_sec=(child_started_at - started_at if child_started_at else None),
-        dependent_supervision_sec=(time.monotonic() - child_started_at if child_started_at else None),
+        guard_runtime_sec=timing.completed_mono - timing.guard_started_mono,
+        dependent_launch_offset_sec=(
+            timing.dependent_launched_mono - timing.guard_started_mono
+            if timing.dependent_launched_mono is not None
+            else None
+        ),
+        dependent_supervision_sec=(
+            timing.supervision_ended_mono - timing.supervision_started_mono
+            if timing.supervision_started_mono is not None
+            and timing.supervision_ended_mono is not None
+            else None
+        ),
+        guard_started_at=timing.guard_started_at,
+        qualification_started_at=timing.guard_started_at,
+        qualification_completed_at=timing.qualification_completed_at,
+        dependent_launched_at=timing.dependent_launched_at,
+        supervision_started_at=timing.supervision_started_at,
+        supervision_ended_at=timing.supervision_ended_at,
+        dependent_exited_at=timing.dependent_exited_at,
+        enforcement_at=timing.enforcement_at,
         structural=structural,
         transitions=transitions,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=timing.completed_at,
     )
 
 
@@ -455,7 +628,25 @@ def _persist(
     if result_path is not None:
         path = Path(result_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(result.model_dump(mode="json"), fh, indent=2, sort_keys=True)
-            fh.write("\n")
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(
+                    result.model_dump(mode="json"),
+                    fh,
+                    indent=2,
+                    sort_keys=True,
+                )
+                fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
     return result

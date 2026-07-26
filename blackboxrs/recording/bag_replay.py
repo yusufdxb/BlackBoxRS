@@ -100,15 +100,18 @@ def _split_db3_files(dir_path: Path) -> list[Path]:
     ...) once a size/duration threshold is hit; all of them belong to the
     same bag and must be read together or messages are silently dropped.
     ``metadata.yaml``'s ``relative_file_paths`` is the authoritative list
-    and is preferred; a sorted glob is the fallback when metadata is
-    missing or unreadable.
+    and is preferred; a sorted glob is the fallback only when metadata is
+    absent.
     """
     metadata_path = dir_path / "metadata.yaml"
     if metadata_path.exists():
         import yaml
 
-        with open(metadata_path, "r", encoding="utf-8") as fh:
-            metadata = yaml.safe_load(fh)
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as fh:
+                metadata = yaml.safe_load(fh)
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValueError(f"Malformed rosbag2 metadata: {metadata_path}") from exc
         try:
             rel_paths = metadata["rosbag2_bagfile_information"][
                 "relative_file_paths"
@@ -116,7 +119,26 @@ def _split_db3_files(dir_path: Path) -> list[Path]:
         except (KeyError, TypeError):
             rel_paths = None
         if rel_paths:
-            return [dir_path / rel for rel in rel_paths]
+            root = dir_path.resolve()
+            files: list[Path] = []
+            seen: set[Path] = set()
+            for rel in rel_paths:
+                if not isinstance(rel, str):
+                    raise ValueError("Malformed rosbag2 metadata relative file path")
+                candidate = (dir_path / rel).resolve()
+                try:
+                    candidate.relative_to(root)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Rosbag2 metadata path escapes bag directory: {rel}"
+                    ) from exc
+                if candidate in seen:
+                    raise ValueError(
+                        f"Rosbag2 metadata contains duplicate path: {rel}"
+                    )
+                seen.add(candidate)
+                files.append(candidate)
+            return files
     return sorted(dir_path.glob("*.db3"))
 
 

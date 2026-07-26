@@ -19,11 +19,21 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from blackboxrs.core.schemas import BlackBoxEvent
+from blackboxrs.incident.bundle import BundleReader
+from blackboxrs.incident.fingerprint import compute as compute_incident_fingerprint
+from blackboxrs.incident.models import DetectorTrigger
+
 from .rules import PreventionRule, verify_rule_fingerprint
 
 
 class TelemetryHealthContract(BaseModel):
-    """Runtime parameters fixed by one evidence-derived rule."""
+    """Runtime parameters fixed by one evidence-derived rule.
+
+    ``aggregate_topic`` evaluates the combined traffic from all compatible
+    publishers. It does not protect the identity or health of any specific
+    producer while another publisher keeps the aggregate traffic healthy.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -147,6 +157,156 @@ def verify_evidence_sources(evidence: TelemetryHealthEvidence) -> None:
         raise ValueError("Telemetry source bag hash mismatch")
 
 
+def load_source_event(bundle_path: Path, event_ref: str) -> BlackBoxEvent:
+    """Resolve one stable ``events.jsonl#L<n>`` reference inside a bundle."""
+    if not event_ref.startswith("events.jsonl#L"):
+        raise ValueError(
+            "Telemetry source event reference is not a stable events.jsonl line"
+        )
+    try:
+        line_no = int(event_ref.rsplit("L", 1)[1])
+        lines = (
+            (Path(bundle_path) / "evidence" / "events.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        if line_no < 1 or line_no > len(lines) or not lines[line_no - 1].strip():
+            raise ValueError
+        return BlackBoxEvent.from_jsonl(lines[line_no - 1])
+    except (OSError, ValueError) as exc:
+        raise ValueError("Telemetry source event reference does not resolve") from exc
+
+
+def verify_source_event_binding(
+    bundle_path: Path, trigger: DetectorTrigger
+) -> BlackBoxEvent:
+    """Verify trigger identity against the referenced source event.
+
+    This checks provenance identity only. It does not validate ROS message
+    payload semantics.
+    """
+    if not trigger.source_event_ref:
+        raise ValueError("Telemetry source trigger has no event cross-reference")
+    event = load_source_event(bundle_path, trigger.source_event_ref)
+    detector = str(event.data.get("detector", "unknown"))
+    detector_class = str(
+        event.metadata.get("detector_class", detector) or detector
+    )
+    subject = str(
+        event.data.get("topic")
+        or event.data.get("metric")
+        or event.data.get("subject")
+        or event.event_type
+    )
+    if event.source != "anomaly_engine":
+        raise ValueError("Telemetry source event is not an anomaly event")
+    if event.timestamp != trigger.t:
+        raise ValueError("Telemetry source event timestamp differs from trigger")
+    if detector != trigger.detector:
+        raise ValueError("Telemetry source event detector differs from trigger")
+    if detector_class != trigger.detector_class:
+        raise ValueError("Telemetry source event detector class differs from trigger")
+    if subject != trigger.subject:
+        raise ValueError("Telemetry source event topic differs from trigger")
+    expected_trigger_id = DetectorTrigger.make_id(
+        trigger.detector, trigger.t, trigger.subject
+    )
+    if trigger.trigger_id != expected_trigger_id:
+        raise ValueError("Telemetry source trigger ID is not deterministically derived")
+    return event
+
+
+def verify_incident_source(
+    rule: PreventionRule, contract: TelemetryHealthContract
+) -> None:
+    """Verify the finalized incident, trigger, and source-event rule bindings."""
+    incident_path = Path(str(rule.derivation["source_incident_ref"]))
+    manifest_path = incident_path / "manifest.json"
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+    except OSError as exc:
+        raise ValueError("Telemetry source incident manifest is unavailable") from exc
+    if (
+        hashlib.sha256(manifest_bytes).hexdigest()
+        != rule.derivation["source_incident_manifest_sha256"]
+    ):
+        raise ValueError("Telemetry source incident manifest hash mismatch")
+
+    try:
+        reader = BundleReader(incident_path, strict=False)
+        result = reader.validate(require_finalized=True)
+    except (OSError, ValueError) as exc:
+        raise ValueError("Telemetry source incident is unavailable") from exc
+    if result.errors:
+        details = "; ".join(
+            f"{issue.code}:{issue.path or '-'}:{issue.message}"
+            for issue in result.errors
+        )
+        raise ValueError(
+            f"Telemetry source incident failed integrity validation: {details}"
+        )
+
+    incident = reader.load_incident()
+    if incident.incident_id != rule.source_incident_id:
+        raise ValueError("Telemetry source incident ID differs from rule")
+    try:
+        manifest = json.loads(manifest_bytes)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Telemetry source incident manifest is malformed") from exc
+    if manifest.get("incident_id") != incident.incident_id:
+        raise ValueError("Telemetry manifest incident ID differs from incident")
+    if incident.fingerprint is None:
+        raise ValueError("Telemetry source incident has no failure fingerprint")
+    if incident.fingerprint.fingerprint_id != rule.source_fingerprint_id:
+        raise ValueError("Telemetry source incident fingerprint differs from rule")
+    bundle_fingerprint = reader.load_fingerprint()
+    if bundle_fingerprint != incident.fingerprint:
+        raise ValueError("Telemetry source incident fingerprints are inconsistent")
+
+    triggers = reader.load_triggers()
+    matching = [
+        trigger
+        for trigger in triggers
+        if trigger.trigger_id == rule.derivation["source_trigger_id"]
+    ]
+    if len(matching) != 1:
+        raise ValueError(
+            "Telemetry source trigger does not resolve uniquely in incident"
+        )
+    trigger = matching[0]
+    if trigger.trigger_id not in incident.triggers:
+        raise ValueError("Telemetry source trigger is not cross-referenced by incident")
+    if trigger.detector_class != rule.derivation["source_detector_class"]:
+        raise ValueError("Telemetry source detector class differs from rule")
+    if trigger.subject != rule.derivation["source_topic"]:
+        raise ValueError("Telemetry source topic differs from incident evidence")
+    if trigger.subject != contract.topic:
+        raise ValueError("Telemetry contract topic differs from incident evidence")
+    if trigger.source_event_ref != rule.derivation["source_event_ref"]:
+        raise ValueError("Telemetry source event reference differs from trigger")
+
+    top = incident.likely_causes[0] if incident.likely_causes else None
+    if top is None:
+        raise ValueError("Telemetry source incident has no likely cause")
+    required_refs = {
+        trigger.source_event_ref,
+        f"triggers.json#{trigger.trigger_id}",
+    }
+    if None in required_refs or not required_refs.issubset(set(top.evidence_refs)):
+        raise ValueError(
+            "Telemetry source incident is missing trigger or event cross-reference"
+        )
+    if top.confidence != float(rule.derivation["hypothesis_confidence"]):
+        raise ValueError("Telemetry source hypothesis confidence differs from rule")
+
+    verify_source_event_binding(incident_path, trigger)
+    computed = compute_incident_fingerprint(triggers, reader.load_snapshots())
+    if computed.fingerprint_id != incident.fingerprint.fingerprint_id:
+        raise ValueError(
+            "Telemetry source incident fingerprint does not match its triggers"
+        )
+
+
 def derive_thresholds(
     statistics: HealthyTelemetryStatistics,
 ) -> TelemetryThresholds:
@@ -193,6 +353,8 @@ def contract_from_rule(
         raise ValueError("Telemetry-health rule requires exactly one source trigger")
 
     required = {
+        "confidence_bounds",
+        "healthy_statistics",
         "strategy",
         "source_detector_class",
         "source_trigger_id",
@@ -205,6 +367,7 @@ def contract_from_rule(
         "threshold_derivation",
         "source_incident_ref",
         "source_incident_manifest_sha256",
+        "selected_thresholds",
     }
     missing = sorted(key for key in required if not rule.derivation.get(key))
     if missing:
@@ -225,6 +388,7 @@ def contract_from_rule(
     contract = TelemetryHealthContract.model_validate(rule.check.params)
     if contract.topic != rule.derivation["source_topic"]:
         raise ValueError("Telemetry-health contract topic differs from source topic")
+    verify_incident_source(rule, contract)
     evidence_ref = str(rule.derivation["healthy_evidence_ref"]).split("#", 1)[0]
     evidence = load_telemetry_evidence(Path(evidence_ref))
     verify_evidence_sources(evidence)
@@ -232,10 +396,39 @@ def contract_from_rule(
         raise ValueError("Telemetry evidence fingerprint differs from rule")
     if evidence.topic != contract.topic or evidence.message_type != contract.expected_type:
         raise ValueError("Telemetry evidence identity differs from rule")
+    if evidence.offered_qos != contract.expected_qos:
+        raise ValueError("Telemetry evidence QoS differs from rule")
     if evidence.graph_context != contract.graph_context:
         raise ValueError("Telemetry evidence context differs from rule")
     if evidence.thresholds.model_dump(mode="json") != rule.derivation.get("selected_thresholds"):
         raise ValueError("Telemetry thresholds differ from selected provenance")
+    contract_thresholds = {
+        "startup_grace_sec": contract.startup_grace_sec,
+        "stale_timeout_sec": contract.stale_timeout_sec,
+        "minimum_rate_hz": contract.minimum_rate_hz,
+        "rate_window_sec": contract.rate_window_sec,
+        "header_progress_timeout_sec": contract.header_progress_timeout_sec,
+    }
+    selected_thresholds = dict(rule.derivation["selected_thresholds"])
+    if any(
+        contract_thresholds[key] != selected_thresholds.get(key)
+        for key in contract_thresholds
+    ):
+        raise ValueError("Telemetry contract thresholds differ from selected provenance")
+    healthy_statistics = {
+        "message_count": evidence.statistics.message_count,
+        "mean_rate_hz": evidence.statistics.mean_rate_hz,
+        "median_rate_hz": evidence.statistics.median_rate_hz,
+        "p95_inter_arrival_sec": evidence.statistics.inter_arrival_sec["p95"],
+        "p99_inter_arrival_sec": evidence.statistics.inter_arrival_sec["p99"],
+        "max_healthy_gap_sec": evidence.statistics.inter_arrival_sec["max"],
+    }
+    if healthy_statistics != rule.derivation["healthy_statistics"]:
+        raise ValueError("Telemetry healthy statistics differ from rule provenance")
+    if evidence.derivation_method != rule.derivation["threshold_derivation"]:
+        raise ValueError("Telemetry threshold derivation differs from evidence")
+    if evidence.confidence_bounds != rule.derivation["confidence_bounds"]:
+        raise ValueError("Telemetry confidence bounds differ from evidence")
     if evidence.source_bag_sha256 != rule.derivation["source_bag_sha256"]:
         raise ValueError("Telemetry source bag differs from rule")
     return contract
@@ -347,7 +540,9 @@ class TelemetryHealthState:
             return TelemetryHealthEvaluation(state="starting", evaluated_at=now, detail="collecting rate intervals")
         intervals = [b - a for a, b in zip(self._arrivals, list(self._arrivals)[1:])]
         observed_rate = 1.0 / statistics.fmean(intervals) if intervals else 0.0
-        if observed_rate < self.contract.minimum_rate_hz:
+        # Preserve the mathematical hard boundary despite binary floating
+        # point noise in otherwise exact interval schedules.
+        if observed_rate + 1e-9 < self.contract.minimum_rate_hz:
             return self._fail(
                 now,
                 "below_rate",

@@ -31,13 +31,12 @@ from blackboxrs.incident.api import build_incident, render_report
 from blackboxrs.incident.bundle import BundleReader
 from blackboxrs.prevention.derivation import (
     PreventionDerivationError,
+    derive_rule_from_bundle,
     derive_telemetry_health_rule,
 )
 from blackboxrs.prevention.rules import (
-    PreflightCheck,
     load_rule,
     load_rules,
-    make_rule,
     save_rule,
 )
 from blackboxrs.prevention.runner import PreflightRunner
@@ -328,64 +327,13 @@ def prevention_adopt(incident_dir: str, rules_dir: str | None) -> None:
     """Adopt the recommended preflight rule from an incident bundle."""
     rdir = Path(rules_dir).expanduser() if rules_dir else _DEFAULT_RULES_DIR
     reader = BundleReader(Path(incident_dir))
-    incident = reader.load_incident()
-    triggers = reader.load_triggers()
-    if not incident.likely_causes:
-        click.echo(click.style("No likely causes; nothing to adopt.", fg="yellow"))
-        sys.exit(1)
-    top = incident.likely_causes[0]
-    if top.confidence < 0.7:
-        click.echo(click.style(
-            f"Top hypothesis confidence {top.confidence:.2f} below threshold 0.70; "
-            "refuse to auto-adopt.", fg="yellow"))
+    try:
+        derivation = derive_rule_from_bundle(reader)
+    except PreventionDerivationError as exc:
+        click.echo(click.style(str(exc), fg="yellow"))
         sys.exit(1)
 
-    cause_lower = top.cause.lower()
-    if "qos mismatch" in cause_lower:
-        topic = next(
-            (t.subject for t in triggers
-             if t.detector_class.endswith("QoSMismatchDetector")),
-            None,
-        )
-        if topic is None:
-            click.echo(click.style("No QoSMismatch trigger; cannot adopt.", fg="red"))
-            sys.exit(1)
-        check = PreflightCheck(
-            name=f"qos match on {topic}",
-            kind="qos_match",
-            params={"topic": topic},
-            severity_on_fail="block",
-        )
-    elif "stopped emitting" in cause_lower:
-        topic = next(
-            (t.subject for t in triggers
-             if t.detector_class.endswith("DeadTopicDetector")),
-            None,
-        )
-        if topic is None:
-            click.echo(click.style("No DeadTopic trigger; cannot adopt.", fg="red"))
-            sys.exit(1)
-        check = PreflightCheck(
-            name=f"topic present: {topic}",
-            kind="topic_present",
-            params={"topic": topic, "min_publishers": 1},
-            severity_on_fail="block",
-        )
-    else:
-        click.echo(click.style(
-            f"No automatic mapping for cause {top.cause!r}; adopt manually.",
-            fg="yellow"))
-        sys.exit(1)
-
-    rule = make_rule(
-        check,
-        rationale=top.cause,
-        source_incident_id=incident.incident_id,
-        source_fingerprint_id=(
-            incident.fingerprint.fingerprint_id if incident.fingerprint else None
-        ),
-    )
-    target = save_rule(rule, rdir)
+    target = save_rule(derivation.rule, rdir)
     click.echo(click.style(f"Adopted: {target}", fg="green"))
 
 

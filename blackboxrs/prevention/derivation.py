@@ -15,6 +15,7 @@ from .telemetry_health import (
     derive_thresholds,
     load_telemetry_evidence,
     verify_evidence_sources,
+    verify_source_event_binding,
 )
 
 
@@ -157,6 +158,15 @@ def derive_telemetry_health_rule(
         raise PreventionDerivationError(
             "Telemetry-health derivation requires a source incident fingerprint."
         )
+    if trigger.trigger_id not in incident.triggers:
+        raise PreventionDerivationError(
+            "Source incident does not cross-reference the selected trigger."
+        )
+    bundle_fingerprint = reader.load_fingerprint()
+    if bundle_fingerprint != incident.fingerprint:
+        raise PreventionDerivationError(
+            "Source incident fingerprint files are inconsistent."
+        )
 
     try:
         evidence = load_telemetry_evidence(Path(evidence_path))
@@ -166,16 +176,18 @@ def derive_telemetry_health_rule(
         verify_evidence_sources(evidence)
     except ValueError as exc:
         raise PreventionDerivationError(str(exc)) from exc
-    event_ref = trigger.source_event_ref
-    if not event_ref.startswith("events.jsonl#L"):
-        raise PreventionDerivationError("Source event reference is not a stable events.jsonl line reference")
     try:
-        line_no = int(event_ref.rsplit("L", 1)[1])
-        event_lines = (reader.path / "evidence" / "events.jsonl").read_text(encoding="utf-8").splitlines()
-        if line_no < 1 or line_no > len(event_lines) or not event_lines[line_no - 1].strip():
-            raise ValueError
-    except (OSError, ValueError) as exc:
-        raise PreventionDerivationError("Source event reference does not resolve") from exc
+        verify_source_event_binding(reader.path, trigger)
+    except ValueError as exc:
+        raise PreventionDerivationError(str(exc)) from exc
+    required_refs = {
+        trigger.source_event_ref,
+        f"triggers.json#{trigger.trigger_id}",
+    }
+    if None in required_refs or not required_refs.issubset(set(top.evidence_refs)):
+        raise PreventionDerivationError(
+            "Source hypothesis is missing trigger or event cross-reference."
+        )
     if evidence.topic != trigger.subject:
         raise PreventionDerivationError(
             f"Healthy evidence topic {evidence.topic!r} does not match "
