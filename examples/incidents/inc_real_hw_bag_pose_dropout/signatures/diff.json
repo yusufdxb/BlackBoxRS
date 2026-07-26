@@ -51,7 +51,7 @@
   "versions": {
     "baseline_hash": null,
     "changed": [],
-    "current_hash": "daec1ad3e331f79e6002dcb60a6390d06027456af322635109e3db2d38f4ffb9",
+    "current_hash": "4df4eed0d0fc68eb7e134474091926075fa065c45dcca94c3d30c76402c704b5",
     "identical": false,
     "only_in_baseline": [],
     "only_in_current": [
@@ -86,7 +86,7 @@
         "key": "pip_freeze_sha256"
       },
       {
-        "after": "/home/yusuf/Projects/BlackBoxRS/.venv/bin/python",
+        "after": "python3",
         "before": null,
         "key": "python.executable"
       },

@@ -114,5 +114,6 @@ jobs:
             python3 -m pytest -q \
               tests/integration/test_ros_live.py \
               tests/integration/test_observer_live.py \
+              tests/integration/test_closed_loop_replay_prevention.py \
               tests/integration/test_telemetry_guard_ros_adversarial.py \
               tests/integration/test_public_telemetry_health_demo.py

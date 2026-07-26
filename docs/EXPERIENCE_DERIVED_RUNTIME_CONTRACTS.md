@@ -170,6 +170,8 @@ reproduction is required whenever the source commit changes.
 
 - One genuine session, one robot platform, and one `PoseStamped` contract.
 - Local ROS 2 Humble with Fast DDS, not multiple distributions or RMWs.
+- Host-monotonic arrival timing, not ROS simulated-time or accelerated-replay
+  timing.
 - Aggregate-topic health, not specific-producer identity.
 - Arrival liveness and header progress, not pose correctness or payload
   semantics.

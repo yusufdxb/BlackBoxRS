@@ -26,6 +26,9 @@ Old timestamps that arrive live and continue increasing satisfy the header
 progress check. Frozen or reset ROS time fails when the header stops exceeding
 its previous high-water mark for the configured timeout. Wall-clock changes do
 not affect enforcement because arrival timing uses the monotonic clock.
+The runtime guard does not scale arrival timing to ROS simulated time or
+accelerated replay. Those modes require separate offline replay validation and
+are outside this local runtime contract.
 
 ## Multiple publishers
 
