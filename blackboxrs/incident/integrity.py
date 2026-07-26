@@ -574,4 +574,3 @@ def _fsync_dir(path: Path) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)
-

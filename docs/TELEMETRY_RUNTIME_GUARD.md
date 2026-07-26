@@ -1,8 +1,9 @@
 # Telemetry Runtime Guard Boundary
 
-The telemetry runtime guard is a bounded local ROS 2 launch guard. Its current
-classification remains `EXPERIMENTAL_LOCAL_RUNTIME_GUARD` until the full
-adversarial suite and clean evidence regeneration complete.
+The telemetry runtime guard is a bounded local ROS 2 launch guard. Its validated
+classification is `LOCAL_SEMANTIC_REPEAT_PREVENTION_VALIDATED`.
+
+> In a bounded local ROS 2 evaluation, BlackBoxRS derived a telemetry-health contract from genuine GO2 bag evidence and prevented selected semantic liveness failures, including publisher-present silence and sustained under-rate telemetry, while admitting selected nearby healthy conditions. The hardened guard rejected topic remapping, runtime-context mismatch, provenance tampering, and unsupported dependent-process escape within its documented Linux process model. Thresholds remain session-derived and require multi-session and live-robot validation.
 
 ## Telemetry contract
 

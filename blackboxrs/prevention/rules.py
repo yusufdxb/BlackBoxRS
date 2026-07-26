@@ -228,4 +228,3 @@ def load_rules(rules_dir: Path) -> list[PreventionRule]:
     if not rules_dir.is_dir():
         return []
     return [load_rule(p) for p in sorted(rules_dir.glob("*.yaml"))]
-

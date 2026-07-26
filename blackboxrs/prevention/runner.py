@@ -149,4 +149,3 @@ class PreflightRunner:
         return PreflightReport(
             started_at=started, finished_at=finished, results=results
         )
-

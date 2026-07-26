@@ -1,0 +1,62 @@
+{
+  "bag": {
+    "combined_identity_sha256": "f6c15669dd5a1630578d4ab7931b24e93d22251b5bd08ba5b8cded1709e350c5",
+    "duration_sec": 329.601840622,
+    "message_count": 94325,
+    "metadata_sha256": "ad8162351e448391bb0199936ac4d0d5a35d6dfaedacc985b05b51b1d87a160c",
+    "payload_combined_sha256": "401e8a769172a5c341ad95ddfa1ddeda1b2e888e5dc36a0e60bec593f11ca674",
+    "size_bytes": 681996932,
+    "storage_backend": "sqlite3",
+    "topic_count": 6
+  },
+  "classification": "LOCAL_SEMANTIC_REPEAT_PREVENTION_VALIDATED",
+  "controlled_dropout": {
+    "detection_latency_from_last_message_sec": 0.1510000000000007,
+    "drop_after_sec": 5.0,
+    "publisher_present": true,
+    "reason": "stale"
+  },
+  "critical_attack_results": {
+    "daemon_or_session_escape": "rejected within documented Linux process model",
+    "provenance_tampering": "25/25 focused tests passed",
+    "remapping_spoof": "blocked with contract topic preserved",
+    "runtime_context_mismatch": "blocked",
+    "sigkill_cleanup": "supported process tree cleaned"
+  },
+  "evidence_scope": "One read-only physical-GO2 rosbag2 session. The bag is not distributed in this repository.",
+  "pose_topic": {
+    "header_frozen_deltas": 0,
+    "header_negative_deltas": 0,
+    "maximum_gap_sec": 0.070847572,
+    "mean_rate_hz": 18.746780976988813,
+    "median_rate_hz": 18.756079021048965,
+    "message_count": 6177,
+    "name": "/utlidar/robot_pose",
+    "type": "geometry_msgs/msg/PoseStamped"
+  },
+  "provenance": {
+    "evidence_fingerprint": "d3d6dfeaee5f649977587900bcf77f6fcb5f73f98c6d53ebd218d8490b58d8a8",
+    "incident_id": "inc_2026-04-06T18-13-40_f2ed4c28",
+    "source_event_reference": "events.jsonl#L2231",
+    "trigger_id": "trg_c56eff95",
+    "trusted_rule_fingerprint": "c616e9d0f4822718ea6fac71f47a3a997e31e36d4221d0c1e4f918b6f6c29cbd",
+    "validated_source_commit": "650b388a8e89cb72a5a4839091279eeb9d10560a"
+  },
+  "selected_case_counts": {
+    "hardened_invalid": "7/7 selected cases blocked",
+    "hardened_valid": "6/6 selected cases admitted",
+    "jitter_15_1_hz": "3/3 selected multi-phase cases admitted"
+  },
+  "selected_thresholds": {
+    "header_progress_timeout_sec": 0.15,
+    "minimum_rate_hz": 15.0,
+    "rate_window_sec": 2.0,
+    "stale_timeout_sec": 0.15,
+    "startup_grace_sec": 0.5
+  },
+  "validation_environment": {
+    "rmw": "Fast DDS",
+    "ros_distro": "Humble",
+    "scope": "bounded local Linux ROS 2 evaluation"
+  }
+}
