@@ -12,6 +12,7 @@ from blackboxrs.incident.models import DetectorTrigger, Incident
 from .rules import PreflightCheck, PreventionRule, make_rule
 from .telemetry_health import (
     TelemetryHealthContract,
+    TelemetryHealthEvidence,
     derive_thresholds,
     load_telemetry_evidence,
     verify_evidence_sources,
@@ -123,7 +124,7 @@ def derive_telemetry_health_rule(
 
     The incident must be finalized and must explicitly reference a
     DeadTopicDetector trigger. The healthy evidence is independently
-    content-addressed and its thresholds must exactly match the fixed v1
+    content-addressed and its thresholds must exactly match the fixed v2
     derivation method.
     """
     result = reader.validate(require_finalized=True)
@@ -172,6 +173,11 @@ def derive_telemetry_health_rule(
         evidence = load_telemetry_evidence(Path(evidence_path))
     except (OSError, ValueError) as exc:
         raise PreventionDerivationError(str(exc)) from exc
+    if not isinstance(evidence, TelemetryHealthEvidence):
+        raise PreventionDerivationError(
+            "Historical telemetry-health evidence v1 is readable but requires "
+            "explicit migration before trusted adoption."
+        )
     try:
         verify_evidence_sources(evidence)
     except ValueError as exc:
@@ -200,7 +206,7 @@ def derive_telemetry_health_rule(
     expected_thresholds = derive_thresholds(evidence.statistics)
     if evidence.thresholds != expected_thresholds:
         raise PreventionDerivationError(
-            "Selected thresholds do not match dead_topic_telemetry_health_v1."
+            "Selected thresholds do not match dead_topic_telemetry_health_v2."
         )
 
     thresholds = evidence.thresholds
@@ -208,7 +214,7 @@ def derive_telemetry_health_rule(
         topic=evidence.topic,
         expected_type=evidence.message_type,
         expected_qos=evidence.offered_qos,
-        graph_context=evidence.graph_context,
+        declared_context_label=evidence.declared_context_label,
         startup_grace_sec=thresholds.startup_grace_sec,
         stale_timeout_sec=thresholds.stale_timeout_sec,
         minimum_rate_hz=thresholds.minimum_rate_hz,
@@ -222,7 +228,7 @@ def derive_telemetry_health_rule(
         kind="telemetry_health",
         params=contract.model_dump(mode="json"),
         severity_on_fail="block",
-        applies_to=[evidence.graph_context],
+        applies_to=[evidence.declared_context_label],
     )
     rationale = (
         f"{top.cause} Require evidence-derived startup and sustained "
@@ -237,7 +243,7 @@ def derive_telemetry_health_rule(
         ),
         source_trigger_ids=[trigger.trigger_id],
         derivation={
-            "strategy": "dead_topic_telemetry_health_v1",
+            "strategy": "dead_topic_telemetry_health_v2",
             "source_detector_class": trigger.detector_class,
             "source_trigger_id": trigger.trigger_id,
             "source_event_ref": trigger.source_event_ref,
@@ -245,7 +251,10 @@ def derive_telemetry_health_rule(
             "hypothesis_confidence": top.confidence,
             "healthy_evidence_ref": f"{Path(evidence_path).resolve()}#statistics",
             "healthy_evidence_fingerprint": evidence.evidence_fingerprint,
-            "source_bag_sha256": evidence.source_bag_sha256,
+            "source_bag_manifest_schema": evidence.digest_schema,
+            "source_bag_manifest_sha256": (
+                evidence.source_bag_manifest_sha256
+            ),
             "source_incident_ref": str(reader.path.resolve()),
             "source_incident_manifest_sha256": hashlib.sha256((reader.path / "manifest.json").read_bytes()).hexdigest(),
             "healthy_statistics": {

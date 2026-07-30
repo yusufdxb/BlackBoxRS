@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Characterize the genuine GO2 PoseStamped stream and select v1 thresholds."""
+"""Characterize the genuine GO2 PoseStamped stream and select v2 thresholds."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import random
 import statistics
 import sys
 from pathlib import Path
-from typing import Iterable
 
 import rosbag2_py
 import yaml
@@ -29,6 +28,10 @@ from blackboxrs.prevention.telemetry_health import (  # noqa: E402
     TelemetryHealthEvidence,
     compute_evidence_fingerprint,
     derive_thresholds,
+)
+from blackboxrs.prevention.bag_manifest import (  # noqa: E402
+    build_bag_manifest,
+    compute_manifest_sha256,
 )
 
 
@@ -85,25 +88,6 @@ def _bootstrap_confidence(intervals: list[float]) -> dict[str, list[float]]:
     }
 
 
-def _hash_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _hash_bag(bag: Path, files: Iterable[Path]) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(files, key=lambda item: item.name):
-        digest.update(path.relative_to(bag).as_posix().encode("utf-8"))
-        digest.update(b"\0")
-        with open(path, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _metadata_for_topic(metadata: dict, topic: str) -> tuple[dict, dict]:
     info = metadata["rosbag2_bagfile_information"]
     for item in info["topics_with_message_count"]:
@@ -135,8 +119,10 @@ def characterize(
     bag: Path,
     *,
     topic: str,
-    graph_context: str,
+    declared_context_label: str,
 ) -> TelemetryHealthEvidence:
+    bag_manifest = build_bag_manifest(bag)
+    bag_manifest_hash = compute_manifest_sha256(bag_manifest)
     metadata_path = bag / "metadata.yaml"
     metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
     info = metadata["rosbag2_bagfile_information"]
@@ -260,24 +246,29 @@ def characterize(
         }
     )
 
-    bag_files = [metadata_path] + [bag / rel for rel in info["relative_file_paths"]]
-    bag_hash = _hash_bag(bag, bag_files)
+    final_bag_manifest = build_bag_manifest(bag)
+    if final_bag_manifest != bag_manifest:
+        raise ValueError("Telemetry source bag changed during characterization")
+
     evidence_id = "evh_" + hashlib.sha256(
-        f"telemetry-health-evidence-v1|{bag_hash}|{topic}".encode("utf-8")
+        (
+            f"telemetry-health-evidence-v2|{bag_manifest_hash}|{topic}"
+        ).encode("utf-8")
     ).hexdigest()[:12]
     evidence = TelemetryHealthEvidence(
-        schema_version="telemetry-health-evidence-v1",
+        schema_version="telemetry-health-evidence-v2",
         evidence_id=evidence_id,
         source_bag_path=str(bag.resolve()),
-        source_bag_sha256=bag_hash,
-        metadata_sha256=_hash_file(metadata_path),
-        source_bag_size_bytes=sum(path.stat().st_size for path in bag_files),
+        source_bag_manifest_sha256=bag_manifest_hash,
+        source_bag_manifest=bag_manifest,
+        metadata_sha256=bag_manifest.metadata.sha256,
+        source_bag_size_bytes=bag_manifest.total_size,
         source_bag_duration_sec=info["duration"]["nanoseconds"] / 1e9,
         source_bag_message_count=info["message_count"],
         topic=topic,
         message_type=topic_metadata["type"],
         offered_qos=offered_qos,
-        graph_context=graph_context,
+        declared_context_label=declared_context_label,
         statistics=stats,
         thresholds=thresholds,
         derivation_method={
@@ -299,21 +290,27 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("bag", type=Path)
     parser.add_argument("--topic", default="/utlidar/robot_pose")
-    parser.add_argument("--graph-context", required=True)
+    parser.add_argument(
+        "--context-label",
+        "--graph-context",
+        dest="declared_context_label",
+        required=True,
+        help="Declared context label. This is not deployment identity attestation.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
     evidence = characterize(
         args.bag,
         topic=args.topic,
-        graph_context=args.graph_context,
+        declared_context_label=args.declared_context_label,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     temporary = args.output.with_name(f".{args.output.name}.{os.getpid()}.tmp")
     try:
         with open(temporary, "w", encoding="utf-8") as fh:
             json.dump(
-                evidence.model_dump(mode="json"),
+                evidence.model_dump(mode="json", by_alias=True),
                 fh,
                 indent=2,
                 sort_keys=True,

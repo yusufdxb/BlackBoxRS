@@ -89,7 +89,11 @@ def _repository_context(
         "ros_distro": os.environ.get("ROS_DISTRO"),
         "rmw_implementation": get_rmw_implementation_identifier(),
         "kernel": platform.release(),
-        "source_bag_sha256": evidence.source_bag_sha256,
+        "source_bag_manifest_schema": evidence.digest_schema,
+        "source_bag_manifest_sha256": evidence.source_bag_manifest_sha256,
+        "source_bag_files": evidence.source_bag_manifest.model_dump(
+            mode="json", by_alias=True
+        ),
         "metadata_sha256": evidence.metadata_sha256,
         "command_record": [sys.executable, *sys.argv],
         "working_directory": str(REPO_ROOT),
@@ -197,8 +201,8 @@ def _run_guard(
             str(result_path),
             "--monitor-duration",
             str(monitor_duration),
-            "--context",
-            rule.check.params["graph_context"],
+            "--context-label",
+            rule.check.params["declared_context_label"],
             "--trusted-rule-fingerprint",
             rule.rule_fingerprint or "",
             "--",
@@ -310,7 +314,11 @@ def _insufficient_evidence_control(
     )
     path = out_dir / "insufficient_healthy_evidence.json"
     path.write_text(
-        json.dumps(insufficient.model_dump(mode="json"), indent=2, sort_keys=True)
+        json.dumps(
+            insufficient.model_dump(mode="json", by_alias=True),
+            indent=2,
+            sort_keys=True,
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -369,8 +377,8 @@ def _tampered_rule_control(
                 str(tampered_path),
                 "--monitor-duration",
                 "1",
-                "--context",
-                data["check"]["params"]["graph_context"],
+                "--context-label",
+                data["check"]["params"]["declared_context_label"],
                 "--trusted-rule-fingerprint",
                 rule.rule_fingerprint or "",
                 "--",

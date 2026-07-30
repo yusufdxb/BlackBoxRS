@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import click
+import yaml
 
 from blackboxrs.core.config import BlackBoxConfig
 from blackboxrs.incident.api import build_incident, render_report
@@ -40,7 +41,12 @@ from blackboxrs.prevention.rules import (
     save_rule,
 )
 from blackboxrs.prevention.runner import PreflightRunner
-from blackboxrs.prevention.telemetry_guard import run_ros_telemetry_guard
+from blackboxrs.prevention.telemetry_guard import (
+    begin_guard_invocation,
+    fail_guard_invocation,
+    refuse_guard_invocation,
+    run_ros_telemetry_guard,
+)
 
 
 _DEFAULT_INCIDENTS_DIR = Path("~/.blackboxrs/incidents").expanduser()
@@ -368,26 +374,59 @@ def prevention_adopt_telemetry_health(
 @click.option("--result", "result_path", default=None,
               type=click.Path(dir_okay=False, path_type=Path))
 @click.option("--monitor-duration", type=float, default=None)
-@click.option("--context", "runtime_context", required=True)
+@click.option(
+    "--context-label",
+    "--context",
+    "declared_context_label",
+    required=True,
+    help="Declared context label, not deployment identity attestation.",
+)
 @click.option("--trusted-rule-fingerprint", required=True)
 @click.argument("command", nargs=-1, type=click.UNPROCESSED)
 def prevention_guard(
     rule_path: Path, result_path: Path | None, monitor_duration: float | None,
-    runtime_context: str, trusted_rule_fingerprint: str, command: tuple[str, ...]
+    declared_context_label: str, trusted_rule_fingerprint: str,
+    command: tuple[str, ...],
 ) -> None:
     """Hold COMMAND until healthy, then supervise its health."""
+    invocation = begin_guard_invocation(
+        result_path,
+        requested_topic=_requested_topic_from_rule(rule_path),
+        declared_context_label=declared_context_label,
+    )
     try:
         result = run_ros_telemetry_guard(
             load_rule(rule_path), command,
             monitor_duration_sec=monitor_duration, result_path=result_path,
-            runtime_context=runtime_context,
+            declared_context_label=declared_context_label,
             trusted_rule_fingerprint=trusted_rule_fingerprint,
+            invocation=invocation,
         )
-    except (OSError, RuntimeError, ValueError) as exc:
+    except ValueError as exc:
+        if not invocation.terminal_written:
+            refuse_guard_invocation(invocation, reason=str(exc))
         click.echo(click.style(f"Telemetry guard refused: {exc}", fg="red"))
+        sys.exit(1)
+    except (OSError, RuntimeError) as exc:
+        if not invocation.terminal_written:
+            fail_guard_invocation(
+                invocation,
+                error_category=type(exc).__name__,
+            )
+        click.echo(click.style(f"Telemetry guard failed: {exc}", fg="red"))
         sys.exit(1)
     click.echo(json.dumps(result.model_dump(mode="json"), sort_keys=True))
     sys.exit(0 if result.status == "passed" else 1)
+
+
+def _requested_topic_from_rule(rule_path: Path) -> str:
+    """Read only the requested topic for the pre-validation lifecycle record."""
+    try:
+        raw = yaml.safe_load(Path(rule_path).read_text(encoding="utf-8"))
+        topic = raw["check"]["params"]["topic"]
+    except (KeyError, OSError, TypeError, yaml.YAMLError):
+        return "<unavailable>"
+    return str(topic)
 
 
 __all__ = [

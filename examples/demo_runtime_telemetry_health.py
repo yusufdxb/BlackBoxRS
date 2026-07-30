@@ -170,7 +170,7 @@ def _guard_command(
         str(result_path),
         "--monitor-duration",
         str(monitor_duration_sec),
-        "--context",
+        "--context-label",
         GRAPH_CONTEXT,
         "--trusted-rule-fingerprint",
         rule_fingerprint,

@@ -129,8 +129,6 @@ import sys
 import time
 from pathlib import Path
 
-from blackboxrs.prevention.telemetry_guard import _set_parent_death_signal
-
 command = json.loads(os.environ["BLACKBOXRS_TEST_COMMAND"])
 state_path = Path(os.environ["BLACKBOXRS_TEST_STATE"])
 result_path = Path(os.environ["BLACKBOXRS_TEST_RESULT"])
@@ -147,7 +145,6 @@ wrapper = subprocess.Popen(
         *command,
     ],
     start_new_session=True,
-    preexec_fn=lambda: _set_parent_death_signal(parent_pid),
     env=child_env,
 )
 state_path.write_text(

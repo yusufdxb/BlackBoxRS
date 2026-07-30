@@ -51,7 +51,7 @@ fields are asserted by `tests/integration/test_public_telemetry_health_demo.py`.
 | 42-58 s | Pause after the publisher becomes silent. Show that the process remains alive and `topic_present` passes. | “The ROS graph still has a publisher, but useful telemetry has stopped.” |
 | 58-72 s | Show `status=blocked`, `reason=stale`, detection latency, dependent exit, and no surviving PID. | “The hardened guard detects arrival staleness and enforces the supported process boundary.” |
 | 72-82 s | Show the nearby 18.75 Hz result. | “A selected nearby healthy stream completes one full second of post-launch supervision.” |
-| 82-90 s | Show the linked attack results and limitations. | “Remapping, context, provenance, and process escape were tested separately. This remains aggregate-topic liveness, not payload semantics or field safety.” |
+| 82-90 s | Show the linked attack results and limitations. | “Remapping, declared-label mismatch, provenance, and process escape were tested separately. This remains aggregate-topic liveness, not payload semantics or field safety.” |
 
 The dependent is only a Python marker writer followed by sleep. The demo does
 not launch robot software or send control commands.
@@ -123,7 +123,7 @@ substitute a rosbag2 directory containing a fully qualified `PoseStamped` topic:
 python3 scripts/characterize_go2_pose_telemetry.py \
   /path/to/your/bag \
   --topic /your/pose/topic \
-  --graph-context your_reviewed_context \
+  --context-label your_reviewed_label \
   --output /new/external/output/healthy_telemetry_evidence.json
 ```
 

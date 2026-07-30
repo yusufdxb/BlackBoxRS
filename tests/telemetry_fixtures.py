@@ -8,7 +8,6 @@ verification.  Central provenance checks are never mocked.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -27,6 +26,10 @@ from blackboxrs.incident.models import (
     VersionSignature,
 )
 from blackboxrs.prevention.derivation import derive_telemetry_health_rule
+from blackboxrs.prevention.bag_manifest import (
+    build_bag_manifest,
+    compute_manifest_sha256,
+)
 from blackboxrs.prevention.rules import PreventionRule, load_rule, save_rule
 from blackboxrs.prevention.telemetry_health import (
     HealthyTelemetryStatistics,
@@ -97,27 +100,13 @@ def healthy_statistics(
     )
 
 
-def source_bag_sha256(bag_path: Path) -> str:
-    """Hash a deterministic bag directory using the production algorithm."""
-    paths = sorted(
-        (path for path in Path(bag_path).rglob("*") if path.is_file()),
-        key=lambda path: path.name,
-    )
-    digest = hashlib.sha256()
-    for path in paths:
-        digest.update(path.relative_to(bag_path).as_posix().encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
-
-
 def write_evidence(
     root: Path,
     *,
     message_count: int = 6177,
     topic: str = TOPIC,
     message_type: str = MESSAGE_TYPE,
-    graph_context: str = GRAPH_CONTEXT,
+    declared_context_label: str = GRAPH_CONTEXT,
     offered_qos: dict[str, object] | None = None,
 ) -> tuple[Path, Path]:
     """Write a minimal deterministic source bag and evidence document."""
@@ -138,25 +127,25 @@ def write_evidence(
     )
 
     stats = healthy_statistics(message_count=message_count)
+    bag_manifest = build_bag_manifest(bag_path)
     evidence = TelemetryHealthEvidence(
-        schema_version="telemetry-health-evidence-v1",
+        schema_version="telemetry-health-evidence-v2",
         evidence_id="evh_123456789abc",
         source_bag_path=str(bag_path.resolve()),
-        source_bag_sha256=source_bag_sha256(bag_path),
-        metadata_sha256=hashlib.sha256(metadata.read_bytes()).hexdigest(),
-        source_bag_size_bytes=sum(
-            path.stat().st_size for path in bag_path.iterdir() if path.is_file()
-        ),
+        source_bag_manifest_sha256=compute_manifest_sha256(bag_manifest),
+        source_bag_manifest=bag_manifest,
+        metadata_sha256=bag_manifest.metadata.sha256,
+        source_bag_size_bytes=bag_manifest.total_size,
         source_bag_duration_sec=329.6,
         source_bag_message_count=94_325,
         topic=topic,
         message_type=message_type,
         offered_qos=dict(offered_qos or OFFERED_QOS),
-        graph_context=graph_context,
+        declared_context_label=declared_context_label,
         statistics=stats,
         thresholds=derive_thresholds(stats),
         derivation_method={
-            "method": "dead_topic_telemetry_health_v1",
+            "method": "dead_topic_telemetry_health_v2",
             "source": "deterministic_test_fixture",
         },
         confidence_bounds={"descriptive_only": True},
@@ -166,7 +155,12 @@ def write_evidence(
     )
     evidence_path = root / "healthy_evidence.json"
     evidence_path.write_text(
-        json.dumps(evidence.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            evidence.model_dump(mode="json", by_alias=True),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return evidence_path, bag_path

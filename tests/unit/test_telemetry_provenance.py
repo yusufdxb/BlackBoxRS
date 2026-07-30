@@ -75,7 +75,11 @@ def _read_evidence(path: Path) -> TelemetryHealthEvidence:
 
 def _write_evidence(path: Path, evidence: TelemetryHealthEvidence) -> None:
     path.write_text(
-        json.dumps(evidence.model_dump(mode="json"), indent=2, sort_keys=True)
+        json.dumps(
+            evidence.model_dump(mode="json", by_alias=True),
+            indent=2,
+            sort_keys=True,
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -122,7 +126,7 @@ def test_valid_control_adoption_and_runtime_provenance_passes(tmp_path):
 
     assert contract == fixture.contract
     assert contract.topic == TOPIC
-    assert contract.graph_context == GRAPH_CONTEXT
+    assert contract.declared_context_label == GRAPH_CONTEXT
 
 
 # Traceability: incident -> trigger -> source event -> topic identity.
@@ -274,35 +278,25 @@ def test_integrity_02_missing_source_bag_fails_closed(tmp_path):
     _assert_refused(fixture.rule, match="source bag is unavailable")
 
 
-def test_integrity_03_wrong_bag_hash_fails_closed(tmp_path):
+def test_integrity_03_changed_payload_fails_closed(tmp_path):
     fixture = build_telemetry_provenance_fixture(tmp_path)
-    evidence = _rehash_evidence(
-        _read_evidence(fixture.evidence_path),
-        source_bag_sha256="0" * 64,
-    )
-    _write_evidence(fixture.evidence_path, evidence)
-    rule = _rule_with_derivation(
-        fixture.rule,
-        healthy_evidence_fingerprint=evidence.evidence_fingerprint,
-        source_bag_sha256=evidence.source_bag_sha256,
+    payload = fixture.bag_path / "healthy_0.db3"
+    payload.write_bytes(
+        payload.read_bytes() + b"changed after trusted adoption"
     )
 
-    _assert_refused(rule, match="source bag hash mismatch")
+    _assert_refused(fixture.rule, match="source bag manifest mismatch")
 
 
-def test_integrity_04_wrong_metadata_hash_fails_closed(tmp_path):
+def test_integrity_04_changed_metadata_fails_closed(tmp_path):
     fixture = build_telemetry_provenance_fixture(tmp_path)
-    evidence = _rehash_evidence(
-        _read_evidence(fixture.evidence_path),
-        metadata_sha256="0" * 64,
-    )
-    _write_evidence(fixture.evidence_path, evidence)
-    rule = _rule_with_derivation(
-        fixture.rule,
-        healthy_evidence_fingerprint=evidence.evidence_fingerprint,
+    metadata = fixture.bag_path / "metadata.yaml"
+    metadata.write_text(
+        metadata.read_text(encoding="utf-8") + "# changed\n",
+        encoding="utf-8",
     )
 
-    _assert_refused(rule, match="metadata hash mismatch")
+    _assert_refused(fixture.rule, match="source bag manifest mismatch")
 
 
 def test_integrity_10_modified_event_file_fails_closed(tmp_path):
@@ -371,10 +365,10 @@ def test_integrity_16_modified_type_fails_closed(tmp_path):
     _assert_refused(rule, match="identity")
 
 
-def test_integrity_17_modified_graph_context_fails_closed(tmp_path):
+def test_integrity_17_modified_declared_context_label_fails_closed(tmp_path):
     fixture = build_telemetry_provenance_fixture(tmp_path)
     rule = _rule_with_params(
-        fixture.rule, graph_context="different_runtime_context"
+        fixture.rule, declared_context_label="different_runtime_context"
     )
 
     _assert_refused(rule, match="context")

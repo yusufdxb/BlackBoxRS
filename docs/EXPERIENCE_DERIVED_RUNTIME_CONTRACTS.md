@@ -19,8 +19,9 @@ The central distinction is:
 
 The selected failure is publisher-present silence on
 `/utlidar/robot_pose`. Related selected failures include sustained under-rate
-traffic, frozen header progression, wrong topic type or QoS, wrong runtime
-context, and topic substitution through remapping. The implemented property is
+traffic, frozen header progression, wrong topic type or incompatible QoS,
+mismatched declared context label, and topic substitution through remapping.
+The implemented property is
 aggregate topic arrival liveness plus monotonic header progress. It does not
 inspect pose values, infer a specific producer, or establish payload-semantic
 freshness.
@@ -39,9 +40,9 @@ recorded runtime failure
 
 The incident bundle captures the trigger and event reference. Characterization
 reads a rosbag2 source without altering it. Derivation checks that incident
-topic, detector, event, evidence, type, QoS, graph context, and selected
-thresholds agree. Runtime verification subscribes to the exact contract topic
-and starts a Linux supervisor only after qualification.
+topic, detector, event, evidence, exact type, compatible QoS, declared context
+label, and selected thresholds agree. Runtime verification subscribes to the
+exact contract topic and starts a Linux supervisor only after qualification.
 
 ## 4. Incident-to-contract derivation
 
@@ -53,8 +54,9 @@ binds them to a dead-topic incident:
 - stale and header-progress timeout: 0.15 seconds;
 - hard minimum rate: 15.0 Hz;
 - rate window: 2.0 seconds;
-- exact topic, `PoseStamped` type, reliable/volatile keep-last QoS, and reviewed
-  runtime context.
+- exact topic and `PoseStamped` type, compatible QoS against the
+  reliable/volatile keep-last subscription, and a reviewed declared context
+  label.
 
 The failure-to-prevention path is:
 
@@ -69,8 +71,10 @@ Traceability, integrity, and trusted local approval are separate:
 
 - Traceability resolves the rule to one incident, trigger, event, bag,
   evidence record, topic, and thresholds.
-- Integrity hashes the incident manifest, event, bag payload and metadata,
-  evidence, selected thresholds, and rule.
+- Integrity hashes the incident manifest and event plus a canonical v2 bag
+  manifest containing normalized paths, roles, sizes, per-file hashes, storage
+  relationships, and total size. It also hashes the evidence, selected
+  thresholds, and rule.
 - Trusted local approval requires the exact rule fingerprint supplied by the
   operator.
 
@@ -82,8 +86,11 @@ model resembles a narrow provenance graph, but it does not implement the full
 ## 6. Runtime guard and process supervision
 
 The guard suppresses global ROS remapping, resolves the contract topic, checks
-graph context, type, compatible QoS, freshness, interval-based rate, and header
-progress, and then launches a foreground dependent.
+the caller-declared context label, exact type, compatible QoS, freshness,
+interval-based rate, and header progress, and then launches a foreground
+dependent. The label is not robot, host, deployment, DDS graph, or ROS-domain
+attestation. Matching labels in an independently different actual environment
+are outside the guarantee.
 
 On Linux, a new session and process group contain the supervisor and supported
 foreground descendants. The supervisor uses parent-death monitoring, subreaping,
@@ -136,8 +143,8 @@ the selected arrival and header contract.
 ## 10. Adversarial evaluation
 
 The focused suites exercised missing and modified evidence, bag and metadata
-hashes, incident and trigger substitutions, event and topic substitutions,
-threshold and QoS changes, context changes, recomputed untrusted fingerprints,
+manifests, incident and trigger substitutions, event and topic substitutions,
+threshold and QoS changes, declared-label changes, recomputed untrusted fingerprints,
 untrusted identities, and missing cross-references. They also exercised global
 remapping, wrong namespace, type, QoS and context, aggregate multi-publisher
 behavior, guard signals, descendant trees, session and daemon escape, result

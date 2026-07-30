@@ -77,6 +77,8 @@ def _start_pose_publisher(
     duration_sec: float = 6.0,
     silent_after_sec: float | None = None,
     best_effort: bool = False,
+    depth: int = 1,
+    transient_local: bool = False,
 ) -> subprocess.Popen[str]:
     command = [
         sys.executable,
@@ -87,11 +89,15 @@ def _start_pose_publisher(
         "20",
         "--duration-sec",
         str(duration_sec),
+        "--depth",
+        str(depth),
     ]
     if silent_after_sec is not None:
         command.extend(["--silent-after-sec", str(silent_after_sec)])
     if best_effort:
         command.append("--best-effort")
+    if transient_local:
+        command.append("--transient-local")
     process = subprocess.Popen(
         command,
         cwd=_REPO_ROOT,
@@ -204,8 +210,15 @@ def _run_guard(
     monitor_duration_sec: float | None = 0.35,
     extra_dependent_args: Sequence[str] = (),
     dependent_command: Sequence[str] | None = None,
+    preseed_success: bool = False,
 ) -> _GuardOutcome:
     result_path = tmp_path / "guard-result.json"
+    if preseed_success:
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        result_path.write_text(
+            '{"run_id":"old-success","status":"passed","sentinel":"stale"}\n',
+            encoding="utf-8",
+        )
     marker = tmp_path / "dependent-started"
     dependent_source = (
         "from pathlib import Path;import time;"
@@ -222,7 +235,7 @@ def _run_guard(
         str(fixture.rule_path),
         "--result",
         str(result_path),
-        "--context",
+        "--context-label",
         context,
         "--trusted-rule-fingerprint",
         str(fixture.rule.rule_fingerprint),
@@ -372,7 +385,7 @@ def test_global_remapping_cannot_redirect_contract_subscription(
     assert structural["publisher_count"] == 0
 
 
-def test_correct_topic_type_qos_and_context_starts_dependent(
+def test_correct_topic_type_compatible_qos_and_declared_label_starts_dependent(
     tmp_path: Path,
     telemetry_provenance: TelemetryProvenanceFixture,
     ros_env: dict[str, str],
@@ -415,7 +428,7 @@ def test_same_basename_in_wrong_namespace_does_not_qualify(
     assert result["resolved_topic"] == TOPIC
 
 
-def test_correct_traffic_under_wrong_runtime_context_is_refused(
+def test_correct_traffic_under_mismatched_declared_context_label_is_refused(
     tmp_path: Path,
     telemetry_provenance: TelemetryProvenanceFixture,
     ros_env: dict[str, str],
@@ -429,11 +442,17 @@ def test_correct_traffic_under_wrong_runtime_context_is_refused(
         telemetry_provenance,
         ros_env,
         context="go2_simulation_wrong_context",
+        preseed_success=True,
     )
 
     assert outcome.process.returncode == 1
-    assert "Runtime context does not match the telemetry contract" in outcome.process.stdout
-    assert outcome.result is None
+    assert (
+        "Declared context label does not match the telemetry contract"
+        in outcome.process.stdout
+    )
+    assert outcome.result is not None
+    assert outcome.result["status"] == "refused"
+    assert outcome.result["run_id"] != "old-success"
     assert not outcome.dependent_marker.exists()
 
 
@@ -475,6 +494,34 @@ def test_same_topic_and_type_with_incompatible_qos_is_blocked(
     assert result["reason"] == "wrong_type_or_incompatible_qos"
     assert result["structural"]["publisher_count"] >= 1
     assert result["structural"]["compatible_publisher_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("depth", "transient_local"),
+    [(10, False), (1, True)],
+)
+def test_compatible_qos_depth_or_durability_difference_is_admitted(
+    tmp_path: Path,
+    telemetry_provenance: TelemetryProvenanceFixture,
+    ros_env: dict[str, str],
+    publishers: list[subprocess.Popen[str]],
+    depth: int,
+    transient_local: bool,
+) -> None:
+    publisher = _start_pose_publisher(
+        publishers,
+        ros_env,
+        depth=depth,
+        transient_local=transient_local,
+    )
+    _await_publisher_start(publisher, ros_env)
+
+    outcome = _run_guard(tmp_path, telemetry_provenance, ros_env)
+
+    assert outcome.process.returncode == 0, outcome.process.stdout
+    assert outcome.result is not None
+    assert outcome.result["status"] == "passed"
+    assert outcome.result["structural"]["compatible_publisher_count"] >= 1
 
 
 def test_one_healthy_and_one_stale_publisher_passes_on_aggregate_traffic(
@@ -657,6 +704,61 @@ def test_nonzero_dependent_exit_is_reported(
     assert outcome.result["status"] == "dependent_failed"
     assert outcome.result["reason"] == "dependent_exit"
     assert outcome.result["dependent_exit_code"] == 23
+
+
+def test_preseeded_pass_is_replaced_by_dependent_launch_failure(
+    tmp_path: Path,
+    telemetry_provenance: TelemetryProvenanceFixture,
+    ros_env: dict[str, str],
+    publishers: list[subprocess.Popen[str]],
+) -> None:
+    publisher = _start_pose_publisher(publishers, ros_env)
+    _await_publisher_start(publisher, ros_env)
+
+    outcome = _run_guard(
+        tmp_path,
+        telemetry_provenance,
+        ros_env,
+        monitor_duration_sec=1.0,
+        dependent_command=(str(tmp_path / "does-not-exist"),),
+        preseed_success=True,
+    )
+
+    assert outcome.process.returncode == 1
+    assert outcome.result is not None
+    assert outcome.result["status"] == "dependent_failed"
+    assert outcome.result["dependent_exit_code"] == 127
+    assert outcome.result["run_id"] != "old-success"
+
+
+def test_repeated_launches_with_active_dds_threads_do_not_hang(
+    tmp_path: Path,
+    telemetry_provenance: TelemetryProvenanceFixture,
+    ros_env: dict[str, str],
+    publishers: list[subprocess.Popen[str]],
+) -> None:
+    publisher = _start_pose_publisher(
+        publishers,
+        ros_env,
+        duration_sec=15.0,
+    )
+    _await_publisher_start(publisher, ros_env)
+
+    run_ids: set[str] = set()
+    for index in range(3):
+        outcome = _run_guard(
+            tmp_path / f"launch-{index}",
+            telemetry_provenance,
+            ros_env,
+            monitor_duration_sec=0.05,
+        )
+        assert outcome.process.returncode == 0, outcome.process.stdout
+        assert outcome.result is not None
+        assert outcome.result["status"] == "passed"
+        assert outcome.result["dependent_started"] is True
+        run_ids.add(str(outcome.result["run_id"]))
+
+    assert len(run_ids) == 3
 
 
 def test_no_monitor_duration_waits_for_natural_exit(

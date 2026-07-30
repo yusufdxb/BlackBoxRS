@@ -28,7 +28,7 @@ def _contract() -> TelemetryHealthContract:
             "reliability": "reliable",
             "durability": "volatile",
         },
-        graph_context="go2_utlidar_hardware_eval_20260406",
+        declared_context_label="go2_utlidar_hardware_eval_20260406",
         startup_grace_sec=0.5,
         stale_timeout_sec=0.15,
         minimum_rate_hz=15.0,

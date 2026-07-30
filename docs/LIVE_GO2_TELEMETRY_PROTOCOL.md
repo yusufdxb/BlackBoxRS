@@ -20,7 +20,9 @@ field-safety experiment.
   selected DDS domain.
 - Approved mechanism to isolate only the telemetry source without unsafe motion
   or uncontrolled restart.
-- Pre-reviewed topic, type, QoS, runtime context, ROS domain, RMW, and rule pin.
+- Pre-reviewed topic, exact type, compatible QoS, declared context label, ROS
+  domain, RMW, and rule pin. Domain and RMW are separate operator checks, not
+  properties attested by the label.
 - Output directory outside source repositories and bag directories.
 - Only a harmless marker-and-sleep process is allowed as the dependent.
 - CPU, memory, and network monitoring active before the guard starts.
@@ -73,7 +75,7 @@ python3 -m blackboxrs prevention guard \
   --rule "$RULE" \
   --result "$OUT/live-healthy-01.json" \
   --monitor-duration 5 \
-  --context "$REVIEWED_CONTEXT" \
+  --context-label "$REVIEWED_CONTEXT_LABEL" \
   --trusted-rule-fingerprint "$TRUSTED_RULE_FINGERPRINT" \
   -- python3 -c 'import time; time.sleep(30)'
 ```

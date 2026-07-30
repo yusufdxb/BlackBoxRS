@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import ctypes
-import ctypes.util
 import os
 import signal
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +29,13 @@ class TelemetryGuardResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    schema_version: Literal["telemetry-guard-result-v2"] = (
+        "telemetry-guard-result-v2"
+    )
+    run_id: str
+    invocation_started_at: datetime
+    declared_context_label: str
+    exit_code: int
     rule_id: str
     rule_fingerprint: str
     source_incident_id: str
@@ -37,7 +43,6 @@ class TelemetryGuardResult(BaseModel):
     source_trigger_ids: list[str]
     topic: str
     expected_type: str
-    graph_context: str
     resolved_topic: str
     publisher_semantics: Literal["aggregate_topic"]
     status: Literal["passed", "blocked", "dependent_failed"]
@@ -66,6 +71,130 @@ class TelemetryGuardResult(BaseModel):
     structural: dict[str, Any] = Field(default_factory=dict)
     transitions: list[dict[str, Any]] = Field(default_factory=list)
     completed_at: datetime
+
+
+class TelemetryGuardLifecycleResult(BaseModel):
+    """Current-invocation state before a completed guard result exists."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["telemetry-guard-result-v2"] = (
+        "telemetry-guard-result-v2"
+    )
+    run_id: str
+    status: Literal["starting", "refused", "failed"]
+    requested_topic: str
+    declared_context_label: str
+    started_at: datetime
+    reason: str | None = None
+    error_category: str | None = None
+    exit_code: int | None = None
+    completed_at: datetime | None = None
+
+
+GuardResultDocument = TelemetryGuardLifecycleResult | TelemetryGuardResult
+
+
+@dataclass
+class GuardInvocation:
+    """Stable identity and output destination for one CLI or API invocation."""
+
+    run_id: str
+    requested_topic: str
+    declared_context_label: str
+    started_at: datetime
+    result_path: Path | None
+    terminal_written: bool = False
+
+
+def begin_guard_invocation(
+    result_path: Path | None,
+    *,
+    requested_topic: str,
+    declared_context_label: str,
+    run_id: str | None = None,
+) -> GuardInvocation:
+    """Create a run ID and replace any old result with this invocation."""
+    invocation = GuardInvocation(
+        run_id=run_id or str(uuid.uuid4()),
+        requested_topic=requested_topic,
+        declared_context_label=declared_context_label,
+        started_at=datetime.now(timezone.utc),
+        result_path=Path(result_path) if result_path is not None else None,
+    )
+    _persist_document(
+        TelemetryGuardLifecycleResult(
+            run_id=invocation.run_id,
+            status="starting",
+            requested_topic=invocation.requested_topic,
+            declared_context_label=invocation.declared_context_label,
+            started_at=invocation.started_at,
+        ),
+        invocation.result_path,
+        invocation.run_id,
+    )
+    return invocation
+
+
+def refuse_guard_invocation(
+    invocation: GuardInvocation, *, reason: str, exit_code: int = 1
+) -> None:
+    """Atomically record a prelaunch refusal for the current run."""
+    _persist_document(
+        TelemetryGuardLifecycleResult(
+            run_id=invocation.run_id,
+            status="refused",
+            requested_topic=invocation.requested_topic,
+            declared_context_label=invocation.declared_context_label,
+            started_at=invocation.started_at,
+            reason=_bounded_text(reason),
+            exit_code=exit_code,
+            completed_at=datetime.now(timezone.utc),
+        ),
+        invocation.result_path,
+        invocation.run_id,
+    )
+    invocation.terminal_written = True
+
+
+def fail_guard_invocation(
+    invocation: GuardInvocation,
+    *,
+    error_category: str,
+    exit_code: int = 1,
+) -> None:
+    """Atomically record an unexpected current-run failure."""
+    _persist_document(
+        TelemetryGuardLifecycleResult(
+            run_id=invocation.run_id,
+            status="failed",
+            requested_topic=invocation.requested_topic,
+            declared_context_label=invocation.declared_context_label,
+            started_at=invocation.started_at,
+            error_category=_bounded_text(error_category, limit=100),
+            exit_code=exit_code,
+            completed_at=datetime.now(timezone.utc),
+        ),
+        invocation.result_path,
+        invocation.run_id,
+    )
+    invocation.terminal_written = True
+
+
+def load_guard_result(
+    path: Path, *, expected_run_id: str | None = None
+) -> GuardResultDocument:
+    """Load an atomic result and optionally require a caller-known run ID."""
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    model: type[TelemetryGuardLifecycleResult] | type[TelemetryGuardResult]
+    if raw.get("status") in {"starting", "refused", "failed"}:
+        model = TelemetryGuardLifecycleResult
+    else:
+        model = TelemetryGuardResult
+    result = model.model_validate(raw)
+    if expected_run_id is not None and result.run_id != expected_run_id:
+        raise ValueError("Telemetry guard result run ID mismatch")
+    return result
 
 
 @dataclass
@@ -140,8 +269,48 @@ def run_ros_telemetry_guard(
     monitor_duration_sec: float | None = None,
     result_path: Path | None = None,
     spin_slice_sec: float = 0.01,
-    runtime_context: str | None = None,
+    declared_context_label: str | None = None,
     trusted_rule_fingerprint: str | None = None,
+    invocation: GuardInvocation | None = None,
+) -> TelemetryGuardResult:
+    """Run one guarded command with current-invocation result lifecycle."""
+    active_invocation = invocation or begin_guard_invocation(
+        result_path,
+        requested_topic=str(rule.check.params.get("topic", "<unavailable>")),
+        declared_context_label=declared_context_label or "",
+    )
+    try:
+        return _run_ros_telemetry_guard(
+            rule,
+            command,
+            monitor_duration_sec=monitor_duration_sec,
+            spin_slice_sec=spin_slice_sec,
+            declared_context_label=declared_context_label,
+            trusted_rule_fingerprint=trusted_rule_fingerprint,
+            invocation=active_invocation,
+        )
+    except ValueError as exc:
+        if not active_invocation.terminal_written:
+            refuse_guard_invocation(active_invocation, reason=str(exc))
+        raise
+    except Exception as exc:
+        if not active_invocation.terminal_written:
+            fail_guard_invocation(
+                active_invocation,
+                error_category=_error_category(exc),
+            )
+        raise
+
+
+def _run_ros_telemetry_guard(
+    rule: PreventionRule,
+    command: Sequence[str],
+    *,
+    monitor_duration_sec: float | None,
+    spin_slice_sec: float,
+    declared_context_label: str | None,
+    trusted_rule_fingerprint: str | None,
+    invocation: GuardInvocation,
 ) -> TelemetryGuardResult:
     """Hold a dependent command until healthy, then terminate it on failure.
 
@@ -149,8 +318,13 @@ def run_ros_telemetry_guard(
     evidence-backed GO2 contract in this experiment is PoseStamped-specific.
     """
     contract = contract_from_rule(rule, trusted_rule_fingerprint=trusted_rule_fingerprint)
-    if runtime_context is None or runtime_context != contract.graph_context:
-        raise ValueError("Runtime context does not match the telemetry contract")
+    if (
+        declared_context_label is None
+        or declared_context_label != contract.declared_context_label
+    ):
+        raise ValueError(
+            "Declared context label does not match the telemetry contract"
+        )
     if contract.expected_type != "geometry_msgs/msg/PoseStamped":
         raise ValueError(
             "Runtime guard currently supports only geometry_msgs/msg/PoseStamped"
@@ -270,8 +444,9 @@ def run_ros_telemetry_guard(
                         structural=structural,
                         transitions=transitions,
                         timing=timing,
+                        invocation=invocation,
                     )
-                    return _persist(result, result_path)
+                    return _persist(result, invocation)
 
             supervision_deadline = (
                 child_started_at + monitor_duration_sec
@@ -340,8 +515,9 @@ def run_ros_telemetry_guard(
                     structural=structural,
                     transitions=transitions,
                     timing=timing,
+                    invocation=invocation,
                 )
-                return _persist(result, result_path)
+                return _persist(result, invocation)
 
             if deadline_reached:
                 assert child is not None
@@ -367,8 +543,9 @@ def run_ros_telemetry_guard(
                     structural=structural,
                     transitions=transitions,
                     timing=timing,
+                    invocation=invocation,
                 )
-                return _persist(result, result_path)
+                return _persist(result, invocation)
 
             if evaluation.state == "healthy" and child is None:
                 supervisor = [__import__("sys").executable, "-m", "blackboxrs.prevention.process_supervisor", "--", *command]
@@ -382,7 +559,6 @@ def run_ros_telemetry_guard(
                     child = subprocess.Popen(
                         supervisor,
                         start_new_session=True,
-                        preexec_fn=lambda: _set_parent_death_signal(parent_pid),
                         env=child_env,
                         pass_fds=(ready_write_fd,),
                     )
@@ -469,17 +645,6 @@ def _graph_consistent(structural: dict[str, Any], contract: TelemetryHealthContr
     )
 
 
-def _set_parent_death_signal(parent_pid: int) -> None:
-    libc_path = ctypes.util.find_library("c")
-    if not libc_path:
-        raise RuntimeError("libc unavailable for parent-death supervision")
-    libc = ctypes.CDLL(libc_path, use_errno=True)
-    if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:
-        raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG) failed")
-    if os.getppid() != parent_pid:
-        os.kill(os.getpid(), signal.SIGTERM)
-
-
 def _read_dependent_pid(ready_fd: int) -> tuple[int | None, bool]:
     """Read one atomic dependent-launch acknowledgement from the supervisor."""
     try:
@@ -563,6 +728,7 @@ def _result(
     structural: dict[str, Any],
     transitions: list[dict[str, Any]],
     timing: _GuardTiming,
+    invocation: GuardInvocation,
 ) -> TelemetryGuardResult:
     assert rule.rule_fingerprint is not None
     assert rule.source_incident_id is not None
@@ -570,6 +736,10 @@ def _result(
     assert timing.completed_mono is not None
     assert timing.completed_at is not None
     return TelemetryGuardResult(
+        run_id=invocation.run_id,
+        invocation_started_at=invocation.started_at,
+        declared_context_label=contract.declared_context_label,
+        exit_code=0 if status == "passed" else 1,
         rule_id=rule.rule_id,
         rule_fingerprint=rule.rule_fingerprint,
         source_incident_id=rule.source_incident_id,
@@ -577,7 +747,6 @@ def _result(
         source_trigger_ids=rule.source_trigger_ids,
         topic=contract.topic,
         expected_type=contract.expected_type,
-        graph_context=contract.graph_context,
         resolved_topic=str(structural.get("resolved_topic", contract.topic)),
         publisher_semantics=contract.publisher_semantics,
         status=status,
@@ -623,30 +792,55 @@ def _result(
 
 
 def _persist(
-    result: TelemetryGuardResult, result_path: Path | None
+    result: TelemetryGuardResult,
+    invocation: GuardInvocation,
 ) -> TelemetryGuardResult:
-    if result_path is not None:
-        path = Path(result_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        try:
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(
-                    result.model_dump(mode="json"),
-                    fh,
-                    indent=2,
-                    sort_keys=True,
-                )
-                fh.write("\n")
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp, path)
-            directory_fd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
+    _persist_document(result, invocation.result_path, invocation.run_id)
+    invocation.terminal_written = True
     return result
+
+
+def _persist_document(
+    result: GuardResultDocument,
+    result_path: Path | None,
+    run_id: str,
+) -> None:
+    if result_path is None:
+        return
+    path = Path(result_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{run_id}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(
+                result.model_dump(mode="json"),
+                fh,
+                indent=2,
+                sort_keys=True,
+            )
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _bounded_text(value: str, *, limit: int = 500) -> str:
+    return value if len(value) <= limit else value[: limit - 3] + "..."
+
+
+def _error_category(exc: Exception) -> str:
+    if isinstance(exc, ImportError):
+        return "ros_import_error"
+    if isinstance(exc, OSError):
+        return "operating_system_error"
+    if isinstance(exc, RuntimeError):
+        return "runtime_setup_error"
+    return "unexpected_error"

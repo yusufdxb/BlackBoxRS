@@ -41,6 +41,10 @@ jobs:
           ruff --version
           python -m ruff check
 
+      - name: Validate curated telemetry evidence summary
+        run: |
+          python scripts/validate_telemetry_public_summary.py
+
       - name: Unit + integration tests
         # rclpy-gated integration tests auto-skip on runners that do
         # not have ROS 2 installed (which GitHub hosted runners don't).

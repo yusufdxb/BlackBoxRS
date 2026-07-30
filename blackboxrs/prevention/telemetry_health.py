@@ -24,6 +24,12 @@ from blackboxrs.incident.bundle import BundleReader
 from blackboxrs.incident.fingerprint import compute as compute_incident_fingerprint
 from blackboxrs.incident.models import DetectorTrigger
 
+from .bag_manifest import (
+    BAG_MANIFEST_SCHEMA,
+    BagManifest,
+    compute_manifest_sha256,
+    verify_bag_manifest,
+)
 from .rules import PreventionRule, verify_rule_fingerprint
 
 
@@ -40,7 +46,7 @@ class TelemetryHealthContract(BaseModel):
     topic: str
     expected_type: str
     expected_qos: dict[str, Any]
-    graph_context: str
+    declared_context_label: str
     publisher_semantics: Literal["aggregate_topic"] = "aggregate_topic"
     startup_grace_sec: float = Field(..., gt=0.0)
     stale_timeout_sec: float = Field(..., gt=0.0)
@@ -94,8 +100,8 @@ class TelemetryThresholds(BaseModel):
     allowed_jitter_sec: float = Field(..., gt=0.0)
 
 
-class TelemetryHealthEvidence(BaseModel):
-    """Content-addressed healthy-bag characterization."""
+class HistoricalTelemetryHealthEvidenceV1(BaseModel):
+    """Readable historical evidence that is never eligible for trusted adoption."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -118,20 +124,75 @@ class TelemetryHealthEvidence(BaseModel):
     confidence_bounds: dict[str, Any]
 
 
-def compute_evidence_fingerprint(evidence: TelemetryHealthEvidence) -> str:
+class TelemetryHealthEvidence(BaseModel):
+    """Content-addressed v2 characterization with a framed bag manifest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["telemetry-health-evidence-v2"]
+    digest_schema: Literal["blackboxrs-bag-manifest-v2"] = BAG_MANIFEST_SCHEMA
+    evidence_id: str
+    evidence_fingerprint: str | None = None
+    source_bag_path: str
+    source_bag_manifest_sha256: str
+    source_bag_manifest: BagManifest
+    metadata_sha256: str
+    source_bag_size_bytes: int = Field(..., gt=0)
+    source_bag_duration_sec: float = Field(..., gt=0.0)
+    source_bag_message_count: int = Field(..., gt=0)
+    topic: str
+    message_type: str
+    offered_qos: dict[str, Any]
+    declared_context_label: str
+    statistics: HealthyTelemetryStatistics
+    thresholds: TelemetryThresholds
+    derivation_method: dict[str, str]
+    confidence_bounds: dict[str, Any]
+
+    @model_validator(mode="after")
+    def _validate_manifest_binding(self) -> "TelemetryHealthEvidence":
+        if compute_manifest_sha256(self.source_bag_manifest) != (
+            self.source_bag_manifest_sha256
+        ):
+            raise ValueError("Telemetry bag manifest fingerprint mismatch")
+        if self.metadata_sha256 != self.source_bag_manifest.metadata.sha256:
+            raise ValueError("Telemetry metadata hash differs from bag manifest")
+        if self.source_bag_size_bytes != self.source_bag_manifest.total_size:
+            raise ValueError("Telemetry source bag size differs from bag manifest")
+        return self
+
+
+TelemetryEvidenceDocument = (
+    HistoricalTelemetryHealthEvidenceV1 | TelemetryHealthEvidence
+)
+
+
+def compute_evidence_fingerprint(evidence: TelemetryEvidenceDocument) -> str:
     """Compute the SHA-256 for an evidence document, excluding its hash field."""
-    payload = evidence.model_dump(mode="json", exclude={"evidence_fingerprint"})
+    payload = evidence.model_dump(
+        mode="json",
+        by_alias=True,
+        exclude={"evidence_fingerprint"},
+    )
     canonical = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
 
-def load_telemetry_evidence(path: Path) -> TelemetryHealthEvidence:
+def load_telemetry_evidence(path: Path) -> TelemetryEvidenceDocument:
     """Load and verify a content-addressed healthy-telemetry evidence file."""
-    evidence = TelemetryHealthEvidence.model_validate_json(
-        Path(path).read_text(encoding="utf-8")
+    raw = Path(path).read_text(encoding="utf-8")
+    try:
+        schema_version = json.loads(raw).get("schema_version")
+    except (AttributeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Telemetry evidence is malformed: {path}") from exc
+    model = (
+        HistoricalTelemetryHealthEvidenceV1
+        if schema_version == "telemetry-health-evidence-v1"
+        else TelemetryHealthEvidence
     )
+    evidence = model.model_validate_json(raw)
     expected = compute_evidence_fingerprint(evidence)
     if evidence.evidence_fingerprint != expected:
         raise ValueError(f"Telemetry evidence fingerprint mismatch: {path}")
@@ -139,22 +200,8 @@ def load_telemetry_evidence(path: Path) -> TelemetryHealthEvidence:
 
 
 def verify_evidence_sources(evidence: TelemetryHealthEvidence) -> None:
-    """Verify the recorded bag and metadata bytes, not just the JSON self-hash."""
-    bag = Path(evidence.source_bag_path)
-    metadata = bag / "metadata.yaml"
-    if not bag.is_dir() or not metadata.is_file():
-        raise ValueError(f"Telemetry source bag is unavailable: {bag}")
-    metadata_hash = hashlib.sha256(metadata.read_bytes()).hexdigest()
-    if metadata_hash != evidence.metadata_sha256:
-        raise ValueError("Telemetry metadata hash mismatch")
-    files = sorted((p for p in bag.rglob("*") if p.is_file()), key=lambda p: p.name)
-    digest = hashlib.sha256()
-    for path in files:
-        digest.update(path.relative_to(bag).as_posix().encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-    if digest.hexdigest() != evidence.source_bag_sha256:
-        raise ValueError("Telemetry source bag hash mismatch")
+    """Verify the current bag against the evidence's complete v2 manifest."""
+    verify_bag_manifest(Path(evidence.source_bag_path), evidence.source_bag_manifest)
 
 
 def load_source_event(bundle_path: Path, event_ref: str) -> BlackBoxEvent:
@@ -363,7 +410,8 @@ def contract_from_rule(
         "hypothesis_confidence",
         "healthy_evidence_ref",
         "healthy_evidence_fingerprint",
-        "source_bag_sha256",
+        "source_bag_manifest_schema",
+        "source_bag_manifest_sha256",
         "threshold_derivation",
         "source_incident_ref",
         "source_incident_manifest_sha256",
@@ -374,7 +422,7 @@ def contract_from_rule(
         raise ValueError(
             "Telemetry-health rule provenance is incomplete: " + ", ".join(missing)
         )
-    if rule.derivation["strategy"] != "dead_topic_telemetry_health_v1":
+    if rule.derivation["strategy"] != "dead_topic_telemetry_health_v2":
         raise ValueError("Unsupported telemetry-health derivation strategy")
     if not str(rule.derivation["source_detector_class"]).endswith(
         "DeadTopicDetector"
@@ -391,6 +439,11 @@ def contract_from_rule(
     verify_incident_source(rule, contract)
     evidence_ref = str(rule.derivation["healthy_evidence_ref"]).split("#", 1)[0]
     evidence = load_telemetry_evidence(Path(evidence_ref))
+    if not isinstance(evidence, TelemetryHealthEvidence):
+        raise ValueError(
+            "Historical telemetry-health evidence v1 requires explicit migration "
+            "before trusted adoption"
+        )
     verify_evidence_sources(evidence)
     if evidence.evidence_fingerprint != rule.derivation["healthy_evidence_fingerprint"]:
         raise ValueError("Telemetry evidence fingerprint differs from rule")
@@ -398,8 +451,8 @@ def contract_from_rule(
         raise ValueError("Telemetry evidence identity differs from rule")
     if evidence.offered_qos != contract.expected_qos:
         raise ValueError("Telemetry evidence QoS differs from rule")
-    if evidence.graph_context != contract.graph_context:
-        raise ValueError("Telemetry evidence context differs from rule")
+    if evidence.declared_context_label != contract.declared_context_label:
+        raise ValueError("Telemetry evidence declared context label differs from rule")
     if evidence.thresholds.model_dump(mode="json") != rule.derivation.get("selected_thresholds"):
         raise ValueError("Telemetry thresholds differ from selected provenance")
     contract_thresholds = {
@@ -429,8 +482,13 @@ def contract_from_rule(
         raise ValueError("Telemetry threshold derivation differs from evidence")
     if evidence.confidence_bounds != rule.derivation["confidence_bounds"]:
         raise ValueError("Telemetry confidence bounds differ from evidence")
-    if evidence.source_bag_sha256 != rule.derivation["source_bag_sha256"]:
-        raise ValueError("Telemetry source bag differs from rule")
+    if rule.derivation["source_bag_manifest_schema"] != BAG_MANIFEST_SCHEMA:
+        raise ValueError("Telemetry source bag manifest schema differs from rule")
+    if (
+        evidence.source_bag_manifest_sha256
+        != rule.derivation["source_bag_manifest_sha256"]
+    ):
+        raise ValueError("Telemetry source bag manifest differs from rule")
     return contract
 
 

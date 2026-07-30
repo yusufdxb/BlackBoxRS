@@ -29,25 +29,31 @@ def main() -> int:
     parser.add_argument("--freeze-after-sec", type=float, default=None)
     parser.add_argument("--max-messages", type=int, default=None)
     parser.add_argument("--best-effort", action="store_true")
+    parser.add_argument("--depth", type=int, default=1)
+    parser.add_argument("--transient-local", action="store_true")
     parser.add_argument(
         "--jitter-sec",
         default="",
         help="Comma-separated interval offsets repeated over the base period.",
     )
     args = parser.parse_args()
-    if args.rate_hz <= 0 or args.duration_sec <= 0:
-        raise SystemExit("rate and duration must be positive")
+    if args.rate_hz <= 0 or args.duration_sec <= 0 or args.depth <= 0:
+        raise SystemExit("rate, duration, and depth must be positive")
 
     jitter = [float(value) for value in args.jitter_sec.split(",") if value]
     qos = QoSProfile(
         history=HistoryPolicy.KEEP_LAST,
-        depth=1,
+        depth=args.depth,
         reliability=(
             ReliabilityPolicy.BEST_EFFORT
             if args.best_effort
             else ReliabilityPolicy.RELIABLE
         ),
-        durability=DurabilityPolicy.VOLATILE,
+        durability=(
+            DurabilityPolicy.TRANSIENT_LOCAL
+            if args.transient_local
+            else DurabilityPolicy.VOLATILE
+        ),
     )
     rclpy.init()
     node = rclpy.create_node("telemetry_health_test_publisher")

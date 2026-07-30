@@ -127,10 +127,11 @@ BlackBoxRS closes a bounded failure-to-prevention loop:
 runtime failure -> incident evidence -> derived contract -> trusted adoption -> runtime enforcement
 ```
 
-The runtime contract checks one fully qualified topic, exact type and QoS,
-runtime context, aggregate arrival freshness and rate, and monotonic header
-progress. It qualifies telemetry before launching a foreground dependent and
-continues supervision after launch.
+The runtime contract checks one fully qualified topic, exact type, compatible
+QoS, an exact caller-declared context label, aggregate arrival freshness and
+rate, and monotonic header progress. It qualifies telemetry before launching a
+foreground dependent and continues supervision after launch. The label check
+does not attest to a robot, host, deployment, DDS graph, or ROS domain.
 
 ### Genuine GO2 result
 
@@ -178,7 +179,8 @@ fixtures, not genuine robot data. See
 ### Tested adversarial boundaries
 
 - Global topic remapping cannot redirect the contract subscription.
-- Wrong namespace, runtime context, message type, or incompatible QoS blocks.
+- Wrong namespace, mismatched declared context label, message type, or
+  incompatible QoS blocks.
 - Incident, event, bag, metadata, evidence, threshold, and locally pinned rule
   fingerprint tampering fails closed.
 - The supported Linux foreground process tree is cleaned on caught termination
@@ -197,7 +199,7 @@ rates. Thresholds are session-derived. Process ownership is a bounded Linux
 foreground-command model using process groups, `/proc`, and signals, not
 universal descendant cleanup or cgroup ownership.
 
-> In a bounded local ROS 2 evaluation, BlackBoxRS derived a telemetry-health contract from genuine GO2 bag evidence and prevented selected semantic liveness failures, including publisher-present silence and sustained under-rate telemetry, while admitting selected nearby healthy conditions. The hardened guard rejected topic remapping, runtime-context mismatch, provenance tampering, and unsupported dependent-process escape within its documented Linux process model. Thresholds remain session-derived and require multi-session and live-robot validation.
+> In a bounded local ROS 2 evaluation, BlackBoxRS derived a telemetry-health contract from genuine GO2 bag evidence and prevented selected semantic arrival-liveness failures while admitting selected nearby healthy conditions. The hardened guard rejected topic remapping, mismatched declared context labels, trusted-evidence tampering, and unsupported dependent-process escape within its documented Linux process model. It enforces exact topic type and compatible QoS. Thresholds remain session-derived and require multi-session and live-robot validation.
 
 ---
 

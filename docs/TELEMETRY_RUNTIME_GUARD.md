@@ -3,13 +3,13 @@
 The telemetry runtime guard is a bounded local ROS 2 launch guard. Its validated
 classification is `LOCAL_SEMANTIC_REPEAT_PREVENTION_VALIDATED`.
 
-> In a bounded local ROS 2 evaluation, BlackBoxRS derived a telemetry-health contract from genuine GO2 bag evidence and prevented selected semantic liveness failures, including publisher-present silence and sustained under-rate telemetry, while admitting selected nearby healthy conditions. The hardened guard rejected topic remapping, runtime-context mismatch, provenance tampering, and unsupported dependent-process escape within its documented Linux process model. Thresholds remain session-derived and require multi-session and live-robot validation.
+> In a bounded local ROS 2 evaluation, BlackBoxRS derived a telemetry-health contract from genuine GO2 bag evidence and prevented selected semantic arrival-liveness failures while admitting selected nearby healthy conditions. The hardened guard rejected topic remapping, mismatched declared context labels, trusted-evidence tampering, and unsupported dependent-process escape within its documented Linux process model. It enforces exact topic type and compatible QoS. Thresholds remain session-derived and require multi-session and live-robot validation.
 
 ## Telemetry contract
 
 The guard qualifies and monitors one fully qualified topic using:
 
-- exact runtime context;
+- exact caller-declared context label;
 - exact resolved topic and message type;
 - compatible QoS;
 - arrival freshness;
@@ -29,6 +29,12 @@ not affect enforcement because arrival timing uses the monotonic clock.
 The runtime guard does not scale arrival timing to ROS simulated time or
 accelerated replay. Those modes require separate offline replay validation and
 are outside this local runtime contract.
+
+The declared context label is compared exactly with the label embedded in the
+approved rule. It does not verify the actual robot, host, deployment, DDS graph,
+or ROS domain. Compatible traffic in another ROS domain can qualify when the
+caller supplies the same label, so independently verified environment identity
+is outside this guard's guarantee.
 
 ## Multiple publishers
 
@@ -65,8 +71,10 @@ Runtime adoption and enforcement separate three properties:
 
 - Traceability: the rule resolves to one finalized incident, trigger, source
   event, topic, and healthy evidence record.
-- Integrity: manifests, source bag bytes, metadata, evidence content, selected
-  thresholds, rule content, and their recorded hashes must match.
+- Integrity: the canonical bag-manifest-v2 file records, metadata, evidence
+  content, selected thresholds, rule content, and their recorded hashes must
+  match. The bag manifest records each normalized path, role, size, file hash,
+  storage relationship, and total size.
 - Trusted local approval: the operator supplies the exact trusted rule
   fingerprint and the runtime rule must match it.
 
@@ -75,7 +83,10 @@ certificate chain, or cryptographic-authenticity claim.
 
 ## Timing boundary
 
-Qualification time and supervision time are independent. Supervision begins
+Qualification time and supervision time are independent. Each invocation first
+replaces any prior result with an atomic `starting` record and unique run ID.
+Prelaunch refusals and unexpected failures atomically replace that record;
+readers can require the expected run ID. Supervision begins
 only after the dependent launches. A zero monitor duration launches and then
 immediately stops the dependent. With no monitor duration, supervision
 continues until telemetry failure or natural dependent exit. Result files are
