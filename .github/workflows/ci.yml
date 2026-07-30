@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
@@ -38,7 +40,12 @@ jobs:
 
       - name: Lint (ruff)
         run: |
+          ruff --version
           python -m ruff check
+
+      - name: Validate curated telemetry evidence summary
+        run: |
+          python scripts/validate_telemetry_public_summary.py
 
       - name: Unit + integration tests
         # rclpy-gated integration tests auto-skip on runners that do
@@ -113,4 +120,7 @@ jobs:
             blackboxrs:humble-ci \
             python3 -m pytest -q \
               tests/integration/test_ros_live.py \
-              tests/integration/test_observer_live.py
+              tests/integration/test_observer_live.py \
+              tests/integration/test_closed_loop_replay_prevention.py \
+              tests/integration/test_telemetry_guard_ros_adversarial.py \
+              tests/integration/test_public_telemetry_health_demo.py

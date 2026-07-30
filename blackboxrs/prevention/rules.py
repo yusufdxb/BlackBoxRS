@@ -8,6 +8,7 @@ is). The actual check semantics are in :class:`PreflightCheck`.
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -24,6 +25,7 @@ CheckKind = Literal[
     "param_value",
     "resource_threshold",
     "custom_python",
+    "telemetry_health",
 ]
 
 SeverityOnFail = Literal["warn", "block"]
@@ -62,8 +64,11 @@ class PreventionRule(BaseModel):
     created_at: datetime
     source_incident_id: str | None = None
     source_fingerprint_id: str | None = None
+    source_trigger_ids: list[str] = Field(default_factory=list)
+    rule_fingerprint: str | None = None
     check: PreflightCheck
     rationale: str = ""
+    derivation: dict[str, Any] = Field(default_factory=dict)
     disabled: bool = False
     last_fired: datetime | None = None
     fire_count: int = 0
@@ -93,10 +98,11 @@ class PreflightReport(BaseModel):
 
     @property
     def exit_code(self) -> int:
-        """0 if all pass, 1 if any blocked, 2 if only warnings."""
+        """0 if all pass, 1 if any blocked/error, 2 if only warnings."""
         any_block = any(r.status == "block" for r in self.results)
+        any_error = any(r.status == "error" for r in self.results)
         any_warn = any(r.status == "warn" for r in self.results)
-        if any_block:
+        if any_block or any_error:
             return 1
         if any_warn:
             return 2
@@ -116,12 +122,58 @@ def _make_rule_id(check: PreflightCheck, rationale: str) -> str:
     return "rule_" + hashlib.sha256(payload).hexdigest()[:8]
 
 
+def _fingerprint_payload(
+    *,
+    check: PreflightCheck,
+    rationale: str,
+    source_incident_id: str | None,
+    source_fingerprint_id: str | None,
+    source_trigger_ids: list[str],
+    derivation: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the immutable rule fields covered by the full fingerprint."""
+    return {
+        "check": check.model_dump(mode="json"),
+        "derivation": derivation,
+        "rationale": rationale,
+        "source_fingerprint_id": source_fingerprint_id,
+        "source_incident_id": source_incident_id,
+        "source_trigger_ids": source_trigger_ids,
+    }
+
+
+def compute_rule_fingerprint(rule: PreventionRule) -> str:
+    """Compute a full SHA-256 over immutable rule semantics and provenance."""
+    payload = _fingerprint_payload(
+        check=rule.check,
+        rationale=rule.rationale,
+        source_incident_id=rule.source_incident_id,
+        source_fingerprint_id=rule.source_fingerprint_id,
+        source_trigger_ids=rule.source_trigger_ids,
+        derivation=rule.derivation,
+    )
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def verify_rule_fingerprint(rule: PreventionRule) -> bool:
+    """Return whether a stored full fingerprint matches the rule contents."""
+    return (
+        rule.rule_fingerprint is not None
+        and rule.rule_fingerprint == compute_rule_fingerprint(rule)
+    )
+
+
 def make_rule(
     check: PreflightCheck,
     *,
     rationale: str = "",
     source_incident_id: str | None = None,
     source_fingerprint_id: str | None = None,
+    source_trigger_ids: list[str] | None = None,
+    derivation: dict[str, Any] | None = None,
 ) -> PreventionRule:
     """Build a :class:`PreventionRule` with a deterministic id."""
     rule_id = _make_rule_id(check, rationale)
@@ -129,14 +181,17 @@ def make_rule(
         check = check.model_copy(update={"check_id": rule_id})
     if check.produced_by is None and source_incident_id:
         check = check.model_copy(update={"produced_by": rule_id})
-    return PreventionRule(
+    rule = PreventionRule(
         rule_id=rule_id,
         created_at=datetime.now(timezone.utc),
         source_incident_id=source_incident_id,
         source_fingerprint_id=source_fingerprint_id,
+        source_trigger_ids=list(source_trigger_ids or []),
         check=check,
         rationale=rationale,
+        derivation=dict(derivation or {}),
     )
+    return rule.model_copy(update={"rule_fingerprint": compute_rule_fingerprint(rule)})
 
 
 def save_rule(rule: PreventionRule, rules_dir: Path) -> Path:
@@ -158,7 +213,10 @@ def load_rule(path: Path) -> PreventionRule:
     """Load a single :class:`PreventionRule` from a YAML file."""
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
-    return PreventionRule.model_validate(data)
+    rule = PreventionRule.model_validate(data)
+    if rule.rule_fingerprint is not None and not verify_rule_fingerprint(rule):
+        raise ValueError(f"Rule fingerprint mismatch: {path}")
+    return rule
 
 
 def load_rules(rules_dir: Path) -> list[PreventionRule]:

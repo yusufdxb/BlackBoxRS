@@ -20,21 +20,33 @@ from __future__ import annotations
 import os
 import re
 import sys
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import click
+import yaml
 
 from blackboxrs.core.config import BlackBoxConfig
 from blackboxrs.incident.api import build_incident, render_report
 from blackboxrs.incident.bundle import BundleReader
+from blackboxrs.prevention.derivation import (
+    PreventionDerivationError,
+    derive_rule_from_bundle,
+    derive_telemetry_health_rule,
+)
 from blackboxrs.prevention.rules import (
-    PreflightCheck,
+    load_rule,
     load_rules,
-    make_rule,
     save_rule,
 )
 from blackboxrs.prevention.runner import PreflightRunner
+from blackboxrs.prevention.telemetry_guard import (
+    begin_guard_invocation,
+    fail_guard_invocation,
+    refuse_guard_invocation,
+    run_ros_telemetry_guard,
+)
 
 
 _DEFAULT_INCIDENTS_DIR = Path("~/.blackboxrs/incidents").expanduser()
@@ -321,65 +333,100 @@ def prevention_adopt(incident_dir: str, rules_dir: str | None) -> None:
     """Adopt the recommended preflight rule from an incident bundle."""
     rdir = Path(rules_dir).expanduser() if rules_dir else _DEFAULT_RULES_DIR
     reader = BundleReader(Path(incident_dir))
-    incident = reader.load_incident()
-    triggers = reader.load_triggers()
-    if not incident.likely_causes:
-        click.echo(click.style("No likely causes; nothing to adopt.", fg="yellow"))
-        sys.exit(1)
-    top = incident.likely_causes[0]
-    if top.confidence < 0.7:
-        click.echo(click.style(
-            f"Top hypothesis confidence {top.confidence:.2f} below threshold 0.70; "
-            "refuse to auto-adopt.", fg="yellow"))
+    try:
+        derivation = derive_rule_from_bundle(reader)
+    except PreventionDerivationError as exc:
+        click.echo(click.style(str(exc), fg="yellow"))
         sys.exit(1)
 
-    cause_lower = top.cause.lower()
-    if "qos mismatch" in cause_lower:
-        topic = next(
-            (t.subject for t in triggers
-             if t.detector_class.endswith("QoSMismatchDetector")),
-            None,
-        )
-        if topic is None:
-            click.echo(click.style("No QoSMismatch trigger; cannot adopt.", fg="red"))
-            sys.exit(1)
-        check = PreflightCheck(
-            name=f"qos match on {topic}",
-            kind="qos_match",
-            params={"topic": topic},
-            severity_on_fail="block",
-        )
-    elif "stopped emitting" in cause_lower:
-        topic = next(
-            (t.subject for t in triggers
-             if t.detector_class.endswith("DeadTopicDetector")),
-            None,
-        )
-        if topic is None:
-            click.echo(click.style("No DeadTopic trigger; cannot adopt.", fg="red"))
-            sys.exit(1)
-        check = PreflightCheck(
-            name=f"topic present: {topic}",
-            kind="topic_present",
-            params={"topic": topic, "min_publishers": 1},
-            severity_on_fail="block",
-        )
-    else:
-        click.echo(click.style(
-            f"No automatic mapping for cause {top.cause!r}; adopt manually.",
-            fg="yellow"))
-        sys.exit(1)
-
-    rule = make_rule(
-        check,
-        rationale=top.cause,
-        source_incident_id=incident.incident_id,
-        source_fingerprint_id=(
-            incident.fingerprint.fingerprint_id if incident.fingerprint else None
-        ),
-    )
-    target = save_rule(rule, rdir)
+    target = save_rule(derivation.rule, rdir)
     click.echo(click.style(f"Adopted: {target}", fg="green"))
+
+
+@prevention_group.command("adopt-telemetry-health")
+@click.option("--from-incident", "incident_dir", required=True,
+              type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--healthy-evidence", "evidence_path", required=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--rules-dir", "rules_dir", default=None,
+              type=click.Path(file_okay=False, path_type=Path))
+def prevention_adopt_telemetry_health(
+    incident_dir: Path, evidence_path: Path, rules_dir: Path | None
+) -> None:
+    """Adopt a bounded runtime-health rule for one dead topic."""
+    rdir = rules_dir.expanduser() if rules_dir else _DEFAULT_RULES_DIR
+    reader = BundleReader(incident_dir, strict=False)
+    try:
+        derivation = derive_telemetry_health_rule(reader, evidence_path)
+    except PreventionDerivationError as exc:
+        click.echo(click.style(str(exc), fg="yellow"))
+        sys.exit(1)
+    target = save_rule(derivation.rule, rdir)
+    click.echo(click.style(f"Adopted: {target}", fg="green"))
+    click.echo(f"  derived: {derivation.reason}")
+    click.echo(f"  trigger: {derivation.source_trigger.trigger_id}")
+    click.echo(f"  fingerprint: {derivation.rule.rule_fingerprint}")
+
+
+@prevention_group.command("guard", context_settings={"ignore_unknown_options": True})
+@click.option("--rule", "rule_path", required=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--result", "result_path", default=None,
+              type=click.Path(dir_okay=False, path_type=Path))
+@click.option("--monitor-duration", type=float, default=None)
+@click.option(
+    "--context-label",
+    "--context",
+    "declared_context_label",
+    required=True,
+    help="Declared context label, not deployment identity attestation.",
+)
+@click.option("--trusted-rule-fingerprint", required=True)
+@click.argument("command", nargs=-1, type=click.UNPROCESSED)
+def prevention_guard(
+    rule_path: Path, result_path: Path | None, monitor_duration: float | None,
+    declared_context_label: str, trusted_rule_fingerprint: str,
+    command: tuple[str, ...],
+) -> None:
+    """Hold COMMAND until healthy, then supervise its health."""
+    invocation = begin_guard_invocation(
+        result_path,
+        requested_topic=_requested_topic_from_rule(rule_path),
+        declared_context_label=declared_context_label,
+    )
+    try:
+        result = run_ros_telemetry_guard(
+            load_rule(rule_path), command,
+            monitor_duration_sec=monitor_duration, result_path=result_path,
+            declared_context_label=declared_context_label,
+            trusted_rule_fingerprint=trusted_rule_fingerprint,
+            invocation=invocation,
+        )
+    except ValueError as exc:
+        if not invocation.terminal_written:
+            refuse_guard_invocation(invocation, reason=str(exc))
+        click.echo(click.style(f"Telemetry guard refused: {exc}", fg="red"))
+        sys.exit(1)
+    except (OSError, RuntimeError) as exc:
+        if not invocation.terminal_written:
+            fail_guard_invocation(
+                invocation,
+                error_category=type(exc).__name__,
+            )
+        click.echo(click.style(f"Telemetry guard failed: {exc}", fg="red"))
+        sys.exit(1)
+    click.echo(json.dumps(result.model_dump(mode="json"), sort_keys=True))
+    sys.exit(0 if result.status == "passed" else 1)
+
+
+def _requested_topic_from_rule(rule_path: Path) -> str:
+    """Read only the requested topic for the pre-validation lifecycle record."""
+    try:
+        raw = yaml.safe_load(Path(rule_path).read_text(encoding="utf-8"))
+        topic = raw["check"]["params"]["topic"]
+    except (KeyError, OSError, TypeError, yaml.YAMLError):
+        return "<unavailable>"
+    return str(topic)
 
 
 __all__ = [

@@ -113,6 +113,96 @@ graph LR
 
 ---
 
+## Runtime telemetry-health guard
+
+### Problem
+
+ROS graph structure alone cannot distinguish a healthy publisher from a
+publisher that remains present but stops delivering useful telemetry. A
+`topic_present` rule can therefore pass while the topic is silent.
+
+BlackBoxRS closes a bounded failure-to-prevention loop:
+
+```text
+runtime failure -> incident evidence -> derived contract -> trusted adoption -> runtime enforcement
+```
+
+The runtime contract checks one fully qualified topic, exact type, compatible
+QoS, an exact caller-declared context label, aggregate arrival freshness and
+rate, and monotonic header progress. It qualifies telemetry before launching a
+foreground dependent and continues supervision after launch. The label check
+does not attest to a robot, host, deployment, DDS graph, or ROS domain.
+
+### Genuine GO2 result
+
+A clean, read-only reproduction used one 329.6-second physical-GO2 rosbag2
+session containing 94,325 messages across six topics. The selected
+`/utlidar/robot_pose` stream contained 6,177 `PoseStamped` messages at a mean
+18.7468 Hz rate, with a 70.8 ms maximum healthy gap. The derived local
+contract selected a 15.0 Hz hard minimum and 150 ms stale timeout.
+
+In the controlled comparison, no-rule and topic-presence checks admitted a
+publisher-present silent condition. The hardened guard detected the same
+silence about 151 ms after the final message and enforced the dependent
+process boundary. It admitted 6/6 selected nearby valid cases and blocked 7/7
+selected invalid cases. Three additional 15.1 Hz multi-phase jitter cases
+passed. The repeated boundary experiment blocked 20/20 selected 14.9 Hz
+constant and 20/20 selected 14.9 Hz jitter cases, while admitting 20/20
+selected 15.0 Hz constant, 20/20 selected 15.1 Hz constant, and 20/20
+selected 15.1 Hz jitter cases. The post-remediation local regression completed
+with 686 passed and 5 optional dependency skips. The public fixture demo below
+is not a substitute for this genuine-bag result.
+
+### Public deterministic reproduction
+
+The repository includes a small generated provenance fixture, so the demo does
+not require the private 681,996,932-byte GO2 bag:
+
+```bash
+source /opt/ros/humble/setup.bash
+export ROS_LOCALHOST_ONLY=1
+OUT="$(mktemp -d /tmp/blackboxrs-telemetry-demo.XXXXXX)"
+python3 examples/demo_runtime_telemetry_health.py \
+  --out "$OUT" --domain-start 180
+jq '.checks' "$OUT/demo_summary.json"
+```
+
+The demo shows a healthy publisher qualifying, a harmless dependent starting,
+the publisher remaining alive while becoming silent, the presence-only rule
+passing, the runtime guard detecting stale telemetry and terminating the
+dependent, and a nearby 18.75 Hz stream passing. It calls the production
+adoption and guard paths. The generated bag and incident are deterministic
+fixtures, not genuine robot data. See
+[the recording guide](docs/RUNTIME_TELEMETRY_DEMO.md) and the curated
+[genuine-data summary](examples/telemetry_health/genuine_go2_evidence_summary.json).
+
+### Tested adversarial boundaries
+
+- Global topic remapping cannot redirect the contract subscription.
+- Wrong namespace, mismatched declared context label, message type, or
+  incompatible QoS blocks.
+- Incident, event, bag, metadata, evidence, threshold, and locally pinned rule
+  fingerprint tampering fails closed.
+- The supported Linux foreground process tree is cleaned on caught termination
+  and tested `SIGKILL` paths.
+- New process groups, `setsid()`, double-forking, and daemonization are rejected.
+- Aggregate topic traffic can remain healthy when one publisher is stale or
+  disappears. This is not a specific-producer health claim.
+
+### Limitations
+
+This result uses one genuine session in local ROS 2 Humble with Fast DDS. It
+covers aggregate topic health, not a particular publisher. It does not validate
+pose values or claim payload-semantic freshness. It does not demonstrate live
+physical prevention, field safety, multi-robot generality, or population error
+rates. Thresholds are session-derived. Process ownership is a bounded Linux
+foreground-command model using process groups, `/proc`, and signals, not
+universal descendant cleanup or cgroup ownership.
+
+> In a bounded local ROS 2 evaluation, BlackBoxRS derived a telemetry-health contract from genuine GO2 bag evidence and prevented selected semantic arrival-liveness failures while admitting selected nearby healthy conditions. The hardened guard rejected topic remapping, mismatched declared context labels, trusted-evidence tampering, and unsupported dependent-process escape within its documented Linux process model. It enforces exact topic type and compatible QoS. Thresholds remain session-derived and require multi-session and live-robot validation.
+
+---
+
 ## A sample bundle
 
 `examples/incidents/inc_demo_tf_break/` is a synthetic-but-realistic TF-break incident, committed to the repo and generated by real code. The top of its `report.md`:
@@ -173,11 +263,11 @@ robot-blackbox incident show examples/incidents/inc_demo_tf_break/
 - **Deterministic signatures.** sha256 over ROS distro, RMW, an env subset, attached files, and OS / Python / driver state. Same inputs, same hash.
 - **Failure fingerprinting (v1).** A stable id from detector classes, subsystems, signature fields, and topic-set topology. Seed two bundles identically and they collide; perturb any input and the id moves.
 - **Likely-cause ranking.** Detector-class weight plus a severity bonus. Confidence below 0.5 carries an explicit caveat; at or above 0.7 the cause is promoted to the summary. Weights are hand-calibrated (`blackboxrs/incident/cause.py:8-18`).
-- **Prevention.** `PreventionRule` + `PreflightCheck` YAML I/O and a `PreflightRunner` with 0/1/2 exit codes (pass / block / warn). All seven check kinds are real: `topic_present`, `qos_match`, `node_running` are live rclpy graph queries; `env_var`, `param_value`, `resource_threshold`, `custom_python` run against `os.environ`, the ROS 2 parameter API, `psutil`, and a user-supplied import path. Unknown kinds raise at load time, never silently skip.
+- **Prevention.** `PreventionRule` + `PreflightCheck` YAML I/O and a `PreflightRunner` with 0/1/2 exit codes (pass / block / warn). Derived rules record the source incident, fingerprint, trigger id, detector class, and evidence ref that justified the rule. Rule derivation and adoption require a finalized, integrity-valid bundle. Active blocking rules fail closed when a check errors or cannot run. All seven check kinds are real: `topic_present`, `qos_match`, `node_running` are live rclpy graph queries; `env_var`, `param_value`, `resource_threshold`, `custom_python` run against `os.environ`, the ROS 2 parameter API, `psutil`, and a user-supplied import path. Unknown kinds raise at load time, never silently skip.
 - **Observer mode, end to end.** `tests/integration/test_observer_live.py` boots a real rclpy publisher and asserts an observer-role daemon fires `anomaly.dead_topic` over DDS within 5s of the publisher going quiet, inside the Docker Humble CI job.
-- **Offline bag replay.** `robot-blackbox replay-bag` replays a recorded `.mcap` or `.db3` through the real detectors, entirely offline, with a virtual clock pinned to bag time. It reads `.db3` split files (the chunks `ros2 bag record` produces on a long session) by merging every file `metadata.yaml` lists, not just the first one, a bug that had been silently dropping ~9% of messages.
+- **Offline bag replay.** `robot-blackbox replay-bag` replays recorded `.mcap` or `.db3` topic-arrival timing through the real `DeadTopicDetector`, entirely offline, with a virtual clock pinned to bag time. It reads `.db3` split files (the chunks `ros2 bag record` produces on a long session) by merging every file `metadata.yaml` lists, not just the first one, a bug that had been silently dropping ~9% of messages. A hardware-free integration test covers the public replay -> adopt -> preflight path for a structured dead-topic incident: the derived rule preserves incident, fingerprint, trigger, detector, and event provenance, blocks a matching missing-topic preflight, and passes a nearby healthy graph.
 - **CLI.** `robot-blackbox incident build / show / list / attach`, `preflight`, `prevention adopt --from-incident / list`, `replay-bag`.
-- **547 tests pass**, plus 2 gated skips on hosted runners (one rclpy-gated, one gated on a local real-hardware bag not present in CI). CI runs lint + unit + integration on Python 3.10 / 3.11 / 3.12, a benchmark regression gate, a detector-FPR smoke run, and a live ROS 2 Humble Docker job on every commit to `main`.
+- **653 baseline tests pass**, plus 4 optional-MCAP skips in the clean telemetry-health validation environment. CI runs lint + unit + integration on Python 3.10 / 3.11 / 3.12, a benchmark regression gate, a detector-FPR smoke run, and live ROS 2 Humble tests, including the telemetry guard adversarial suite, on every commit to `main`.
 
 ## What's next
 

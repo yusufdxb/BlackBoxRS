@@ -1,0 +1,106 @@
+{
+  "bag": {
+    "canonical_manifest_sha256": "449f0e8ddd8f1557f9f8a5604cdd60a3b3a33d3b9be764f93872fb52a62b2246",
+    "digest_schema": "blackboxrs-bag-manifest-v2",
+    "duration_sec": 329.601840622,
+    "manifest": {
+      "metadata": {
+        "metadata_relationship": "rosbag2_bagfile_information",
+        "path": "metadata.yaml",
+        "role": "metadata",
+        "sha256": "ad8162351e448391bb0199936ac4d0d5a35d6dfaedacc985b05b51b1d87a160c",
+        "size": 4740,
+        "storage_identifier": "sqlite3"
+      },
+      "payloads": [
+        {
+          "metadata_relationship": "rosbag2_bagfile_information.relative_file_paths",
+          "path": "extended_5min_0.db3",
+          "role": "storage_payload",
+          "sha256": "ab5e367ad133e5b7b8389c3e99dafcb127abdf254c0699e79d94e4ed138406e1",
+          "size": 620826624,
+          "storage_identifier": "sqlite3"
+        },
+        {
+          "metadata_relationship": "rosbag2_bagfile_information.relative_file_paths",
+          "path": "extended_5min_1.db3",
+          "role": "storage_payload",
+          "sha256": "e2dc8c9cb83662eb0407c85179757758c344ec6a7b4f670ad7d82f35384e6d65",
+          "size": 61165568,
+          "storage_identifier": "sqlite3"
+        }
+      ],
+      "schema": "blackboxrs-bag-manifest-v2",
+      "storage_identifier": "sqlite3",
+      "total_size": 681996932
+    },
+    "message_count": 94325,
+    "metadata_sha256": "ad8162351e448391bb0199936ac4d0d5a35d6dfaedacc985b05b51b1d87a160c",
+    "size_bytes": 681996932,
+    "storage_backend": "sqlite3",
+    "topic_count": 6
+  },
+  "classification": "LOCAL_SEMANTIC_REPEAT_PREVENTION_VALIDATED",
+  "controlled_dropout": {
+    "detection_latency_from_last_message_sec": 0.1510000000000007,
+    "drop_after_sec": 5.0,
+    "publisher_present": true,
+    "reason": "stale"
+  },
+  "critical_attack_results": {
+    "bag_split_file_collision": "rejected by canonical manifest-v2 layout validation",
+    "declared_context_label_mismatch": "blocked",
+    "deployment_or_dds_identity": "not attested; outside the declared-label guarantee",
+    "exact_type_and_compatible_qos": "enforced and tested separately",
+    "process_escape": "rejected within the documented Linux process model",
+    "provenance_tampering": "focused suite passed",
+    "remapping_spoof": "blocked with contract topic preserved",
+    "sigkill_cleanup": "supported process tree cleaned",
+    "stale_result_reuse": "old success invalidated before the current starting write; initial-write SIGKILL leaves no stale public result",
+    "threaded_outer_preexec": "removed; repeated DDS-active launches completed"
+  },
+  "evidence_scope": "One read-only physical-GO2 rosbag2 session. The bag is not distributed in this repository.",
+  "pose_topic": {
+    "header_frozen_deltas": 0,
+    "header_negative_deltas": 0,
+    "maximum_gap_sec": 0.070847572,
+    "mean_rate_hz": 18.746780976988813,
+    "median_rate_hz": 18.756079021048965,
+    "message_count": 6177,
+    "name": "/utlidar/robot_pose",
+    "type": "geometry_msgs/msg/PoseStamped"
+  },
+  "provenance": {
+    "evidence_fingerprint": "051bf3bf2cb01bd6acf2227f96d9f1156aa1005a151dbb402da5826b634a16b0",
+    "incident_id": "inc_2026-04-06T18-13-40_eb8d6333",
+    "source_event_reference": "events.jsonl#L2231",
+    "trigger_id": "trg_c56eff95",
+    "trusted_rule_fingerprint": "90a0d26ae432c176706f647d5ab7ea02d4a63d7bcf210fb8e2c75c1191eb7842",
+    "validated_source_commit": "ec6a9023824faeee4cc8c82131672e5c4a65b8c1",
+    "validated_source_tree": "92a3f02d308d5eb820069e3ba6e0addb8b3a4b53",
+    "validated_worktree_clean": true
+  },
+  "qos_semantics": {
+    "policy": "exact topic type and compatible QoS",
+    "publisher_semantics": "aggregate_topic"
+  },
+  "selected_case_counts": {
+    "hardened_invalid": "7/7 selected cases blocked",
+    "hardened_valid": "6/6 selected cases admitted",
+    "jitter_15_1_hz": "3/3 selected multi-phase cases admitted"
+  },
+  "selected_thresholds": {
+    "header_progress_timeout_sec": 0.15,
+    "minimum_rate_hz": 15.0,
+    "rate_window_sec": 2.0,
+    "stale_timeout_sec": 0.15,
+    "startup_grace_sec": 0.5
+  },
+  "validation_environment": {
+    "actual_environment_identity_attested": false,
+    "declared_context_label": "go2_utlidar_hardware_eval_20260406",
+    "rmw": "rmw_fastrtps_cpp",
+    "ros_distro": "Humble",
+    "scope": "bounded local Linux ROS 2 evaluation"
+  }
+}
