@@ -58,6 +58,10 @@ RUN pip3 install --no-cache-dir --upgrade "pip>=24" "setuptools<80" wheel \
 # Keep the live-ROS integration test in the image so CI can verify the
 # real rclpy path without bind-mounting the repository.
 COPY tests/ ./tests/
+COPY scripts/telemetry_health_publisher.py ./scripts/telemetry_health_publisher.py
+COPY examples/demo_runtime_telemetry_health.py ./examples/demo_runtime_telemetry_health.py
+COPY examples/telemetry_health/genuine_go2_evidence_summary.json \
+     ./examples/telemetry_health/genuine_go2_evidence_summary.json
 
 # Make the CLI discoverable in a ROS-sourced shell.
 ENV PATH="/usr/local/bin:${PATH}"
