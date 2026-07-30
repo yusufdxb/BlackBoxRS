@@ -303,7 +303,10 @@ def run(out_dir: Path, domain_start: int) -> dict[str, Any]:
     print("  This summary describes the private genuine bag. The live demo uses a fixture.")
     print(f"  pose_messages: {genuine['pose_topic']['message_count']}")
     print(f"  mean_rate_hz: {genuine['pose_topic']['mean_rate_hz']:.6f}")
-    print(f"  combined_bag_sha256: {genuine['bag']['combined_identity_sha256']}")
+    print(
+        "  canonical_bag_manifest_sha256: "
+        f"{genuine['bag']['canonical_manifest_sha256']}"
+    )
 
     print("\n[2/6] Fresh deterministic provenance")
     print("  fixture_kind: generated public fixture, not genuine GO2 data")

@@ -33,6 +33,7 @@ _PROTECTED_PATHS = (
     "scripts/run_telemetry_health_experiment.py",
     "scripts/telemetry_health_publisher.py",
     "scripts/validate_telemetry_thresholds.py",
+    "examples/demo_runtime_telemetry_health.py",
     "tests",
 )
 
