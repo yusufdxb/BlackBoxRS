@@ -122,6 +122,7 @@ def begin_guard_invocation(
         started_at=datetime.now(timezone.utc),
         result_path=Path(result_path) if result_path is not None else None,
     )
+    _invalidate_previous_result(invocation.result_path)
     _persist_document(
         TelemetryGuardLifecycleResult(
             run_id=invocation.run_id,
@@ -822,14 +823,31 @@ def _persist_document(
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _fsync_directory(path.parent)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def _invalidate_previous_result(result_path: Path | None) -> None:
+    """Remove any prior consumable result before the first current-run write."""
+    if result_path is None:
+        return
+    path = Path(result_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    _fsync_directory(path.parent)
+
+
+def _fsync_directory(directory: Path) -> None:
+    directory_fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def _bounded_text(value: str, *, limit: int = 500) -> str:

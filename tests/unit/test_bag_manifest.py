@@ -175,6 +175,55 @@ def test_symlink_payload_substitution_is_rejected(tmp_path):
         build_bag_manifest(bag)
 
 
+def test_root_symlink_substitution_while_hashing_is_rejected(
+    tmp_path, monkeypatch
+):
+    bag = _write_bag(tmp_path / "bag", {"bag_0.db3": b"reviewed"})
+    replacement = _write_bag(
+        tmp_path / "replacement", {"bag_0.db3": b"substituted"}
+    )
+    moved = tmp_path / "reviewed-moved"
+    original_hash_fd = bag_manifest_module._hash_fd
+    swapped = False
+
+    def swap_root_after_payload_read(file_fd: int, *, collect_bytes: bool):
+        nonlocal swapped
+        result = original_hash_fd(file_fd, collect_bytes=collect_bytes)
+        if not collect_bytes and not swapped:
+            bag.rename(moved)
+            bag.symlink_to(replacement, target_is_directory=True)
+            swapped = True
+        return result
+
+    monkeypatch.setattr(
+        bag_manifest_module, "_hash_fd", swap_root_after_payload_read
+    )
+
+    with pytest.raises(ValueError, match="root changed while hashing"):
+        build_bag_manifest(bag)
+
+
+def test_root_swap_between_lstat_and_open_is_rejected(tmp_path, monkeypatch):
+    bag = _write_bag(tmp_path / "bag", {"bag_0.db3": b"reviewed"})
+    replacement = _write_bag(
+        tmp_path / "replacement", {"bag_0.db3": b"substituted"}
+    )
+    moved = tmp_path / "reviewed-moved"
+    original_open_root = bag_manifest_module._open_bag_root
+
+    def swap_before_open(path: Path, expected: os.stat_result):
+        bag.rename(moved)
+        bag.symlink_to(replacement, target_is_directory=True)
+        return original_open_root(path, expected)
+
+    monkeypatch.setattr(
+        bag_manifest_module, "_open_bag_root", swap_before_open
+    )
+
+    with pytest.raises(ValueError, match="without following links|root changed"):
+        build_bag_manifest(bag)
+
+
 def test_metadata_naming_missing_payload_is_rejected(tmp_path):
     bag = _write_bag(
         tmp_path / "bag",

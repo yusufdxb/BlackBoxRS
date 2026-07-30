@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import builtins
 import json
+import signal
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -170,3 +173,64 @@ def test_failed_terminal_replace_leaves_current_starting_not_old_success(
     result = load_guard_result(result_path, expected_run_id="current-run")
     assert result.status == "starting"
     assert not list(result_path.parent.glob(f".{result_path.name}.*.tmp"))
+
+
+def test_failed_initial_replace_leaves_no_old_consumable_result(
+    tmp_path, monkeypatch
+):
+    result_path = tmp_path / "guard-result.json"
+    _seed_pass(result_path)
+
+    def fail_initial_replace(_source, _destination):
+        raise OSError("simulated interruption before initial atomic replace")
+
+    monkeypatch.setattr(guard_module.os, "replace", fail_initial_replace)
+
+    with pytest.raises(OSError, match="simulated interruption"):
+        begin_guard_invocation(
+            result_path,
+            requested_topic="/utlidar/robot_pose",
+            declared_context_label=GRAPH_CONTEXT,
+            run_id="current-run",
+        )
+
+    assert not result_path.exists()
+    assert not list(result_path.parent.glob(f".{result_path.name}.*.tmp"))
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="SIGKILL proof requires Linux")
+def test_sigkill_during_initial_write_cannot_leave_old_success_consumable(
+    tmp_path,
+):
+    result_path = tmp_path / "guard-result.json"
+    _seed_pass(result_path)
+    program = """
+import os
+import signal
+import sys
+from pathlib import Path
+import blackboxrs.prevention.telemetry_guard as guard
+
+def die_before_replace(_source, _destination):
+    os.kill(os.getpid(), signal.SIGKILL)
+
+guard.os.replace = die_before_replace
+guard.begin_guard_invocation(
+    Path(sys.argv[1]),
+    requested_topic="/utlidar/robot_pose",
+    declared_context_label="bounded-evaluation",
+    run_id="current-run",
+)
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", program, str(result_path)],
+        check=False,
+        timeout=5,
+    )
+
+    assert completed.returncode == -signal.SIGKILL
+    assert not result_path.exists()
+    with pytest.raises(FileNotFoundError):
+        load_guard_result(result_path)
+    assert list(result_path.parent.glob(f".{result_path.name}.current-run.tmp"))

@@ -98,67 +98,77 @@ def build_bag_manifest(bag_path: Path) -> BagManifest:
     if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
         raise ValueError("Telemetry source bag must be a non-symlink directory")
 
-    initial_inventory = _inventory(bag)
-    if _METADATA_PATH not in initial_inventory:
-        raise ValueError("Telemetry source bag metadata.yaml is unavailable")
+    root_fd = _open_bag_root(bag, root_stat)
+    try:
+        initial_inventory = _inventory(root_fd, bag)
+        if _METADATA_PATH not in initial_inventory:
+            raise ValueError("Telemetry source bag metadata.yaml is unavailable")
 
-    metadata_bytes, metadata_size, metadata_hash = _stable_file_digest(
-        bag, _METADATA_PATH, collect_bytes=True
-    )
-    assert metadata_bytes is not None
-    storage_identifier, listed_payloads = _parse_metadata(metadata_bytes)
+        metadata_bytes, metadata_size, metadata_hash = _stable_file_digest(
+            root_fd, _METADATA_PATH, collect_bytes=True
+        )
+        assert metadata_bytes is not None
+        storage_identifier, listed_payloads = _parse_metadata(metadata_bytes)
 
-    expected_paths = {_METADATA_PATH, *listed_payloads}
-    actual_paths = set(initial_inventory)
-    missing = sorted(expected_paths - actual_paths)
-    unexpected = sorted(actual_paths - expected_paths)
-    if missing:
-        raise ValueError(
-            "Telemetry metadata names missing payload files: " + ", ".join(missing)
-        )
-    if unexpected:
-        raise ValueError(
-            "Telemetry source bag contains unexpected files: "
-            + ", ".join(unexpected)
-        )
-
-    payload_records: list[BagFileRecord] = []
-    for relative_path in sorted(listed_payloads):
-        _validate_payload_extension(relative_path, storage_identifier)
-        _bytes, size, digest = _stable_file_digest(
-            bag, relative_path, collect_bytes=False
-        )
-        payload_records.append(
-            BagFileRecord(
-                path=relative_path,
-                size=size,
-                sha256=digest,
-                role="storage_payload",
-                storage_identifier=storage_identifier,
-                metadata_relationship=(
-                    "rosbag2_bagfile_information.relative_file_paths"
-                ),
+        expected_paths = {_METADATA_PATH, *listed_payloads}
+        actual_paths = set(initial_inventory)
+        missing = sorted(expected_paths - actual_paths)
+        unexpected = sorted(actual_paths - expected_paths)
+        if missing:
+            raise ValueError(
+                "Telemetry metadata names missing payload files: "
+                + ", ".join(missing)
             )
+        if unexpected:
+            raise ValueError(
+                "Telemetry source bag contains unexpected files: "
+                + ", ".join(unexpected)
+            )
+
+        payload_records: list[BagFileRecord] = []
+        for relative_path in sorted(listed_payloads):
+            _validate_payload_extension(relative_path, storage_identifier)
+            _bytes, size, digest = _stable_file_digest(
+                root_fd, relative_path, collect_bytes=False
+            )
+            payload_records.append(
+                BagFileRecord(
+                    path=relative_path,
+                    size=size,
+                    sha256=digest,
+                    role="storage_payload",
+                    storage_identifier=storage_identifier,
+                    metadata_relationship=(
+                        "rosbag2_bagfile_information.relative_file_paths"
+                    ),
+                )
+            )
+
+        final_inventory = _inventory(root_fd, bag)
+        if _inventory_identity(initial_inventory) != _inventory_identity(
+            final_inventory
+        ):
+            raise ValueError("Telemetry source bag layout changed while hashing")
+        _verify_root_path_stable(bag, root_stat)
+
+        metadata_record = BagFileRecord(
+            path=_METADATA_PATH,
+            size=metadata_size,
+            sha256=metadata_hash,
+            role="metadata",
+            storage_identifier=storage_identifier,
+            metadata_relationship="rosbag2_bagfile_information",
         )
-
-    final_inventory = _inventory(bag)
-    if _inventory_identity(initial_inventory) != _inventory_identity(final_inventory):
-        raise ValueError("Telemetry source bag layout changed while hashing")
-
-    metadata_record = BagFileRecord(
-        path=_METADATA_PATH,
-        size=metadata_size,
-        sha256=metadata_hash,
-        role="metadata",
-        storage_identifier=storage_identifier,
-        metadata_relationship="rosbag2_bagfile_information",
-    )
-    return BagManifest(
-        storage_identifier=storage_identifier,
-        metadata=metadata_record,
-        payloads=payload_records,
-        total_size=metadata_size + sum(record.size for record in payload_records),
-    )
+        return BagManifest(
+            storage_identifier=storage_identifier,
+            metadata=metadata_record,
+            payloads=payload_records,
+            total_size=metadata_size + sum(
+                record.size for record in payload_records
+            ),
+        )
+    finally:
+        os.close(root_fd)
 
 
 def verify_bag_manifest(bag_path: Path, expected: BagManifest) -> None:
@@ -219,39 +229,89 @@ def _validate_payload_extension(relative_path: str, storage_identifier: str) -> 
         )
 
 
-def _inventory(bag: Path) -> dict[str, os.stat_result]:
-    inventory: dict[str, os.stat_result] = {}
-    for directory, directory_names, file_names in os.walk(
-        bag, topdown=True, followlinks=False
+def _root_identity(file_stat: os.stat_result) -> tuple[int, int, int]:
+    return (file_stat.st_dev, file_stat.st_ino, file_stat.st_mode)
+
+
+def _open_bag_root(bag: Path, expected: os.stat_result) -> int:
+    try:
+        root_fd = os.open(
+            bag,
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as exc:
+        raise ValueError(
+            "Telemetry source bag root could not be opened without following links"
+        ) from exc
+    opened = os.fstat(root_fd)
+    if (
+        not stat.S_ISDIR(opened.st_mode)
+        or _root_identity(opened) != _root_identity(expected)
     ):
-        directory_path = Path(directory)
+        os.close(root_fd)
+        raise ValueError("Telemetry source bag root changed while opening")
+    return root_fd
+
+
+def _verify_root_path_stable(bag: Path, expected: os.stat_result) -> None:
+    try:
+        current = bag.lstat()
+    except OSError as exc:
+        raise ValueError("Telemetry source bag root changed while hashing") from exc
+    if (
+        stat.S_ISLNK(current.st_mode)
+        or not stat.S_ISDIR(current.st_mode)
+        or _root_identity(current) != _root_identity(expected)
+    ):
+        raise ValueError("Telemetry source bag root changed while hashing")
+
+
+def _inventory(root_fd: int, bag: Path) -> dict[str, os.stat_result]:
+    inventory: dict[str, os.stat_result] = {}
+    for directory, directory_names, file_names, directory_fd in os.fwalk(
+        ".",
+        topdown=True,
+        follow_symlinks=False,
+        dir_fd=root_fd,
+    ):
         for name in list(directory_names):
-            child = directory_path / name
-            child_stat = child.lstat()
+            relative = _inventory_relative_path(directory, name)
+            child_stat = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
             if stat.S_ISLNK(child_stat.st_mode):
-                raise ValueError(f"Telemetry source bag contains symlink: {child}")
+                raise ValueError(
+                    f"Telemetry source bag contains symlink: {bag / relative}"
+                )
             if not stat.S_ISDIR(child_stat.st_mode):
                 raise ValueError(
-                    f"Telemetry source bag contains non-directory entry: {child}"
+                    "Telemetry source bag contains non-directory entry: "
+                    f"{bag / relative}"
                 )
         for name in file_names:
-            child = directory_path / name
-            child_stat = child.lstat()
+            relative = _inventory_relative_path(directory, name)
+            child_stat = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
             if stat.S_ISLNK(child_stat.st_mode):
-                raise ValueError(f"Telemetry source bag contains symlink: {child}")
+                raise ValueError(
+                    f"Telemetry source bag contains symlink: {bag / relative}"
+                )
             if not stat.S_ISREG(child_stat.st_mode):
                 raise ValueError(
-                    f"Telemetry source bag contains non-regular file: {child}"
+                    "Telemetry source bag contains non-regular file: "
+                    f"{bag / relative}"
                 )
-            relative = _normalise_relative_path(
-                child.relative_to(bag).as_posix()
-            )
             if relative in inventory:
                 raise ValueError(
                     "Telemetry source bag contains duplicate normalized paths"
                 )
             inventory[relative] = child_stat
     return inventory
+
+
+def _inventory_relative_path(directory: str, name: str) -> str:
+    raw_path = name if directory == "." else f"{directory.removeprefix('./')}/{name}"
+    return _normalise_relative_path(raw_path)
 
 
 def _inventory_identity(
@@ -276,13 +336,10 @@ def _stat_identity(
     )
 
 
-def _open_regular_file(bag: Path, relative_path: str) -> tuple[int, list[int]]:
+def _open_regular_file(root_fd: int, relative_path: str) -> tuple[int, list[int]]:
     parts = PurePosixPath(relative_path).parts
     directory_fds: list[int] = []
-    current_fd = os.open(
-        bag,
-        os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0),
-    )
+    current_fd = os.dup(root_fd)
     directory_fds.append(current_fd)
     try:
         for part in parts[:-1]:
@@ -323,9 +380,9 @@ def _hash_fd(file_fd: int, *, collect_bytes: bool) -> tuple[bytes | None, str]:
 
 
 def _stable_file_digest(
-    bag: Path, relative_path: str, *, collect_bytes: bool
+    root_fd: int, relative_path: str, *, collect_bytes: bool
 ) -> tuple[bytes | None, int, str]:
-    file_fd, directory_fds = _open_regular_file(bag, relative_path)
+    file_fd, directory_fds = _open_regular_file(root_fd, relative_path)
     try:
         before = os.fstat(file_fd)
         if not stat.S_ISREG(before.st_mode):

@@ -84,9 +84,11 @@ certificate chain, or cryptographic-authenticity claim.
 ## Timing boundary
 
 Qualification time and supervision time are independent. Each invocation first
-replaces any prior result with an atomic `starting` record and unique run ID.
-Prelaunch refusals and unexpected failures atomically replace that record;
-readers can require the expected run ID. Supervision begins
+invalidates any prior consumable result, then atomically writes a `starting`
+record with a unique run ID. An interruption during that initial write can leave
+no result at the public path, but cannot expose the prior result as current.
+Prelaunch refusals and unexpected failures atomically replace the starting
+record; readers can require the expected run ID. Supervision begins
 only after the dependent launches. A zero monitor duration launches and then
 immediately stops the dependent. With no monitor duration, supervision
 continues until telemetry failure or natural dependent exit. Result files are
