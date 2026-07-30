@@ -56,7 +56,7 @@
     "provenance_tampering": "focused suite passed",
     "remapping_spoof": "blocked with contract topic preserved",
     "sigkill_cleanup": "supported process tree cleaned",
-    "stale_result_reuse": "old success replaced by the current run ID and refusal",
+    "stale_result_reuse": "old success invalidated before the current starting write; initial-write SIGKILL leaves no stale public result",
     "threaded_outer_preexec": "removed; repeated DDS-active launches completed"
   },
   "evidence_scope": "One read-only physical-GO2 rosbag2 session. The bag is not distributed in this repository.",
@@ -72,12 +72,12 @@
   },
   "provenance": {
     "evidence_fingerprint": "051bf3bf2cb01bd6acf2227f96d9f1156aa1005a151dbb402da5826b634a16b0",
-    "incident_id": "inc_2026-04-06T18-13-40_f2ed4c28",
+    "incident_id": "inc_2026-04-06T18-13-40_eb8d6333",
     "source_event_reference": "events.jsonl#L2231",
     "trigger_id": "trg_c56eff95",
-    "trusted_rule_fingerprint": "88662b36f1eb8411cf886ce08b7a47e1176bf983dfee89a32e5eb044f44da675",
-    "validated_source_commit": "86753a224ee7ae1451ef76902ad53e2747658d22",
-    "validated_source_tree": "081f7852a8cc66a0620460ac4c73d15ea0ef485c",
+    "trusted_rule_fingerprint": "90a0d26ae432c176706f647d5ab7ea02d4a63d7bcf210fb8e2c75c1191eb7842",
+    "validated_source_commit": "ec6a9023824faeee4cc8c82131672e5c4a65b8c1",
+    "validated_source_tree": "92a3f02d308d5eb820069e3ba6e0addb8b3a4b53",
     "validated_worktree_clean": true
   },
   "qos_semantics": {
