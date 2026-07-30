@@ -108,8 +108,11 @@ topics over 329.601840622 seconds. `/utlidar/robot_pose` contained 6,177
 gap 0.070847572 seconds. No negative, frozen, or nonprogressing header deltas
 were observed.
 
-The bag is about 682 MB and is not distributed. Its combined identity SHA-256
-is `f6c15669dd5a1630578d4ab7931b24e93d22251b5bd08ba5b8cded1709e350c5`.
+The bag is about 682 MB and is not distributed. Its canonical
+bag-manifest-v2 SHA-256 is
+`449f0e8ddd8f1557f9f8a5604cdd60a3b3a33d3b9be764f93872fb52a62b2246`.
+The scrubbed public summary includes the metadata and two payload records with
+their individual sizes and SHA-256 values.
 The public repository contains only a curated summary and a generated fixture
 that is explicitly labeled as non-genuine.
 
@@ -168,10 +171,11 @@ matrix, 6/6 selected valid conditions were admitted and 7/7 selected invalid
 conditions were blocked. Three additional 15.1 Hz multi-phase jitter cases and
 the selected aggregate healthy-plus-stale publisher condition passed.
 
-The clean baseline regression completed with 653 passed tests and four
-optional-MCAP skips. Focused suites passed 16 ROS adversarial, 25 provenance,
-18 process-supervision, and 25 rate and clock boundary tests. A post-integration
-reproduction is required whenever the source commit changes.
+The post-remediation local regression completed with 686 passed tests and five
+optional dependency skips. Focused manifest, ROS adversarial, provenance,
+result-lifecycle, process-supervision, and rate-boundary suites are reported
+with the exact source commit in the scrubbed summary. A new genuine-data
+reproduction is required whenever protected source or tests change.
 
 ## 12. Limitations
 

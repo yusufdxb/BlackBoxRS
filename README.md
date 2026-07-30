@@ -149,9 +149,9 @@ selected invalid cases. Three additional 15.1 Hz multi-phase jitter cases
 passed. The repeated boundary experiment blocked 20/20 selected 14.9 Hz
 constant and 20/20 selected 14.9 Hz jitter cases, while admitting 20/20
 selected 15.0 Hz constant, 20/20 selected 15.1 Hz constant, and 20/20
-selected 15.1 Hz jitter cases. The clean baseline regression completed with
-653 passed and 4 optional-MCAP skips. The public fixture demo below is not a
-substitute for this genuine-bag result.
+selected 15.1 Hz jitter cases. The post-remediation local regression completed
+with 686 passed and 5 optional dependency skips. The public fixture demo below
+is not a substitute for this genuine-bag result.
 
 ### Public deterministic reproduction
 

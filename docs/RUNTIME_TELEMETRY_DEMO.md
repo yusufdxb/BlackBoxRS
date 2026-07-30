@@ -111,8 +111,9 @@ visible.
 The separate physical-GO2 session contains 94,325 messages over 329.601840622
 seconds. The `/utlidar/robot_pose` topic contributes 6,177
 `geometry_msgs/msg/PoseStamped` records, with mean rate 18.746780976988813 Hz
-and maximum healthy gap 0.070847572 seconds. Its combined identity SHA-256 is
-`f6c15669dd5a1630578d4ab7931b24e93d22251b5bd08ba5b8cded1709e350c5`.
+and maximum healthy gap 0.070847572 seconds. Its canonical bag-manifest-v2
+SHA-256 is
+`449f0e8ddd8f1557f9f8a5604cdd60a3b3a33d3b9be764f93872fb52a62b2246`.
 
 The bag is not committed because it is about 682 MB and comes from a private
 hardware evaluation session. The curated hashes and statistics are in

@@ -1,10 +1,41 @@
 {
   "bag": {
-    "combined_identity_sha256": "f6c15669dd5a1630578d4ab7931b24e93d22251b5bd08ba5b8cded1709e350c5",
+    "canonical_manifest_sha256": "449f0e8ddd8f1557f9f8a5604cdd60a3b3a33d3b9be764f93872fb52a62b2246",
+    "digest_schema": "blackboxrs-bag-manifest-v2",
     "duration_sec": 329.601840622,
+    "manifest": {
+      "metadata": {
+        "metadata_relationship": "rosbag2_bagfile_information",
+        "path": "metadata.yaml",
+        "role": "metadata",
+        "sha256": "ad8162351e448391bb0199936ac4d0d5a35d6dfaedacc985b05b51b1d87a160c",
+        "size": 4740,
+        "storage_identifier": "sqlite3"
+      },
+      "payloads": [
+        {
+          "metadata_relationship": "rosbag2_bagfile_information.relative_file_paths",
+          "path": "extended_5min_0.db3",
+          "role": "storage_payload",
+          "sha256": "ab5e367ad133e5b7b8389c3e99dafcb127abdf254c0699e79d94e4ed138406e1",
+          "size": 620826624,
+          "storage_identifier": "sqlite3"
+        },
+        {
+          "metadata_relationship": "rosbag2_bagfile_information.relative_file_paths",
+          "path": "extended_5min_1.db3",
+          "role": "storage_payload",
+          "sha256": "e2dc8c9cb83662eb0407c85179757758c344ec6a7b4f670ad7d82f35384e6d65",
+          "size": 61165568,
+          "storage_identifier": "sqlite3"
+        }
+      ],
+      "schema": "blackboxrs-bag-manifest-v2",
+      "storage_identifier": "sqlite3",
+      "total_size": 681996932
+    },
     "message_count": 94325,
     "metadata_sha256": "ad8162351e448391bb0199936ac4d0d5a35d6dfaedacc985b05b51b1d87a160c",
-    "payload_combined_sha256": "401e8a769172a5c341ad95ddfa1ddeda1b2e888e5dc36a0e60bec593f11ca674",
     "size_bytes": 681996932,
     "storage_backend": "sqlite3",
     "topic_count": 6
@@ -17,11 +48,16 @@
     "reason": "stale"
   },
   "critical_attack_results": {
-    "daemon_or_session_escape": "rejected within documented Linux process model",
-    "provenance_tampering": "25/25 focused tests passed",
+    "bag_split_file_collision": "rejected by canonical manifest-v2 layout validation",
+    "declared_context_label_mismatch": "blocked",
+    "deployment_or_dds_identity": "not attested; outside the declared-label guarantee",
+    "exact_type_and_compatible_qos": "enforced and tested separately",
+    "process_escape": "rejected within the documented Linux process model",
+    "provenance_tampering": "focused suite passed",
     "remapping_spoof": "blocked with contract topic preserved",
-    "runtime_context_mismatch": "blocked",
-    "sigkill_cleanup": "supported process tree cleaned"
+    "sigkill_cleanup": "supported process tree cleaned",
+    "stale_result_reuse": "old success replaced by the current run ID and refusal",
+    "threaded_outer_preexec": "removed; repeated DDS-active launches completed"
   },
   "evidence_scope": "One read-only physical-GO2 rosbag2 session. The bag is not distributed in this repository.",
   "pose_topic": {
@@ -35,12 +71,18 @@
     "type": "geometry_msgs/msg/PoseStamped"
   },
   "provenance": {
-    "evidence_fingerprint": "d3d6dfeaee5f649977587900bcf77f6fcb5f73f98c6d53ebd218d8490b58d8a8",
+    "evidence_fingerprint": "051bf3bf2cb01bd6acf2227f96d9f1156aa1005a151dbb402da5826b634a16b0",
     "incident_id": "inc_2026-04-06T18-13-40_f2ed4c28",
     "source_event_reference": "events.jsonl#L2231",
     "trigger_id": "trg_c56eff95",
-    "trusted_rule_fingerprint": "c616e9d0f4822718ea6fac71f47a3a997e31e36d4221d0c1e4f918b6f6c29cbd",
-    "validated_source_commit": "650b388a8e89cb72a5a4839091279eeb9d10560a"
+    "trusted_rule_fingerprint": "291dea673c4d17e5444f595b4545e383e379a2c576f44d84693258fcbde2b5b5",
+    "validated_source_commit": "e5f359006e809dc4b90bdd1a0788fb6f8e2eb203",
+    "validated_source_tree": "b9793cb9d2af5abc07a186184c5fd2fdea324701",
+    "validated_worktree_clean": true
+  },
+  "qos_semantics": {
+    "policy": "exact topic type and compatible QoS",
+    "publisher_semantics": "aggregate_topic"
   },
   "selected_case_counts": {
     "hardened_invalid": "7/7 selected cases blocked",
@@ -55,7 +97,9 @@
     "startup_grace_sec": 0.5
   },
   "validation_environment": {
-    "rmw": "Fast DDS",
+    "actual_environment_identity_attested": false,
+    "declared_context_label": "go2_utlidar_hardware_eval_20260406",
+    "rmw": "rmw_fastrtps_cpp",
     "ros_distro": "Humble",
     "scope": "bounded local Linux ROS 2 evaluation"
   }
