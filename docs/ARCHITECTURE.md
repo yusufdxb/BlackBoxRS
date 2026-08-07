@@ -19,7 +19,8 @@ The daemon supports two runtime roles (see *Runtime roles* below):
 
 The bundle format is identical between the two roles; observer-mode
 bundles carry both `observer_host` and `observed_host` fields so the
-two sides of the capture are never confused.
+two sides of the capture are never confused. Finalized bundles record
+the bundle format version in root `manifest.json`.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -105,7 +106,7 @@ two sides of the capture are never confused.
   through every registered detector. Anomaly events are republished to
   the bus; the engine skips events whose `source == "anomaly_engine"`
   to avoid feedback loops.
-- Four built-in detectors are always loaded. Additional user-supplied
+- Seven built-in detectors are always loaded. Additional user-supplied
   detectors can be registered via `anomaly_engine.custom_detectors` in
   `config.yaml`: each entry specifies a dotted import path to a
   `BaseDetector` subclass plus optional `params` kwargs. The loader
@@ -118,11 +119,14 @@ two sides of the capture are never confused.
 | `FrequencyDetector` | `ros.frequency` | `anomaly.frequency` (auto-learned baseline + tolerance floor) |
 | `DeadTopicDetector` | `ros.frequency` | `anomaly.dead_topic` (only fires when *another* event arrives, driven by the bus, not by an internal heartbeat) |
 | `QoSMismatchDetector` | `ros.qos` | `anomaly.qos_mismatch` (one event per topic with at least one incompatible pub × sub pair) |
+| `TfTopologyDetector` | `ros.tf` | `anomaly.tf_topology` |
+| `ClockSkewDetector` | `system.clock_skew` | `anomaly.clock_skew` |
+| `ProcessSignalsDetector` | `system.process_signals` | `anomaly.process_signals` |
 | Custom detectors | User-defined | User-defined (should use `anomaly.` prefix by convention) |
 
 ### `recording/`: Anomaly-triggered rosbag2 capture
 - `Rosbag2Recorder` subscribes to `channel="anomaly_engine"` and
-  reacts only to configured anomaly types (default: all four built-in
+  reacts only to configured anomaly types (default: all seven built-in
   anomaly event types, overrideable in config).
 - Starts `ros2 bag record` as a supervised subprocess in its own
   process group, stops it after `record_duration_sec`, and enforces a
@@ -147,6 +151,38 @@ two sides of the capture are never confused.
 - `LogReader` provides streaming time-range queries, tail, and source/
   severity filters. There is no separate index file, readers scan in
   order.
+
+### `incident/`: Bundle finalization and integrity
+- `IncidentBuilder` writes each new bundle into a sibling staging
+  directory named `.<incident_id>.staging.<suffix>`. Only after all files
+  are closed does it write root `manifest.json`, validate the bundle, and
+  publish the staging directory to the final incident path.
+- First publication uses same-directory `os.replace`, which is atomic on
+  normal POSIX filesystems. Rebuilding an existing deterministic incident
+  id cannot be a universal atomic non-empty directory swap; BlackBoxRS
+  validates the staging bundle first, moves the prior directory aside, and
+  restores it if the final publish step fails. Failed staging directories
+  are preserved for diagnosis.
+- `manifest.json` is the finalization marker. It records manifest schema
+  version, bundle format version, incident id, creation/finalization
+  timestamps, generator metadata, and a sorted file list with path,
+  required/optional classification, byte size, and SHA-256 checksum.
+  The manifest does not list or checksum itself.
+- Bundle validation returns a structured result with states:
+  `valid_finalized`, `legacy`, `incomplete`, `corrupted`, and
+  `unsupported_version`. Legacy bundles without `manifest.json` remain
+  readable for display with an integrity warning, but safety-relevant
+  operations such as prevention rule derivation require a finalized valid
+  manifest.
+- Unknown extra regular files do not invalidate a bundle; validation
+  reports them as warnings and ignores them for integrity. Symlinks are
+  never followed by integrity checks. A symlink listed in the manifest is
+  invalid.
+- `incident attach` refuses finalized bundles so operator attachments cannot
+  silently sit outside manifest coverage. Attachments must be present before
+  finalization, or the bundle remains explicitly legacy/unverified.
+- Checksums detect local incompleteness and accidental modification. They
+  are not digital signatures, authentication, or tamper-proof security.
 
 ### `cli/`: User interface
 - Built with `click`. The `BlackBoxDaemon` orchestrates every component

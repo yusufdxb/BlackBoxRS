@@ -37,3 +37,6 @@ Thumbs.db
 
 # BlackBoxRS logs
 .blackboxrs/logs/
+
+# Generated local benchmark output
+artifacts/

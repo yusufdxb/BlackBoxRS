@@ -29,6 +29,7 @@ With BlackBoxRS the daemon is already running, so the failure is already capture
 robot-blackbox incident build --since 5m
 # -> ~/.blackboxrs/incidents/inc_2026-05-07T14-22-00_a3f2/
 #    ├── report.md
+#    ├── manifest.json
 #    ├── incident.json
 #    ├── timeline.json
 #    ├── fingerprint.json
@@ -37,6 +38,14 @@ robot-blackbox incident build --since 5m
 ```
 
 You read `report.md`. The likely cause is named with a confidence score, and every claim in it links straight to the evidence file that backs it (`events.jsonl#L11`, `triggers.json#trg_df6aa081`). One command converts the incident into a `PreventionRule`, and `robot-blackbox preflight` fires that rule before the next launch.
+
+Before downstream use, the bundle can verify itself:
+
+```bash
+robot-blackbox incident verify ~/.blackboxrs/incidents/inc_*
+```
+
+New bundles are written through a staging directory and finalized with a root `manifest.json`. The manifest records bundle format version, producer metadata, required/optional file paths, byte sizes, and SHA-256 checksums. This detects incomplete or modified local artifacts. Finalized bundles are closed to late `incident attach` mutations. The manifest is not a signature, authentication system, or tamper-proof security mechanism.
 
 ---
 
@@ -211,7 +220,7 @@ params:
 severity_on_fail: block
 ```
 
-Read the whole thing without running anything:
+Read the whole committed report without running anything:
 
 ```bash
 robot-blackbox incident show examples/incidents/inc_demo_tf_break/
@@ -222,7 +231,7 @@ robot-blackbox incident show examples/incidents/inc_demo_tf_break/
 ## What works today
 
 - **Capture.** ROS 2 topic introspection and host telemetry feed seven anomaly detectors (`threshold`, `frequency`, `dead_topic`, `qos_mismatch`, `tf_topology`, `clock_skew`, `process_signals`), all with hysteresis (`min_consecutive_samples`, default 2) so a single noisy sample can't trip a false alarm. JSONL logging with size and age rotation; optional anomaly-triggered `rosbag2` recording. Measured FPR/TPR per detector is published in `docs/DETECTOR_CHARACTERISTICS.md`.
-- **Incident bundles.** `IncidentBuilder` slices the JSONL log into a typed bundle: events, triggers, signatures, timeline, fingerprint, report.
+- **Incident bundles.** `IncidentBuilder` slices the JSONL log into a typed bundle: events, triggers, signatures, timeline, fingerprint, report. New bundles are staged, validated, checksummed, and atomically published on first creation with a root `manifest.json`.
 - **Grounded reports.** Every claim in `report.md` resolves to a file in the bundle (`events.jsonl#Ln`, `triggers.json#<id>`). No orphan assertions.
 - **Deterministic signatures.** sha256 over ROS distro, RMW, an env subset, attached files, and OS / Python / driver state. Same inputs, same hash.
 - **Failure fingerprinting (v1).** A stable id from detector classes, subsystems, signature fields, and topic-set topology. Seed two bundles identically and they collide; perturb any input and the id moves.
@@ -230,14 +239,14 @@ robot-blackbox incident show examples/incidents/inc_demo_tf_break/
 - **Prevention.** `PreventionRule` + `PreflightCheck` YAML I/O and a `PreflightRunner` with 0/1/2 exit codes (pass / block / warn). Derived rules record the source incident, fingerprint, trigger id, detector class, and evidence ref that justified the rule. Rule derivation and adoption require a finalized, integrity-valid bundle. Active blocking rules fail closed when a check errors or cannot run. All seven check kinds are real: `topic_present`, `qos_match`, `node_running` are live rclpy graph queries; `env_var`, `param_value`, `resource_threshold`, `custom_python` run against `os.environ`, the ROS 2 parameter API, `psutil`, and a user-supplied import path. Unknown kinds raise at load time, never silently skip.
 - **Observer mode, end to end.** `tests/integration/test_observer_live.py` boots a real rclpy publisher and asserts an observer-role daemon fires `anomaly.dead_topic` over DDS within 5s of the publisher going quiet, inside the Docker Humble CI job.
 - **Offline bag replay.** `robot-blackbox replay-bag` replays recorded `.mcap` or `.db3` topic-arrival timing through the real `DeadTopicDetector`, entirely offline, with a virtual clock pinned to bag time. It reads `.db3` split files (the chunks `ros2 bag record` produces on a long session) by merging every file `metadata.yaml` lists, not just the first one, a bug that had been silently dropping ~9% of messages. A hardware-free integration test covers the public replay -> adopt -> preflight path for a structured dead-topic incident: the derived rule preserves incident, fingerprint, trigger, detector, and event provenance, blocks a matching missing-topic preflight, and passes a nearby healthy graph.
-- **CLI.** `robot-blackbox incident build / show / list / attach`, `preflight`, `prevention adopt --from-incident / list`, `replay-bag`.
-- **547 tests pass**, plus 2 gated skips on hosted runners (one rclpy-gated, one gated on a local real-hardware bag not present in CI). CI runs lint + unit + integration on Python 3.10 / 3.11 / 3.12, a benchmark regression gate, a detector-FPR smoke run, and a live ROS 2 Humble Docker job on every commit to `main`.
+- **CLI.** `robot-blackbox incident build / show / list / attach / verify / replay`, `preflight`, `prevention adopt --from-incident / list`, `replay-bag`.
+- **CI covers lint, unit, and integration tests** on Python 3.10 / 3.11 / 3.12, plus a benchmark regression gate, a detector-FPR smoke run, and a live ROS 2 Humble Docker job. ROS- and real-bag-dependent checks are gated when their runtime dependencies are absent.
 
 ## What's next
 
 - **Live onboard capture.** The committed real-hardware evidence is offline replay of a real GO2 bag. A bundle captured live, on the robot, during an actual field failure is the single largest remaining gap and the next thing to land.
 - **Cross-incident clustering.** `cluster_id` is already reserved on `FailureFingerprint`; targeted for v0.5.
-- **`incident pack` / `unpack`** for portable tarballs.
+- **`incident pack` / `unpack`** for portable tarballs built on top of manifest verification.
 
 Deliberately out of scope for now: a web dashboard and multi-host capture. Single-host first, and the bundle is the artifact. The bundle format is forward-compatible when multi-host arrives.
 

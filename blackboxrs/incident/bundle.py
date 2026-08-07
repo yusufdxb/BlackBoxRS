@@ -21,6 +21,14 @@ from .models import (
     TimelineEvent,
     VersionSignature,
 )
+from .integrity import (
+    BundleManifest,
+    BundleValidationResult,
+    build_manifest,
+    inspect_bundle_state,
+    validate_bundle,
+    write_manifest,
+)
 
 
 # Required files; absent → bundle is invalid.
@@ -32,6 +40,12 @@ _REQUIRED = (
     "signatures/config.json",
     "signatures/versions.json",
     "fingerprint.json",
+)
+
+_OPTIONAL = (
+    "evidence/triggers.json",
+    "evidence/snapshots.json",
+    "signatures/diff.json",
 )
 
 
@@ -129,6 +143,27 @@ class BundleWriter:
             if not text.endswith("\n"):
                 fh.write("\n")
 
+    def build_manifest(self, *, incident_id: str, created_at) -> BundleManifest:
+        """Build a manifest for the current on-disk bundle contents."""
+        return build_manifest(
+            self._dir,
+            incident_id=incident_id,
+            created_at=created_at,
+            required_files=_REQUIRED,
+        )
+
+    def write_manifest(self, manifest: BundleManifest) -> Path:
+        """Write manifest.json as the final marker."""
+        return write_manifest(self._dir, manifest)
+
+    def validate(self, *, require_finalized: bool = False) -> BundleValidationResult:
+        """Validate this bundle's layout and integrity."""
+        return validate_bundle(
+            self._dir,
+            required_files=_REQUIRED,
+            require_finalized=require_finalized,
+        )
+
     # -- introspection ---------------------------------------------------
 
     def required_files_present(self) -> list[str]:
@@ -150,11 +185,13 @@ class BundleReader:
         if not self._dir.is_dir():
             raise FileNotFoundError(f"Bundle directory not found: {self._dir}")
         if strict:
-            missing = [n for n in _REQUIRED if not (self._dir / n).exists()]
-            if missing:
-                raise ValueError(
-                    f"Bundle {self._dir} is missing required files: {missing}"
+            result = validate_bundle(self._dir, required_files=_REQUIRED)
+            if result.errors:
+                details = "; ".join(
+                    f"{issue.code}:{issue.path or '-'}:{issue.message}"
+                    for issue in result.errors
                 )
+                raise ValueError(f"Invalid bundle {self._dir}: {details}")
 
     @property
     def path(self) -> Path:
@@ -234,5 +271,34 @@ class BundleReader:
         with open(target, "r", encoding="utf-8") as fh:
             return IncidentDiff.model_validate_json(fh.read())
 
+    def validate(self, *, require_finalized: bool = False) -> BundleValidationResult:
+        """Validate bundle integrity and completeness."""
+        return validate_bundle(
+            self._dir,
+            required_files=_REQUIRED,
+            require_finalized=require_finalized,
+        )
 
-__all__ = ["BundleReader", "BundleWriter"]
+
+def validate_bundle_path(
+    bundle_dir: Path, *, require_finalized: bool = False
+) -> BundleValidationResult:
+    """Validate a bundle directory without constructing a reader."""
+    return validate_bundle(
+        Path(bundle_dir),
+        required_files=_REQUIRED,
+        require_finalized=require_finalized,
+    )
+
+
+def inspect_bundle_path(bundle_dir: Path) -> BundleValidationResult:
+    """Return a cheap bundle state summary without deep integrity checks."""
+    return inspect_bundle_state(Path(bundle_dir))
+
+
+__all__ = [
+    "BundleReader",
+    "BundleWriter",
+    "inspect_bundle_path",
+    "validate_bundle_path",
+]

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import shutil
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
@@ -223,7 +224,8 @@ class IncidentBuilder:
         severity = _severity_from(triggers, events)
         incident_id = _make_incident_id(window_start, sid, host)
         bundle_dir = self._incidents_dir / incident_id
-        writer = BundleWriter(bundle_dir)
+        staging_dir = self._staging_dir_for(incident_id)
+        writer = BundleWriter(staging_dir)
 
         # Diff against the most recent prior bundle on this host (if any).
         # We compute this BEFORE ranking causes so the precursor-aware
@@ -301,11 +303,64 @@ class IncidentBuilder:
         # Render report from the disk view to keep it consistent with what
         # `incident show` will load later. Strict=False because report.md
         # itself does not exist yet at this point in the build pipeline.
-        report_text = report_mod.render(BundleReader(bundle_dir, strict=False))
+        report_text = report_mod.render(BundleReader(staging_dir, strict=False))
         writer.write_report(report_text)
 
+        manifest = writer.build_manifest(
+            incident_id=incident.incident_id,
+            created_at=incident.created_at,
+        )
+        writer.write_manifest(manifest)
+        result = writer.validate(require_finalized=True)
+        if result.errors:
+            details = "; ".join(
+                f"{issue.code}:{issue.path or '-'}:{issue.message}"
+                for issue in result.errors
+            )
+            raise RuntimeError(
+                f"Incident bundle finalization failed; staging preserved at "
+                f"{staging_dir}: {details}"
+            )
+
+        self._publish_staging(staging_dir, bundle_dir)
         logger.info("Built incident %s at %s", incident_id, bundle_dir)
         return bundle_dir
+
+    def _staging_dir_for(self, incident_id: str) -> Path:
+        suffix = hashlib.sha256(
+            f"{incident_id}|{datetime.now(timezone.utc).isoformat()}|{os.getpid()}".encode(
+                "utf-8"
+            )
+        ).hexdigest()[:8]
+        return self._incidents_dir / f".{incident_id}.staging.{suffix}"
+
+    def _publish_staging(self, staging_dir: Path, bundle_dir: Path) -> None:
+        """Publish a validated staging directory.
+
+        First publication uses ``os.replace`` on the same parent directory.
+        Rebuilding an existing deterministic incident id falls back to
+        moving the old directory aside before publishing the new one. This is
+        not an atomic non-empty directory swap on POSIX, but the old completed
+        bundle is restored if the final publish step fails.
+        """
+        if not bundle_dir.exists():
+            os.replace(staging_dir, bundle_dir)
+            return
+
+        backup_dir = bundle_dir.with_name(f".{bundle_dir.name}.replacing.{os.getpid()}")
+        while backup_dir.exists():
+            backup_dir = backup_dir.with_name(f"{backup_dir.name}.retry")
+        os.replace(bundle_dir, backup_dir)
+        try:
+            os.replace(staging_dir, bundle_dir)
+        except Exception:
+            if not bundle_dir.exists() and backup_dir.exists():
+                os.replace(backup_dir, bundle_dir)
+            raise
+        try:
+            shutil.rmtree(backup_dir)
+        except OSError:
+            logger.warning("Could not remove replaced incident backup %s", backup_dir)
 
     # -- diff baseline lookup --------------------------------------------
 

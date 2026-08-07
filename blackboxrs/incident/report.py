@@ -17,6 +17,10 @@ from .models import (
     LikelyCauseHypothesis,
     TimelineEvent,
 )
+from blackboxrs.prevention.derivation import (
+    PreventionDerivationError,
+    derive_rule_from_incident,
+)
 
 
 _TIMELINE_ROW_LIMIT = 50
@@ -329,7 +333,7 @@ def _recommended_rule_section(
         return ""
     return (
         _section("Recommended preflight rule")
-        + "Adopt with `robot-blackbox prevention adopt --from-incident <id>`.\n\n"
+        + "Adopt with `robot-blackbox prevention adopt --from-incident <bundle-dir>`.\n\n"
         "```yaml\n"
         + yaml_block.rstrip()
         + "\n```\n"
@@ -340,37 +344,44 @@ def _yaml_for_top_cause(
     top: LikelyCauseHypothesis, triggers: list[DetectorTrigger]
 ) -> str | None:
     """Map a top hypothesis to a concrete preflight YAML when possible."""
-    cause_lower = top.cause.lower()
-    if "qos mismatch" in cause_lower:
-        topic = _trigger_subject(triggers, "QoSMismatchDetector") or "<topic>"
-        return (
-            f"check: qos_match\n"
-            f"params:\n"
-            f"  topic: {topic!r}\n"
-            f"severity_on_fail: block\n"
-            f"rationale: |\n"
-            f"  Generated from incident: {top.cause}\n"
-        )
-    if "stopped emitting" in cause_lower:
-        topic = _trigger_subject(triggers, "DeadTopicDetector") or "<topic>"
-        return (
-            f"check: topic_present\n"
-            f"params:\n"
-            f"  topic: {topic!r}\n"
-            f"  min_publishers: 1\n"
-            f"severity_on_fail: block\n"
-            f"rationale: |\n"
-            f"  Generated from incident: {top.cause}\n"
-        )
+    incident = _minimal_incident_for_rule_render(top)
+    try:
+        derivation = derive_rule_from_incident(incident, triggers)
+    except PreventionDerivationError:
+        return None
+    check = derivation.rule.check
+    lines = [
+        f"check: {check.kind}",
+        "params:",
+    ]
+    for key, value in check.params.items():
+        lines.append(f"  {key}: {value!r}")
+    lines.extend([
+        f"severity_on_fail: {check.severity_on_fail}",
+        "rationale: |",
+        f"  Generated from incident evidence: {top.cause}",
+    ])
+    return "\n".join(lines) + "\n"
     return None
 
 
-def _trigger_subject(triggers: list[DetectorTrigger], cls: str) -> str | None:
-    for t in triggers:
-        short = t.detector_class.rsplit(".", 1)[-1]
-        if short == cls:
-            return t.subject
-    return None
+def _minimal_incident_for_rule_render(top: LikelyCauseHypothesis):
+    """Build the small Incident surface derivation needs for report YAML."""
+    from datetime import datetime, timezone
+
+    from .models import Incident
+
+    now = datetime.now(timezone.utc)
+    return Incident(
+        incident_id="inc_report_preview",
+        created_at=now,
+        window_start=now,
+        window_end=now,
+        session_id="report_preview",
+        title="report preview",
+        bundle_path=".",
+        likely_causes=[top],
+    )
 
 
 def _attachments_section(reader: BundleReader) -> str:

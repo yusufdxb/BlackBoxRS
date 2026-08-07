@@ -33,6 +33,7 @@ from blackboxrs.cli.incident_cmd import (
     preflight_cmd,
     prevention_group,
 )
+from blackboxrs.cli.benchmark_cmd import benchmark_group
 from blackboxrs.logging.reader import LogReader
 
 # Glob pattern used by the writer.  Keeping it in one place so the
@@ -56,6 +57,7 @@ def cli() -> None:
 cli.add_command(incident_group)
 cli.add_command(preflight_cmd)
 cli.add_command(prevention_group)
+cli.add_command(benchmark_group)
 
 
 # ---------------------------------------------------------------------------
