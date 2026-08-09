@@ -40,3 +40,7 @@ Thumbs.db
 
 # Generated local benchmark output
 artifacts/
+
+# colcon workspace output (native capture packages)
+log/
+install/

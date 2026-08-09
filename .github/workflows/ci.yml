@@ -114,3 +114,284 @@ jobs:
             python3 -m pytest -q \
               tests/integration/test_ros_live.py \
               tests/integration/test_observer_live.py
+
+  native-build:
+    name: Native build + GoogleTest (${{ matrix.compiler }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    container: ros:humble-ros-base
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: GCC
+            cc: gcc
+            cxx: g++
+          - compiler: Clang
+            cc: clang
+            cxx: clang++
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+
+      - name: Install native build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            clang \
+            python3-colcon-common-extensions \
+            ros-humble-ament-cmake-gtest \
+            ros-humble-ament-lint-auto \
+            ros-humble-ament-lint-common \
+            ros-humble-mcap-vendor \
+            ros-humble-rclcpp-components \
+            ros-humble-std-msgs
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Build native packages
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          . /opt/ros/humble/setup.sh
+          colcon build \
+            --packages-up-to blackbox_capture_cpp blackbox_capture_bench \
+            --event-handlers console_direct+ \
+            --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+
+      - name: Run native tests
+        run: |
+          . /opt/ros/humble/setup.sh
+          . install/setup.sh
+          colcon test \
+            --packages-select blackbox_capture_cpp blackbox_capture_bench \
+            --event-handlers console_direct+
+          colcon test-result --verbose
+
+  native-sanitizers:
+    name: Native ${{ matrix.sanitizer }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    container: ros:humble-ros-base
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sanitizer: ASan
+            cmake_option: BLACKBOX_CAPTURE_ENABLE_ASAN
+          - sanitizer: UBSan
+            cmake_option: BLACKBOX_CAPTURE_ENABLE_UBSAN
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+
+      - name: Install sanitizer dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            python3-colcon-common-extensions \
+            ros-humble-ament-cmake-gtest \
+            ros-humble-ament-lint-auto \
+            ros-humble-ament-lint-common \
+            ros-humble-mcap-vendor \
+            ros-humble-rclcpp-components \
+            ros-humble-std-msgs
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Build instrumented native tests
+        run: |
+          . /opt/ros/humble/setup.sh
+          colcon build \
+            --packages-select blackbox_capture_cpp \
+            --event-handlers console_direct+ \
+            --cmake-args \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DBUILD_TESTING=ON \
+              -D${{ matrix.cmake_option }}=ON
+
+      - name: Run instrumented native tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          . /opt/ros/humble/setup.sh
+          . install/setup.sh
+          colcon test \
+            --packages-select blackbox_capture_cpp \
+            --event-handlers console_direct+
+          colcon test-result --verbose
+
+  native-format:
+    name: Native formatting
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    container: ros:humble-ros-base
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+
+      - name: Install formatter
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ros-humble-ament-uncrustify
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Check native formatting
+        run: |
+          . /opt/ros/humble/setup.sh
+          ament_uncrustify src/blackbox_capture_cpp src/blackbox_capture_bench
+
+  native-integration:
+    name: Native ROS + Python interoperability + benchmark smoke
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    container: ros:humble-ros-base
+    env:
+      ROS_LOCALHOST_ONLY: "1"
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+
+      - name: Install integration dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            python3-colcon-common-extensions \
+            python3-pip \
+            ros-humble-ament-cmake-gtest \
+            ros-humble-ament-lint-auto \
+            ros-humble-ament-lint-common \
+            ros-humble-mcap-vendor \
+            ros-humble-rclcpp-components \
+            ros-humble-std-msgs
+          rm -rf /var/lib/apt/lists/*
+          python3 -m pip install --no-cache-dir --upgrade pip
+          python3 -m pip install --no-cache-dir -e ".[dev,replay]"
+          python3 -m pip install --no-cache-dir "jsonschema>=4.0"
+
+      - name: Build native packages
+        run: |
+          . /opt/ros/humble/setup.sh
+          colcon build \
+            --packages-up-to blackbox_capture_cpp blackbox_capture_bench \
+            --event-handlers console_direct+ \
+            --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+
+      - name: Run native Python reader tests
+        run: |
+          . /opt/ros/humble/setup.sh
+          . install/setup.sh
+          python3 -m pytest -q -k native_capture
+
+      - name: Run live native benchmark smoke
+        run: |
+          . /opt/ros/humble/setup.sh
+          . install/setup.sh
+          python3 scripts/native_capture_benchmark.py \
+            --scenario custom \
+            --topics 2 \
+            --rate 200 \
+            --payload-bytes 256 \
+            --duration-sec 3 \
+            --discovery-warmup-sec 1 \
+            --output artifacts/native_capture_smoke.json
+
+      - name: Validate smoke artifact contract
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import validate
+
+          result = json.loads(Path("artifacts/native_capture_smoke.json").read_text())
+          schema = json.loads(Path("scripts/native_capture_benchmark.schema.json").read_text())
+          validate(result, schema)
+          assert result["schema_version"] == "blackboxrs.capture_benchmark.v1"
+          assert result["validity"]["valid"], result["validity"]["errors"]
+          assert result["counters"]["sent"] > 0
+          assert result["counters"]["received"] is not None
+          assert result["counters"]["committed"] is not None
+          assert result["counters"]["serialized_committed"] > 0
+          assert result["counters"]["dropped"] is not None
+          assert result["counters"]["received"] == (
+              result["counters"]["committed"] + result["counters"]["dropped"]
+          )
+          assert result["capture_quality"]["clean"] is True
+          assert result["lifecycle"]["final_status_state"] == "STOPPED_CLEAN"
+          assert result["lifecycle"]["forced_shutdown"] is False
+          PY
+
+      - name: Run shortened long-run tooling smoke
+        run: |
+          . /opt/ros/humble/setup.sh
+          . install/setup.sh
+          python3 scripts/native_capture_long_run.py \
+            --allow-short \
+            --duration-sec 3 \
+            --post-warmup-sec 1 \
+            --topics 2 \
+            --rate 200 \
+            --payload-bytes 256 \
+            --output artifacts/native_capture_long_run_smoke.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import validate
+
+          result = json.loads(Path("artifacts/native_capture_long_run_smoke.json").read_text())
+          schema = json.loads(Path("scripts/native_capture_long_run.schema.json").read_text())
+          validate(result, schema)
+          assert result["schema_version"] == "blackboxrs.capture_long_run.v1"
+          assert result["benchmark"]["validity"]["valid"]
+          assert result["benchmark"]["lifecycle"]["final_status_state"] == "STOPPED_CLEAN"
+          assert result["stability"]["trend"] == "inconclusive"
+          assert result["stability"]["sample_count"] > 0
+          PY
+
+      - name: Run deterministic storage-fault smoke
+        run: |
+          . /opt/ros/humble/setup.sh
+          . install/setup.sh
+          python3 scripts/native_capture_benchmark.py \
+            --scenario custom \
+            --topics 1 \
+            --rate 200 \
+            --payload-bytes 256 \
+            --duration-sec 1 \
+            --discovery-warmup-sec 1 \
+            --fail-after-bytes 4096 \
+            --expect-storage-fault \
+            --output artifacts/native_capture_storage_fault_smoke.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import validate
+
+          result = json.loads(
+              Path("artifacts/native_capture_storage_fault_smoke.json").read_text()
+          )
+          schema = json.loads(Path("scripts/native_capture_benchmark.schema.json").read_text())
+          validate(result, schema)
+          assert result["validity"]["valid"], result["validity"]["errors"]
+          assert result["storage"]["errors"] > 0
+          assert result["lifecycle"]["final_status_state"] != "STOPPED_CLEAN"
+          assert result["counters"]["durable"] is None
+          assert result["storage"]["partial_segments"] > 0 or result["storage"]["segments"] > 0
+          PY
+
+      - name: Upload native benchmark smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-capture-smoke
+          path: |
+            artifacts/native_capture_smoke.json
+            artifacts/native_capture_long_run_smoke.json
+            artifacts/native_capture_storage_fault_smoke.json

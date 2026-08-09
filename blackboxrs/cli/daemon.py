@@ -147,9 +147,7 @@ class BlackBoxDaemon:
                 self._session.hostname,
                 self._config.runtime.observed_host or "<unspecified>",
             )
-        self._event_bus = EventBus(
-            default_queue_maxsize=self._config.event_bus_queue_maxsize
-        )
+        self._event_bus = EventBus(default_queue_maxsize=self._config.event_bus_queue_maxsize)
         self._components: list[_Component] = []
         self._running = False
         self._stop_event = Event()
@@ -188,6 +186,14 @@ class BlackBoxDaemon:
 
         self._running = True
         self._stop_event.clear()
+
+        # Native capture is opt-in. Python monitoring and incident reasoning
+        # remain active because they are the intelligence plane.
+        if self._config.capture.backend == "cpp":
+            from blackboxrs.recording import NativeCaptureProcess  # noqa: E402
+
+            native_capture = NativeCaptureProcess(self._config.capture, self._config.runtime)
+            self._register(native_capture)
 
         # --- Logging pipeline (always enabled) ----------------------------
         from blackboxrs.logging import LoggingPipeline  # noqa: E402

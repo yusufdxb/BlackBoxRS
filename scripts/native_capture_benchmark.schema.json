@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blackboxrs.dev/schema/native_capture_benchmark.v1.json",
+  "title": "BlackBoxRS native capture benchmark",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "git_sha",
+    "machine",
+    "build",
+    "scenario",
+    "capture_backend",
+    "capture_quality",
+    "validity",
+    "counters",
+    "latency_us",
+    "resources",
+    "queue",
+    "storage",
+    "lifecycle",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": "blackboxrs.capture_benchmark.v1"},
+    "generated_at": {"type": "string"},
+    "git_sha": {"type": ["string", "null"]},
+    "git_dirty": {"type": ["boolean", "null"]},
+    "machine": {"type": "object"},
+    "build": {"type": "object"},
+    "scenario": {
+      "type": "object",
+      "required": ["name", "run_id", "topics", "aggregate_rate_hz", "payload_bytes", "duration_sec", "qos"],
+      "properties": {
+        "name": {"type": "string"},
+        "run_id": {"type": "string"},
+        "topics": {"type": "integer", "minimum": 1},
+        "aggregate_rate_hz": {"type": "number", "exclusiveMinimum": 0},
+        "payload_bytes": {"type": "integer", "minimum": 1},
+        "duration_sec": {"type": "number", "exclusiveMinimum": 0},
+        "qos": {"enum": ["best_effort", "reliable"]}
+      }
+    },
+    "capture_backend": {"const": "cpp"},
+    "capture_quality": {"type": ["object", "null"]},
+    "validity": {
+      "type": "object",
+      "required": ["valid", "errors", "warnings"],
+      "properties": {
+        "valid": {"type": "boolean"},
+        "errors": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "counters": {
+      "type": "object",
+      "required": ["sent", "received", "admitted", "committed", "durable", "dropped", "dropped_bytes"],
+      "additionalProperties": {"type": ["integer", "number", "null"], "minimum": 0}
+    },
+    "drop_breakdown": {"type": ["object", "array", "null"]},
+    "latency_us": {"type": "object"},
+    "resources": {"type": "object"},
+    "queue": {"type": "object"},
+    "storage": {"type": "object"},
+    "lifecycle": {"type": "object"},
+    "recovery": {"type": ["object", "array", "string", "boolean", "null"]},
+    "provenance": {"type": "object"},
+    "resource_samples": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false
+}

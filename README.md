@@ -14,6 +14,64 @@ The bundle is the artifact. Everything else is plumbing.
 
 ---
 
+## Bounded native capture plane
+
+BlackBoxRS separates high-rate evidence capture from incident intelligence. A
+bounded C++ ROS 2 recorder owns the ingestion hot path; Python owns incident
+construction, causal ranking, replay, reporting, and prevention.
+
+```mermaid
+flowchart LR
+    ROS[ROS 2 and DDS] --> CPP[blackbox_capture_cpp<br/>bounded serialized capture]
+    CPP --> MCAP[versioned MCAP segments<br/>quality metadata]
+    MCAP --> PY[BlackBoxRS Python<br/>reason, report, prevent]
+```
+
+The `rclcpp` component captures configured topics through generic serialized
+subscriptions, records steady and ROS clocks, orders graph and trigger events in
+the same chronology, and writes through a fixed-capacity descriptor ring and
+fixed-block payload arena. The capture-owned allocation estimate must fit the
+configured memory ceiling before startup. Low-priority traffic is shed at the
+configured watermark, every post-callback recorder drop is counted by topic and
+reason, and upstream delivery limitations explicitly make evidence incomplete.
+
+Continuous history is bounded by bytes and segment count. A native trigger closes
+the post-trigger window and publishes a versioned incident manifest with the
+actual retained interval. Python reads that evidence through
+`NativeCaptureReader`; it does not reimplement MCAP details or move semantic
+incident logic into C++.
+
+The existing Python capture backend remains the default:
+
+```yaml
+capture:
+  backend: python
+```
+
+Native capture is opt-in while the promotion gates are evaluated. See
+[native capture architecture](docs/native_capture_architecture.md),
+[format contract](docs/native_capture_format.md), and
+[promotion gate](docs/native_capture_promotion_gate.md). The repository includes
+a configurable ROS 2 load generator and machine-readable benchmark supervisor,
+but this README makes no performance claim without retained benchmark artifacts.
+
+After building and sourcing the ROS workspace, the daemon owns the native process
+when configured with:
+
+```yaml
+capture:
+  backend: cpp
+  topics: [/imu/data, /joint_states, /cmd_vel, /tf, /tf_static]
+  native_output_dir: ~/.blackboxrs/native
+```
+
+The recorder publishes a READY session pointer, the daemon supervises clean
+shutdown, and incident bundles copy selected MCAP evidence into attachments. The
+output root is capped across restarts by native storage parameters. Python remains
+active for semantic detectors and incident intelligence.
+
+---
+
 ## The problem, concretely
 
 A ROS 2 robot fails on a field test. Today that costs you:
@@ -230,7 +288,7 @@ robot-blackbox incident show examples/incidents/inc_demo_tf_break/
 
 ## What works today
 
-- **Capture.** ROS 2 topic introspection and host telemetry feed seven anomaly detectors (`threshold`, `frequency`, `dead_topic`, `qos_mismatch`, `tf_topology`, `clock_skew`, `process_signals`), all with hysteresis (`min_consecutive_samples`, default 2) so a single noisy sample can't trip a false alarm. JSONL logging with size and age rotation; optional anomaly-triggered `rosbag2` recording. Measured FPR/TPR per detector is published in `docs/DETECTOR_CHARACTERISTICS.md`.
+- **Capture.** The compatibility Python backend keeps ROS 2 topic introspection, JSONL rotation, host telemetry, and optional anomaly-triggered `rosbag2` recording. The opt-in `blackbox_capture_cpp` backend adds bounded generic serialized ingestion, graph chronology, dual clocks, explicit loss accounting, rolling MCAP retention, and pre/post-trigger manifests. Both feed the same Python incident intelligence. The seven semantic detectors remain `threshold`, `frequency`, `dead_topic`, `qos_mismatch`, `tf_topology`, `clock_skew`, and `process_signals`. Measured detector FPR/TPR is published in `docs/DETECTOR_CHARACTERISTICS.md`.
 - **Incident bundles.** `IncidentBuilder` slices the JSONL log into a typed bundle: events, triggers, signatures, timeline, fingerprint, report. New bundles are staged, validated, checksummed, and atomically published on first creation with a root `manifest.json`.
 - **Grounded reports.** Every claim in `report.md` resolves to a file in the bundle (`events.jsonl#Ln`, `triggers.json#<id>`). No orphan assertions.
 - **Deterministic signatures.** sha256 over ROS distro, RMW, an env subset, attached files, and OS / Python / driver state. Same inputs, same hash.

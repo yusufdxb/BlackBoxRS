@@ -1,0 +1,58 @@
+/blackbox/blackbox_capture:
+  ros__parameters:
+    runtime.role: onboard
+    runtime.observed_host: ""
+
+    capture.topics:
+      - /imu/data
+      - /joint_states
+      - /cmd_vel
+      - /tf
+      - /tf_static
+    capture.discover_all: false
+    capture.exclude_topics:
+      - /rosout
+      - /parameter_events
+      - /blackbox/capture_status
+    capture.high_priority_topics:
+      - /tf_static
+    capture.discovery_period_ms: 100
+    capture.max_topics: 1024
+    capture.max_graph_nodes: 2048
+    capture.topic_string_bytes: 262144
+    capture.max_payload_bytes: 4194304
+    capture.subscription_depth: 1000
+
+    buffer.event_capacity: 16384
+    buffer.control_reserve: 256
+    buffer.payload_block_size: 4096
+    buffer.payload_block_count: 16384
+    buffer.memory_budget_bytes: 134217728
+    buffer.high_watermark_ratio: 0.8
+
+    storage.output_directory: ~/.blackboxrs/native
+    storage.segment_max_bytes: 268435456
+    storage.segment_max_events: 1000000
+    storage.segment_max_duration_sec: 5.0
+    storage.chunk_size_bytes: 1048576
+    storage.retention_max_bytes: 2147483648
+    storage.retention_max_segments: 256
+    storage.max_incidents: 20
+    # Root quota reserves the worst-case rolling plus incident footprint for
+    # the new session, then prunes oldest capture_* directories at startup.
+    storage.total_max_bytes: 53687091200
+    storage.max_sessions: 10
+    storage.flush_period_ms: 250
+    storage.failure_injection_delay_ms: 0
+    storage.failure_injection_fail_after_bytes: -1
+
+    trigger.dead_topic_timeout_sec: 2.0
+    trigger.clock_forward_jump_sec: 1.0
+    trigger.clock_backward_jump_sec: 0.001
+    trigger.rate_window_sec: 5.0
+    trigger.rate_deviation_ratio: 0.5
+    buffer.history_seconds: 30.0
+    buffer.post_trigger_seconds: 10.0
+
+    status.publish_period_ms: 1000
+    shutdown.drain_timeout_ms: 5000
