@@ -38,6 +38,7 @@ jobs:
 
       - name: Lint (ruff)
         run: |
+          ruff --version
           python -m ruff check
 
       - name: Unit + integration tests
