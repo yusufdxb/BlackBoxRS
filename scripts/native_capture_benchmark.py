@@ -896,9 +896,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         _first_number(capture_quality, ("retention_evicted_bytes",)),
         _first_number(status, ("retention_evicted_bytes",)),
     )
-    serialized_committed = serialized_retained if retention_evicted_segments == 0 else None
+    serialized_session_reconstructable = (
+        retention_evicted_segments == 0 and not partial_segments
+    )
+    serialized_committed = (
+        serialized_retained if serialized_session_reconstructable else None
+    )
     serialized_committed_bytes = (
-        serialized_retained_bytes if retention_evicted_segments == 0 else None
+        serialized_retained_bytes if serialized_session_reconstructable else None
     )
     if isinstance(retention_evicted_segments, (int, float)) and retention_evicted_segments > 0:
         warnings.append(
@@ -990,9 +995,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             )
     else:
         warnings.append(
-            "serialized publisher-to-recorder delivery could not be reconciled because the "
-            "capture workload was external, rolling retention evicted records, or drop details "
-            "were unavailable"
+            "serialized publisher-to-recorder delivery could not be reconciled; one or more "
+            "conditions applied: external workload, rolling retention, a partial segment, or "
+            "unavailable drop details"
         )
 
     queue_capacity = _first_number(status, ("queue_capacity",), ("queue", "capacity"))
