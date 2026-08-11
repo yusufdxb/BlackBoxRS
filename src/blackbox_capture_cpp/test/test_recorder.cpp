@@ -40,6 +40,7 @@
 #include <thread>
 #include <vector>
 
+#include "blackbox_capture/event.hpp"
 #include "blackbox_capture/recorder.hpp"
 #include "mcap/reader.hpp"
 #include "rcutils/logging.h"
@@ -388,24 +389,37 @@ TEST_F(RecorderNodeTest, CallbackBeginningAfterStopIsSequencedAndAccounted)
   publisher->publish(message);
 
   std::string after;
+  const std::string cutoff_drop =
+    "\"topic\":\"/cutoff_test\",\"reason\":" +
+    std::to_string(static_cast<uint16_t>(DropReason::kShutdownCutoff)) +
+    ",\"count\":1";
   const auto callback_deadline = std::chrono::steady_clock::now() + 2s;
   do {
     executor.spin_some();
     after = recorder->status_json();
-    if (json_uint(after, "dropped") > dropped_before) {
+    if (after.find(cutoff_drop) != std::string::npos) {
       break;
     }
     std::this_thread::sleep_for(10ms);
   } while (std::chrono::steady_clock::now() < callback_deadline);
 
-  EXPECT_EQ(json_uint(after, "received"), received_before + 1U);
-  EXPECT_EQ(json_uint(after, "dropped"), dropped_before + 1U);
-  EXPECT_EQ(json_uint(after, "last_sequence"), sequence_before + 1U);
-  EXPECT_NE(after.find("\"reason\":6,\"count\":1"), std::string::npos);
+  ASSERT_NE(after.find(cutoff_drop), std::string::npos);
+  EXPECT_GE(json_uint(after, "received"), received_before + 1U);
+  EXPECT_GE(json_uint(after, "dropped"), dropped_before + 1U);
+  EXPECT_GE(json_uint(after, "last_sequence"), sequence_before + 1U);
+  EXPECT_EQ(json_uint(after, "last_sequence"), json_uint(after, "received"));
 
   executor.remove_node(recorder);
   executor.remove_node(publisher_node);
-  EXPECT_TRUE(recorder->drain_and_stop(2s));
+  ASSERT_TRUE(recorder->drain_and_stop(2s));
+  const std::string final_status = recorder->status_json();
+  EXPECT_NE(final_status.find(cutoff_drop), std::string::npos);
+  EXPECT_EQ(json_uint(final_status, "last_sequence"), json_uint(final_status, "received"));
+  EXPECT_EQ(
+    json_uint(final_status, "received"),
+    json_uint(final_status, "admitted") + json_uint(final_status, "dropped"));
+  EXPECT_EQ(json_uint(final_status, "committed"), json_uint(final_status, "admitted"));
+  EXPECT_EQ(json_uint(final_status, "durable"), json_uint(final_status, "committed"));
 }
 
 TEST_F(RecorderNodeTest, PeriodicRateStatusReportsExactCallbackCountsOffTheIngestThread)
