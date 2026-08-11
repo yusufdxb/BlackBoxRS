@@ -12,7 +12,8 @@ interpreter saw `rclpy`.  This container removes that ambiguity:
 everything the daemon and bounded C++ recorder need is inside the image,
 built on top of the official `ros:humble-ros-base`. The native package is
 compiled in a separate build stage, so the runtime image does not include a
-compiler or the native test toolchain.
+native source tree, build tree, or package test artifacts. The upstream
+`ros:humble-ros-base` image itself may include general build utilities.
 
 The image includes `ros2 bag`, SQLite and MCAP storage plugins, Fast DDS,
 Cyclone DDS, and type support for `std_msgs`, `geometry_msgs`, `nav_msgs`,

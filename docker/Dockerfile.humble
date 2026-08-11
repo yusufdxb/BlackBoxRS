@@ -20,7 +20,7 @@
 #       -e ROS_DOMAIN_ID=42 \
 #       --entrypoint bash blackboxrs:humble
 #
-# The runtime image contains no compiler or native test toolchain.
+# The native source, build tree, and package test artifacts stay in the build stage.
 
 FROM ros:humble-ros-base AS native-builder
 
