@@ -23,7 +23,7 @@ flowchart TD
     MCAP --> READER[Python NativeCaptureReader]
     READER --> INTEL[Incidents, timelines, causes, fingerprints, reports, prevention]
     CAP --> STATUS[/blackbox/capture_status]
-    CAP --> RATE[Bounded RATE_STATUS batches]
+    CAP --> RATE[Private rate-status FIFO]
     RATE --> BRIDGE[Python low-rate event bridge]
     BRIDGE --> INTEL
 ```
@@ -37,8 +37,8 @@ The package and executable contracts are:
   when `BLACKBOX_CAPTURE_ENABLE_EXPERIMENTAL_COMPOSITION=ON`
 - status topic: `/blackbox/capture_status`, `std_msgs/msg/String`, JSON schema
   `blackboxrs.capture_status.v1`
-- supervised rate stream: bounded `RATE_STATUS` stdout batches, JSON schema
-  `blackboxrs.capture_rate_status.v1`
+- supervised rate stream: bounded `RATE_STATUS` batches over a private mode-0600
+  FIFO, JSON schema `blackboxrs.capture_rate_status.v1`
 - benchmark package and executable: `blackbox_capture_bench publisher`
 
 Standalone execution is the deployment default. The component entry point makes
@@ -161,18 +161,36 @@ classifying ordinary simulated-clock ticks as jumps.
 When the C++ capture scope covers every topic requested by the ROS monitor, the
 recorder also owns live frequency observation. The ingest callback increments a
 preallocated per-topic atomic only. A dedicated native summary thread samples
-those counters at a configured period and emits `RATE_STATUS` lines in batches
-of at most 64 topics, below the supervisor's fixed line limit. Zero-arrival
-topics are omitted so a summary cannot falsely refresh dead-topic liveness.
+those counters at a configured period and emits `RATE_STATUS` frames in batches
+of at most 64 topics, below the supervisor's fixed line limit. Every window emits
+a complete frame, including an empty `topics` array when no messages arrive.
+The empty frame is a bridge heartbeat only. It never becomes a
+`ros.frequency` event, so it cannot falsely refresh dead-topic liveness.
 
 `NativeCaptureProcess` validates each bounded batch and adapts it into the
 existing `ros.frequency` event contract. The Python ROS monitor continues to
 produce low-rate topology, QoS, and TF facts, but it does not create typed data
-subscriptions or deserialize every captured message. If native capture is
-configured for only a subset of the ROS monitor's topic scope, the bridge is
-disabled and the established Python frequency path remains active. This
-coverage check prevents silent monitoring gaps and preserves existing public
-configuration and detector contracts.
+subscriptions or deserialize every captured message. The supervisor requires a
+valid FIFO heartbeat before declaring the bridge active. A parse fault, pipe
+loss, or missed heartbeat permanently enables the Python frequency timer and
+subscriptions for that daemon run. Activation and failover publish explicit
+health events and counters. Rate frames seen on process stdout are rejected while
+the FIFO is expected, so log visibility cannot impersonate bridge health.
+
+Every `RATE_STATUS` batch must also carry a bounded runtime-coverage snapshot:
+`coverage_complete`, `topic_coverage_truncated`, `graph_coverage_faults`,
+`graph_snapshot_failures`, `endpoint_query_failures`, `subscription_failures`,
+and `ambiguous_topic_types`. The counters are cumulative unsigned 64-bit values.
+`coverage_complete` must be true exactly when truncation is false and all five
+counters are zero. Missing, inconsistent, truncated, or nonzero coverage fields
+reject the complete rate window and permanently select the Python frequency
+path. This prevents a healthy rate heartbeat from claiming complete observation
+after the native graph or subscription layer has already missed a topic.
+
+If native capture is configured for only a subset of the ROS monitor's topic
+scope, the bridge is disabled and the established Python frequency path remains
+active. This coverage check prevents silent monitoring gaps and preserves
+existing public configuration and detector contracts.
 
 ## Clocks and triggers
 

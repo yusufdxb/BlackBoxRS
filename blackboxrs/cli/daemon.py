@@ -1,4 +1,4 @@
-"""BlackBoxRS daemon — orchestrates all monitoring components.
+"""BlackBoxRS daemon: orchestrates all monitoring components.
 
 The :class:`BlackBoxDaemon` wires together the event bus, monitors, anomaly
 engine, and logging pipeline.  Components are responsible for managing
@@ -41,7 +41,7 @@ def _read_proc_starttime(pid: int) -> int | None:
 
     The command name is enclosed in parentheses and may contain spaces
     or other whitespace, so we must find the last ``)`` and split the
-    remainder — not ``shlex.split`` — to correctly locate subsequent
+    remainder, not ``shlex.split``, to correctly locate subsequent
     fields.
 
     Returns ``None`` if the process does not exist or /proc is not
@@ -208,6 +208,7 @@ class BlackBoxDaemon:
 
     def _start_components(self, native_rate_bridge: bool) -> None:
         """Start configured components after the daemon enters running state."""
+        native_capture = None
         # --- Logging pipeline (always enabled) ----------------------------
         from blackboxrs.logging import LoggingPipeline  # noqa: E402
 
@@ -237,6 +238,8 @@ class BlackBoxDaemon:
                 rate_topic_filters=self._config.ros_monitor.topic_filters,
             )
             self._register(native_capture)
+            if native_rate_bridge:
+                native_rate_bridge = native_capture.rate_bridge_active
 
         # --- Rosbag2 recorder --------------------------------------------
         # Start after the anomaly engine so it reacts to emitted anomaly
@@ -259,6 +262,12 @@ class BlackBoxDaemon:
                 native_frequency_bridge=native_rate_bridge,
             )
             self._register(ros_mon)
+            if native_capture is not None and _native_rate_bridge_has_full_coverage(
+                self._config
+            ):
+                native_capture.set_rate_bridge_fallback(
+                    ros_mon.enable_python_frequency_fallback
+                )
 
         # --- System monitor -----------------------------------------------
         if self._config.system_monitor.enabled:
@@ -406,7 +415,7 @@ class BlackBoxDaemon:
             )
             return False, None
 
-        # 2. Identity check — starttime is the gold signal against PID
+        # 2. Identity check: starttime is the gold signal against PID
         # recycling.  If the stored starttime is missing (e.g. written
         # on a non-Linux host) we fall back to cmdline-only verification.
         recorded_start = payload.get("starttime")
@@ -426,7 +435,7 @@ class BlackBoxDaemon:
         # 3. cmdline sanity-check.  Accept if EITHER the live cmdline
         # carries the blackboxrs marker (production daemon fingerprint)
         # OR it exactly matches the recorded cmdline (round-trip proof
-        # that the same process is still running — covers in-process
+        # that the same process is still running, which covers in-process
         # tests and hosts with unusual cmdline shapes).
         live_cmdline = _read_proc_cmdline(pid) or ""
         recorded_cmdline = payload.get("cmdline") or ""
@@ -474,7 +483,7 @@ class BlackBoxDaemon:
         Returns the parsed dict, or ``None`` if the content is not a
         JSON object with at least a ``pid`` integer.  Legacy plain-int
         pidfiles are rejected (``None``) so callers treat them as
-        stale — we cannot verify identity without the metadata.
+        stale because we cannot verify identity without the metadata.
         """
         text = raw.strip()
         if not text:
@@ -507,7 +516,7 @@ class BlackBoxDaemon:
     def _handle_signal(self, signum: int, frame: Any) -> None:
         """Handle SIGINT/SIGTERM by initiating a graceful shutdown."""
         sig_name = signal.Signals(signum).name
-        logger.info("Received %s — shutting down", sig_name)
+        logger.info("Received %s, shutting down", sig_name)
         self.stop()
 
     def _write_pid_file(self) -> None:

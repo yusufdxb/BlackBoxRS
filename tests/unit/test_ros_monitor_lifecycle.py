@@ -106,7 +106,7 @@ class TestStaleSubscriptionPruning:
         assert monitor._freq_tracker.get_frequency("/gone") is None
 
     def test_node_none_is_tolerated(self):
-        """During shutdown the node may already be gone — pruning must
+        """During shutdown the node may already be gone; pruning must
         still clean up bookkeeping."""
         monitor, _, _ = _make_monitor()
         monitor._node = None
@@ -154,7 +154,7 @@ class TestPollGraphPruning:
     ):
         """If the config's topic_filters are tightened at runtime, a
         previously-allowed topic still disappears from subscriptions on
-        the next poll because it is no longer in `live_topics` — but
+        the next poll because it is no longer in `live_topics`, but
         more importantly, a newly-filtered topic that IS still in the
         graph must not be re-subscribed."""
         monitor, _, fake_node = _make_monitor(topic_filters=["/keep/*"])
@@ -193,6 +193,67 @@ class TestPollGraphPruning:
         assert topology.source == "ros_monitor"
         assert topology.event_type == "ros.topology"
         assert topology.data["topics"] == ["/imu/data", "/joint_states"]
+
+    def test_native_frequency_fallback_creates_timer_and_subscriptions_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monitor, bus, fake_node = _make_monitor(native_frequency_bridge=True)
+        fake_node.create_subscription.side_effect = lambda *args, **kwargs: SimpleNamespace()
+        monitor._introspector = SimpleNamespace(
+            snapshot=lambda: _snapshot(["/imu/data"]),
+        )
+        monkeypatch.setattr(
+            RosMonitor,
+            "_resolve_msg_type",
+            staticmethod(lambda _s: SimpleNamespace),
+        )
+        events = bus.subscribe()
+
+        assert monitor.enable_python_frequency_fallback("RATE_COVERAGE_INCOMPLETE") is True
+        assert monitor.enable_python_frequency_fallback("duplicate") is False
+        fake_node.create_timer.assert_not_called()
+        fake_node.create_subscription.assert_not_called()
+
+        monitor._poll_graph()
+        monitor._poll_graph()
+
+        assert fake_node.create_timer.call_count == 1
+        assert fake_node.create_subscription.call_count == 1
+        assert set(monitor._subscriptions) == {"/imu/data"}
+        assert monitor.enable_python_frequency_fallback("late duplicate") is False
+        fallback = events.get_nowait()
+        assert fallback.event_type == "ros.frequency_fallback"
+        assert fallback.data["reason"] == "RATE_COVERAGE_INCOMPLETE"
+        assert fallback.data["fallback_count"] == 1
+
+    def test_native_frequency_fallback_retries_timer_activation_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monitor, bus, fake_node = _make_monitor(native_frequency_bridge=True)
+        fake_node.create_timer.side_effect = [RuntimeError("timer failed"), SimpleNamespace()]
+        fake_node.create_subscription.return_value = SimpleNamespace()
+        monitor._introspector = SimpleNamespace(
+            snapshot=lambda: _snapshot(["/imu/data"]),
+        )
+        monkeypatch.setattr(
+            RosMonitor,
+            "_resolve_msg_type",
+            staticmethod(lambda _s: SimpleNamespace),
+        )
+        events = bus.subscribe()
+
+        assert monitor.enable_python_frequency_fallback("RATE_PIPE_CLOSED") is True
+        monitor._poll_graph()
+        assert monitor._native_frequency_bridge is True
+        assert monitor._subscriptions == {}
+        failed = events.get_nowait()
+        assert failed.event_type == "ros.frequency_fallback_failed"
+
+        monitor._poll_graph()
+
+        assert fake_node.create_timer.call_count == 2
+        assert monitor._native_frequency_bridge is False
+        assert set(monitor._subscriptions) == {"/imu/data"}
 
 
 class TestFrequencyTrackerForget:

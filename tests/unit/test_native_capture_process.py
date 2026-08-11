@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -23,12 +24,19 @@ class _FakeProcess:
     def __init__(self, output: bytes = b"") -> None:
         self.returncode = None
         self.stdout = io.BytesIO(output)
+        self.child_fds: list[int] = []
 
     def poll(self):
         return self.returncode
 
     def wait(self, timeout=None):
         self.returncode = 0
+        for descriptor in self.child_fds:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        self.child_fds.clear()
         return 0
 
 
@@ -47,6 +55,18 @@ class _AvailableChunkStream:
 
     def close(self) -> None:
         self.closed = True
+
+
+def _healthy_rate_coverage() -> dict[str, object]:
+    return {
+        "coverage_complete": True,
+        "topic_coverage_truncated": False,
+        "graph_coverage_faults": 0,
+        "graph_snapshot_failures": 0,
+        "endpoint_query_failures": 0,
+        "subscription_failures": 0,
+        "ambiguous_topic_types": 0,
+    }
 
 
 def test_native_process_uses_installed_executable_and_daemon_parameters(
@@ -71,6 +91,23 @@ def test_native_process_uses_installed_executable_and_daemon_parameters(
             ),
             encoding="utf-8",
         )
+        child_rate_fd = os.open(
+            kwargs["env"]["BLACKBOXRS_RATE_STATUS_PIPE"],
+            os.O_WRONLY | os.O_NONBLOCK,
+        )
+        fake.child_fds.append(child_rate_fd)
+        heartbeat = {
+            "schema_version": "blackboxrs.capture_rate_status.v1",
+            "session_id": "ready",
+            "window_start_monotonic_ns": 1,
+            "window_end_monotonic_ns": 1_000_000_001,
+            "batch_index": 0,
+            "batch_count": 1,
+            "topics_truncated": False,
+            **_healthy_rate_coverage(),
+            "topics": [],
+        }
+        os.write(child_rate_fd, f"RATE_STATUS {json.dumps(heartbeat)}\n".encode())
         return fake
 
     signals: list[tuple[int, int]] = []
@@ -90,6 +127,9 @@ def test_native_process_uses_installed_executable_and_daemon_parameters(
     assert node_params["capture.topics"] == ["/imu/data"]
     assert node_params["capture.discover_all"] is False
     assert node_params["status.rate_summary_period_ms"] == 1000
+    rate_pipe = Path(launched["kwargs"]["env"]["BLACKBOXRS_RATE_STATUS_PIPE"])
+    assert rate_pipe.name == "status.fifo"
+    assert process.rate_bridge_active is True
     assert resolve_current_native_session(tmp_path) == tmp_path / "capture_ready"
 
     process.stop()
@@ -380,6 +420,7 @@ def test_native_process_bridges_batched_cpp_rates_into_ros_events(tmp_path: Path
         "batch_index": 0,
         "batch_count": 1,
         "topics_truncated": False,
+        **_healthy_rate_coverage(),
         "topics": [
             {
                 "topic": "/imu/data",
@@ -410,12 +451,17 @@ def test_native_process_bridges_batched_cpp_rates_into_ros_events(tmp_path: Path
     assert first.data["interval_ms"] == 2.5
     assert first.metadata["capture_backend"] == "cpp"
     assert first.metadata["frequency_source"] == "native_cpp"
+    assert first.metadata["rate_coverage_complete"] is True
     assert first.metadata["message_count"] == 400
     assert first.metadata["native_capture_session_id"] == "native"
     assert process.rate_bridge_counters == {
         "status_lines": 1,
         "events_published": 2,
         "status_rejected": 0,
+        "coverage_faults": 0,
+        "heartbeats_received": 1,
+        "failovers": 0,
+        "fallback_callback_failures": 0,
     }
 
 
@@ -437,6 +483,7 @@ def test_native_process_consumes_available_rate_line_without_full_buffer(tmp_pat
         "batch_index": 0,
         "batch_count": 1,
         "topics_truncated": False,
+        **_healthy_rate_coverage(),
         "topics": [
             {
                 "topic": "/imu/data",
@@ -479,6 +526,10 @@ def _assert_bad_numeric_rate_line_is_bounded(
         '"window_start_monotonic_ns":1,'
         '"window_end_monotonic_ns":1000000001,'
         '"batch_index":0,"batch_count":1,"topics_truncated":false,'
+        '"coverage_complete":true,"topic_coverage_truncated":false,'
+        '"graph_coverage_faults":0,"graph_snapshot_failures":0,'
+        '"endpoint_query_failures":0,"subscription_failures":0,'
+        '"ambiguous_topic_types":0,'
         '"topics":[{"topic":"/bad","message_count":'
         + ("9" * digit_count)
         + ',"frequency_hz":1.0,"interval_ms":1.0}]}\n'
@@ -491,6 +542,7 @@ def _assert_bad_numeric_rate_line_is_bounded(
         "batch_index": 0,
         "batch_count": 1,
         "topics_truncated": False,
+        **_healthy_rate_coverage(),
         "topics": [
             {
                 "topic": "/good",
@@ -518,6 +570,10 @@ def _assert_bad_numeric_rate_line_is_bounded(
         "status_lines": 2,
         "events_published": 1,
         "status_rejected": 1,
+        "coverage_faults": 0,
+        "heartbeats_received": 1,
+        "failovers": 0,
+        "fallback_callback_failures": 0,
     }
     assert stream.closed is True
 
@@ -564,6 +620,7 @@ def test_native_process_assembles_batches_and_aggregates_type_churn(tmp_path: Pa
                     "batch_index": index,
                     "batch_count": 2,
                     "topics_truncated": False,
+                    **_healthy_rate_coverage(),
                     "topics": topics,
                 }
             )
@@ -622,6 +679,10 @@ def test_native_process_assembles_batches_and_aggregates_type_churn(tmp_path: Pa
         "status_lines": 2,
         "events_published": 1,
         "status_rejected": 0,
+        "coverage_faults": 0,
+        "heartbeats_received": 1,
+        "failovers": 0,
+        "fallback_callback_failures": 0,
     }
 
 
@@ -640,6 +701,7 @@ def test_native_process_rejects_malformed_rate_status_atomically(tmp_path: Path)
         "window_start_monotonic_ns": 10,
         "window_end_monotonic_ns": 20,
         "topics_truncated": False,
+        **_healthy_rate_coverage(),
         "topics": [
             {
                 "topic": "relative_topic",
@@ -661,7 +723,383 @@ def test_native_process_rejects_malformed_rate_status_atomically(tmp_path: Path)
         "status_lines": 1,
         "events_published": 0,
         "status_rejected": 1,
+        "coverage_faults": 0,
+        "heartbeats_received": 0,
+        "failovers": 0,
+        "fallback_callback_failures": 0,
     }
+
+
+def test_native_process_empty_rate_window_is_heartbeat_not_liveness(tmp_path: Path):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    heartbeat = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "session_id": "native",
+        "window_start_monotonic_ns": 1,
+        "window_end_monotonic_ns": 1_000_000_001,
+        "batch_index": 0,
+        "batch_count": 1,
+        "topics_truncated": False,
+        **_healthy_rate_coverage(),
+        "topics": [],
+    }
+
+    process._inspect_output_line(
+        f"RATE_STATUS {json.dumps(heartbeat)}".encode(),
+        trusted_rate_channel=True,
+    )
+
+    assert events.empty()
+    assert process.rate_bridge_counters["heartbeats_received"] == 1
+    assert process.rate_bridge_counters["events_published"] == 0
+
+
+@pytest.mark.parametrize(
+    "fault_field",
+    [
+        "topic_coverage_truncated",
+        "graph_coverage_faults",
+        "graph_snapshot_failures",
+        "endpoint_query_failures",
+        "subscription_failures",
+        "ambiguous_topic_types",
+    ],
+)
+def test_native_process_runtime_coverage_fault_fails_over_once(
+    tmp_path: Path,
+    fault_field: str,
+):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    fallback_reasons: list[str] = []
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    process.set_rate_bridge_fallback(fallback_reasons.append)
+    process._rate_transport_started = True
+    status = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "session_id": "native",
+        "window_start_monotonic_ns": 1,
+        "window_end_monotonic_ns": 1_000_000_001,
+        "batch_index": 0,
+        "batch_count": 1,
+        "topics_truncated": False,
+        **_healthy_rate_coverage(),
+        "topics": [],
+    }
+    status["coverage_complete"] = False
+    status[fault_field] = True if fault_field == "topic_coverage_truncated" else 1
+
+    process._inspect_output_line(
+        f"RATE_STATUS {json.dumps(status)}".encode(),
+        trusted_rate_channel=True,
+    )
+
+    coverage_fault = events.get_nowait()
+    failover = events.get_nowait()
+    assert events.empty()
+    assert coverage_fault.event_type == "capture.native_rate_bridge_coverage_fault"
+    assert coverage_fault.data["state"] == "RATE_COVERAGE_INCOMPLETE"
+    assert coverage_fault.data[fault_field] == status[fault_field]
+    assert failover.event_type == "capture.native_rate_bridge_failover"
+    assert failover.data["reason"] == "RATE_COVERAGE_INCOMPLETE"
+    assert fallback_reasons == ["RATE_COVERAGE_INCOMPLETE"]
+    assert process.rate_bridge_active is False
+    assert process.rate_bridge_counters["coverage_faults"] == 1
+    assert process.rate_bridge_counters["status_rejected"] == 1
+    assert process.rate_bridge_counters["events_published"] == 0
+
+
+@pytest.mark.parametrize(
+    "invalid_mutation",
+    [
+        ("missing", "coverage_complete"),
+        ("missing", "endpoint_query_failures"),
+        ("value", "subscription_failures"),
+        ("inconsistent", "ambiguous_topic_types"),
+    ],
+)
+def test_native_process_requires_bounded_consistent_coverage_fields(
+    tmp_path: Path,
+    invalid_mutation: tuple[str, str],
+):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    process._rate_transport_started = True
+    status = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "session_id": "native",
+        "window_start_monotonic_ns": 1,
+        "window_end_monotonic_ns": 1_000_000_001,
+        "batch_index": 0,
+        "batch_count": 1,
+        "topics_truncated": False,
+        **_healthy_rate_coverage(),
+        "topics": [],
+    }
+    mutation, field = invalid_mutation
+    if mutation == "missing":
+        status.pop(field)
+    elif mutation == "value":
+        status[field] = (1 << 64)
+    else:
+        status[field] = 1
+
+    process._inspect_output_line(
+        f"RATE_STATUS {json.dumps(status)}".encode(),
+        trusted_rate_channel=True,
+    )
+
+    fault = events.get_nowait()
+    failover = events.get_nowait()
+    assert fault.event_type == "capture.native_rate_bridge_coverage_fault"
+    assert failover.data["reason"] == "RATE_COVERAGE_INCOMPLETE"
+    assert process.rate_bridge_counters["coverage_faults"] == 1
+    assert process.rate_bridge_counters["heartbeats_received"] == 0
+
+
+def test_native_process_runtime_heartbeat_loss_fails_over_once(tmp_path: Path):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    fallback_reasons: list[str] = []
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+        rate_summary_period_ms=10,
+    )
+    process.set_rate_bridge_fallback(fallback_reasons.append)
+    process._rate_transport_started = True
+    heartbeat = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "session_id": "native",
+        "window_start_monotonic_ns": 1,
+        "window_end_monotonic_ns": 10_000_001,
+        "batch_index": 0,
+        "batch_count": 1,
+        "topics_truncated": False,
+        **_healthy_rate_coverage(),
+        "topics": [],
+    }
+    process._inspect_output_line(
+        f"RATE_STATUS {json.dumps(heartbeat)}".encode(),
+        trusted_rate_channel=True,
+    )
+    activated = events.get_nowait()
+    assert activated.event_type == "capture.native_rate_bridge_active"
+    assert process.rate_bridge_active is True
+    assert process._rate_last_heartbeat is not None
+
+    timed_out = process._check_rate_bridge_timeout(
+        process._rate_last_heartbeat + process._rate_heartbeat_timeout_sec + 0.01
+    )
+
+    assert timed_out is True
+    assert process.rate_bridge_active is False
+    assert fallback_reasons == ["HEARTBEAT_TIMEOUT"]
+    failover = events.get_nowait()
+    assert failover.event_type == "capture.native_rate_bridge_failover"
+    assert failover.data["reason"] == "HEARTBEAT_TIMEOUT"
+    assert process._check_rate_bridge_timeout(time.monotonic() + 10.0) is False
+    assert fallback_reasons == ["HEARTBEAT_TIMEOUT"]
+    assert process.rate_bridge_counters["failovers"] == 1
+
+
+def test_native_process_rate_rejection_fails_over_and_keeps_draining(tmp_path: Path):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    fallback_reasons: list[str] = []
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    process.set_rate_bridge_fallback(fallback_reasons.append)
+    process._rate_transport_started = True
+    valid = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "session_id": "native",
+        "window_start_monotonic_ns": 1,
+        "window_end_monotonic_ns": 1_000_000_001,
+        "batch_index": 0,
+        "batch_count": 1,
+        "topics_truncated": False,
+        **_healthy_rate_coverage(),
+        "topics": [
+            {
+                "topic": "/still_draining",
+                "message_count": 1,
+                "frequency_hz": 1.0,
+                "interval_ms": 1000.0,
+            }
+        ],
+    }
+    stream = _AvailableChunkStream(
+        [b"RATE_STATUS {not-json}\n", f"RATE_STATUS {json.dumps(valid)}\n".encode()]
+    )
+
+    process._drain_output(stream, rate_channel=True)  # type: ignore[arg-type]
+
+    fault = events.get_nowait()
+    failover = events.get_nowait()
+    assert events.empty()
+    assert fault.event_type == "capture.native_rate_bridge_fault"
+    assert failover.event_type == "capture.native_rate_bridge_failover"
+    assert fallback_reasons == ["RATE_STATUS_REJECTED"]
+    assert process.rate_bridge_counters["status_lines"] == 2
+    assert process.rate_bridge_counters["status_rejected"] == 1
+    assert process.rate_bridge_counters["events_published"] == 0
+    assert stream.closed is True
+
+
+def test_native_process_rejects_rate_status_from_stdout_when_pipe_expected(
+    tmp_path: Path,
+):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    fallback_reasons: list[str] = []
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    process.set_rate_bridge_fallback(fallback_reasons.append)
+    process._rate_transport_started = True
+    status = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "session_id": "native",
+        "window_start_monotonic_ns": 1,
+        "window_end_monotonic_ns": 1_000_000_001,
+        "batch_index": 0,
+        "batch_count": 1,
+        "topics_truncated": False,
+        **_healthy_rate_coverage(),
+        "topics": [],
+    }
+
+    process._inspect_output_line(f"RATE_STATUS {json.dumps(status)}".encode())
+
+    fault = events.get_nowait()
+    failover = events.get_nowait()
+    assert events.empty()
+    assert fault.data["reason"] == "rate status arrived outside dedicated transport"
+    assert failover.event_type == "capture.native_rate_bridge_failover"
+    assert fallback_reasons == ["RATE_STATUS_REJECTED"]
+    assert process.rate_bridge_active is False
+    assert process.rate_bridge_counters["status_rejected"] == 1
+
+
+def test_native_process_counts_fallback_callback_failure(tmp_path: Path):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    calls = 0
+
+    def fail_fallback(_reason: str) -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("fallback unavailable")
+
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    process._rate_transport_started = True
+    process.set_rate_bridge_fallback(fail_fallback)
+
+    assert process._trigger_rate_bridge_failover("RATE_PIPE_CLOSED") is True
+    assert process._trigger_rate_bridge_failover("RATE_PIPE_CLOSED") is False
+
+    assert calls == 1
+    assert events.get_nowait().event_type == "capture.native_rate_bridge_failover"
+    assert events.get_nowait().event_type == "capture.native_rate_bridge_fallback_failed"
+    assert process.rate_bridge_counters["fallback_callback_failures"] == 1
+
+
+def test_native_process_bounds_initial_activation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake = _FakeProcess()
+
+    def fake_popen(command, **kwargs):
+        session = tmp_path / "capture_ready"
+        session.mkdir()
+        (tmp_path / "current_session.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "blackboxrs.current_capture.v1",
+                    "session_id": "ready",
+                    "path": session.name,
+                }
+            ),
+            encoding="utf-8",
+        )
+        fake.child_fds.append(
+            os.open(
+                kwargs["env"]["BLACKBOXRS_RATE_STATUS_PIPE"],
+                os.O_WRONLY | os.O_NONBLOCK,
+            )
+        )
+        return fake
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("os.killpg", lambda pid, sig: None)
+    monkeypatch.setattr(
+        "blackboxrs.recording.native_process._RATE_HEARTBEAT_MIN_TIMEOUT_SEC", 0.02
+    )
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+        rate_summary_period_ms=10,
+    )
+
+    started_at = time.monotonic()
+    process.start()
+    elapsed = time.monotonic() - started_at
+    fallback_reasons: list[str] = []
+    process.set_rate_bridge_fallback(fallback_reasons.append)
+
+    assert elapsed < 0.5
+    assert process.rate_bridge_active is False
+    assert fallback_reasons == ["ACTIVATION_TIMEOUT"]
+    event = events.get_nowait()
+    assert event.event_type == "capture.native_rate_bridge_failover"
+    assert event.data["reason"] == "ACTIVATION_TIMEOUT"
+    process.stop()
 
 
 @pytest.mark.parametrize(

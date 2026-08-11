@@ -135,3 +135,69 @@ def test_start_preserves_original_error_when_reverse_rollback_stop_fails(
     assert daemon._running is False
     assert daemon._components == []
     assert daemon._stop_event.is_set()
+
+
+def test_daemon_wires_native_rate_loss_to_running_ros_monitor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _isolate_pid_file(monkeypatch, tmp_path)
+    native_instances = []
+    ros_instances = []
+
+    class FakeLoggingPipeline:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+    class FakeNativeCapture:
+        rate_bridge_active = True
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.fallback = None
+            native_instances.append(self)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def set_rate_bridge_fallback(self, callback) -> None:
+            self.fallback = callback
+
+    class FakeRosMonitor:
+        def __init__(self, *args, native_frequency_bridge=False, **kwargs) -> None:
+            self.native_frequency_bridge = native_frequency_bridge
+            self.reasons: list[str] = []
+            ros_instances.append(self)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def enable_python_frequency_fallback(self, reason: str) -> bool:
+            self.reasons.append(reason)
+            return True
+
+    monkeypatch.setattr("blackboxrs.logging.LoggingPipeline", FakeLoggingPipeline)
+    monkeypatch.setattr("blackboxrs.recording.NativeCaptureProcess", FakeNativeCapture)
+    monkeypatch.setattr("blackboxrs.ros_monitor.RosMonitor", FakeRosMonitor)
+    config = _native_config(tmp_path, ["unused"])
+    config.ros_monitor.enabled = True
+    daemon = BlackBoxDaemon(config)
+
+    daemon.start()
+
+    assert ros_instances[0].native_frequency_bridge is True
+    assert native_instances[0].fallback is not None
+    native_instances[0].fallback("RATE_COVERAGE_INCOMPLETE")
+    assert ros_instances[0].reasons == ["RATE_COVERAGE_INCOMPLETE"]
+    daemon.stop()

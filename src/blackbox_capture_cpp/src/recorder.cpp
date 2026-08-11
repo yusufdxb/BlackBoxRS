@@ -21,6 +21,8 @@
 #include "blackbox_capture/recorder.hpp"
 
 #include <fcntl.h>
+#include <pthread.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -81,6 +83,7 @@ namespace
 using namespace std::chrono_literals;
 
 constexpr std::size_t kRateStatusTopicsPerBatch = 64U;
+constexpr const char * kRateStatusPipeEnvironment = "BLACKBOXRS_RATE_STATUS_PIPE";
 
 uint64_t monotonic_now_ns() noexcept
 {
@@ -256,6 +259,33 @@ bool write_all(int descriptor, std::string_view content) noexcept
   return true;
 }
 
+bool block_sigpipe_for_current_thread() noexcept
+{
+  sigset_t signals{};
+  if (::sigemptyset(&signals) != 0 || ::sigaddset(&signals, SIGPIPE) != 0) {
+    return false;
+  }
+  return ::pthread_sigmask(SIG_BLOCK, &signals, nullptr) == 0;
+}
+
+int open_rate_status_pipe() noexcept
+{
+  const char * pipe_path = std::getenv(kRateStatusPipeEnvironment);
+  if (pipe_path == nullptr || pipe_path[0] == '\0') {
+    return -1;
+  }
+  const int descriptor = ::open(pipe_path, O_WRONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (descriptor < 0) {
+    return -1;
+  }
+  struct stat metadata {};
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISFIFO(metadata.st_mode)) {
+    (void)::close(descriptor);
+    return -1;
+  }
+  return descriptor;
+}
+
 bool write_atomic_text(const std::filesystem::path & path, std::string_view content)
 {
   const std::filesystem::path partial = path.string() + ".partial";
@@ -285,14 +315,21 @@ class RecorderNode::Impl
 {
 public:
   explicit Impl(RecorderNode & node)
-  : node_(node)
+  : node_(node), rate_status_fd_(open_rate_status_pipe())
   {
     load_parameters();
     initialize_core();
     start();
   }
 
-  ~Impl() {(void)drain_and_stop(drain_timeout_);}
+  ~Impl()
+  {
+    (void)drain_and_stop(drain_timeout_);
+    if (rate_status_fd_ >= 0) {
+      (void)::close(rate_status_fd_);
+      rate_status_fd_ = -1;
+    }
+  }
 
   Impl(const Impl &) = delete;
   Impl & operator=(const Impl &) = delete;
@@ -1138,6 +1175,11 @@ private:
   void rate_status_loop() noexcept
   {
     rate_status_alive_.store(true, std::memory_order_release);
+    if (rate_status_fd_ >= 0 && !block_sigpipe_for_current_thread()) {
+      rate_status_failures_.fetch_add(1U, std::memory_order_relaxed);
+      rate_status_alive_.store(false, std::memory_order_release);
+      return;
+    }
     try {
       std::unique_lock<std::mutex> lock(rate_status_mutex_);
       while (rate_status_running_.load(std::memory_order_acquire)) {
@@ -1179,13 +1221,26 @@ private:
       rate_status_counts_[topic_id] = count;
       topic_count += count == 0U ? 0U : 1U;
     }
-    if (topic_count == 0U) {
-      return;
-    }
-
     const std::size_t batch_count =
-      (topic_count + kRateStatusTopicsPerBatch - 1U) / kRateStatusTopicsPerBatch;
+      std::max<std::size_t>(
+      1U, (topic_count + kRateStatusTopicsPerBatch - 1U) / kRateStatusTopicsPerBatch);
     const double elapsed_ns = static_cast<double>(window_end_ns - window_start_ns);
+    const bool topic_coverage_truncated =
+      topic_coverage_truncated_.load(std::memory_order_acquire);
+    const uint64_t graph_coverage_faults =
+      graph_coverage_faults_.load(std::memory_order_acquire);
+    const uint64_t graph_snapshot_failures =
+      graph_snapshot_failures_.load(std::memory_order_acquire);
+    const uint64_t endpoint_query_failures =
+      endpoint_query_failures_.load(std::memory_order_acquire);
+    const uint64_t subscription_failures =
+      subscription_failures_.load(std::memory_order_acquire);
+    const uint64_t ambiguous_topic_types =
+      ambiguous_topic_types_.load(std::memory_order_acquire);
+    const bool coverage_complete =
+      !topic_coverage_truncated && graph_coverage_faults == 0U &&
+      graph_snapshot_failures == 0U && endpoint_query_failures == 0U &&
+      subscription_failures == 0U && ambiguous_topic_types == 0U;
     uint32_t next_topic_id = 1U;
     for (std::size_t batch_index = 0U; batch_index < batch_count; ++batch_index) {
       std::ostringstream stream;
@@ -1196,7 +1251,16 @@ private:
              << "\"window_end_monotonic_ns\":" << window_end_ns << ','
              << "\"batch_index\":" << batch_index << ','
              << "\"batch_count\":" << batch_count << ','
-             << "\"topics_truncated\":false,\"topics\":[";
+             << "\"coverage_complete\":" << (coverage_complete ? "true" : "false") << ','
+             << "\"topic_coverage_truncated\":"
+             << (topic_coverage_truncated ? "true" : "false") << ','
+             << "\"graph_coverage_faults\":" << graph_coverage_faults << ','
+             << "\"graph_snapshot_failures\":" << graph_snapshot_failures << ','
+             << "\"endpoint_query_failures\":" << endpoint_query_failures << ','
+             << "\"subscription_failures\":" << subscription_failures << ','
+             << "\"ambiguous_topic_types\":" << ambiguous_topic_types << ','
+             << "\"topics_truncated\":"
+             << (topic_coverage_truncated ? "true" : "false") << ",\"topics\":[";
       std::size_t emitted_in_batch = 0U;
       while (next_topic_id <= max_topics_ &&
         emitted_in_batch < kRateStatusTopicsPerBatch)
@@ -1223,8 +1287,13 @@ private:
         ++emitted_in_batch;
       }
       stream << "]}";
-      if (emitted_in_batch != 0U) {
-        const std::string payload = stream.str();
+      const std::string payload = stream.str();
+      if (rate_status_fd_ >= 0) {
+        const std::string framed_payload = "RATE_STATUS " + payload + '\n';
+        if (!write_all(rate_status_fd_, framed_payload)) {
+          throw std::runtime_error("dedicated native rate-status pipe write failed");
+        }
+      } else {
         RCLCPP_INFO(node_.get_logger(), "RATE_STATUS %s", payload.c_str());
       }
     }
@@ -3063,6 +3132,7 @@ private:
   std::atomic<bool> rate_status_running_{false};
   std::atomic<bool> rate_status_alive_{false};
   std::atomic<uint64_t> rate_status_failures_{0};
+  int rate_status_fd_{-1};
   uint64_t rate_status_window_start_ns_{0};
   std::thread rate_status_thread_;
   std::mutex rate_status_mutex_;

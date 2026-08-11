@@ -90,6 +90,11 @@ class RosMonitor:
         self._config = config
         self._session = session
         self._native_frequency_bridge = native_frequency_bridge
+        self._frequency_period_sec = max(config.poll_interval_sec / 2.0, 1.0)
+        self._python_frequency_fallback_requested = False
+        self._python_frequency_fallback_reason: str | None = None
+        self._frequency_fallback_count = 0
+        self._frequency_fallback_failures = 0
 
         self._node: Node | None = None  # type: ignore[assignment]
         self._executor: Any = None
@@ -144,10 +149,9 @@ class RosMonitor:
         )
 
         # Emit frequency events at half the poll interval (at least 1 s).
-        freq_sec = max(poll_sec / 2.0, 1.0)
         if not self._native_frequency_bridge:
             self._freq_timer = self._node.create_timer(
-                freq_sec, self._emit_frequency_events
+                self._frequency_period_sec, self._emit_frequency_events
             )
 
         # Start the TF snapshot producer. Failures are non-fatal so a
@@ -181,6 +185,24 @@ class RosMonitor:
             _NODE_NAMESPACE,
             f"/{_NODE_NAME}",
         )
+
+    def enable_python_frequency_fallback(self, reason: str) -> bool:
+        """Request one-way native-to-Python frequency failover.
+
+        The native watchdog runs outside the rclpy executor. This method only
+        records the request; ``_poll_graph`` creates subscriptions and the
+        timer on the executor thread.
+        """
+        with self._lock:
+            if (
+                not self._native_frequency_bridge
+                or self._python_frequency_fallback_requested
+            ):
+                return False
+            self._python_frequency_fallback_requested = True
+            self._python_frequency_fallback_reason = reason
+        logger.warning("Python ROS frequency fallback requested: %s", reason)
+        return True
 
     def stop(self) -> None:
         """Cleanly shut down the node and release resources."""
@@ -237,6 +259,7 @@ class RosMonitor:
 
     def _poll_graph(self) -> None:
         """Periodic callback: discover topics, update subscriptions."""
+        self._apply_python_frequency_fallback()
         if self._introspector is None:
             return
 
@@ -266,11 +289,61 @@ class RosMonitor:
         # Drop subscriptions for topics that have left the graph.  Without
         # this step the monitor would keep leaked rclpy subscription
         # objects plus stale frequency windows for publishers that no
-        # longer exist — bad for long-running recorders that outlive
+        # longer exist, which is bad for long-running recorders that outlive
         # many nodes.
         self._prune_stale_subscriptions(
             set() if self._native_frequency_bridge else live_topics
         )
+
+    def _apply_python_frequency_fallback(self) -> None:
+        """Apply a pending failover on the rclpy executor thread exactly once."""
+        with self._lock:
+            if not self._python_frequency_fallback_requested:
+                return
+            reason = self._python_frequency_fallback_reason or "native_rate_bridge_lost"
+
+        try:
+            if self._node is not None and self._freq_timer is None:
+                self._freq_timer = self._node.create_timer(
+                    self._frequency_period_sec, self._emit_frequency_events
+                )
+        except Exception:  # noqa: BLE001
+            with self._lock:
+                self._frequency_fallback_failures += 1
+                failures = self._frequency_fallback_failures
+            logger.exception("Could not create Python frequency fallback timer")
+            event = BlackBoxEvent.ros_event(
+                event_type="ros.frequency_fallback_failed",
+                data={
+                    "state": "ACTIVATION_FAILED",
+                    "reason": reason,
+                    "frequency_source": "unavailable",
+                    "activation_failures": failures,
+                },
+                severity="error",
+                **self._session.metadata(),
+            )
+            self._event_bus.publish(event)
+            return
+
+        with self._lock:
+            self._python_frequency_fallback_requested = False
+            self._python_frequency_fallback_reason = None
+            self._native_frequency_bridge = False
+            self._frequency_fallback_count += 1
+        event = BlackBoxEvent.ros_event(
+            event_type="ros.frequency_fallback",
+            data={
+                "state": "ACTIVE",
+                "reason": reason,
+                "frequency_source": "python",
+                "fallback_count": self._frequency_fallback_count,
+            },
+            severity="warning",
+            **self._session.metadata(),
+        )
+        self._event_bus.publish(event)
+        logger.warning("Python ROS frequency fallback active: %s", reason)
 
     def _prune_stale_subscriptions(self, live_topics: set[str]) -> None:
         """Drop subscriptions whose topics are no longer on the graph.

@@ -19,7 +19,9 @@
 // THE SOFTWARE.
 
 #include <gtest/gtest.h>
+#include <fcntl.h>
 #include <spawn.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -30,6 +32,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -137,6 +140,78 @@ public:
 
 private:
   std::filesystem::path path_;
+};
+
+class ScopedEnvironmentVariable
+{
+public:
+  ScopedEnvironmentVariable(std::string name, std::string value)
+  : name_(std::move(name))
+  {
+    const char * previous = std::getenv(name_.c_str());
+    if (previous != nullptr) {
+      previous_ = previous;
+      had_previous_ = true;
+    }
+    if (::setenv(name_.c_str(), value.c_str(), 1) != 0) {
+      throw std::runtime_error("setenv failed");
+    }
+  }
+
+  ~ScopedEnvironmentVariable()
+  {
+    if (had_previous_) {
+      (void)::setenv(name_.c_str(), previous_.c_str(), 1);
+    } else {
+      (void)::unsetenv(name_.c_str());
+    }
+  }
+
+private:
+  std::string name_;
+  std::string previous_;
+  bool had_previous_{false};
+};
+
+class ScopedDefaultSigpipeDisposition
+{
+public:
+  ScopedDefaultSigpipeDisposition()
+  {
+    struct sigaction action {};
+    action.sa_handler = SIG_DFL;
+    (void)::sigemptyset(&action.sa_mask);
+    if (::sigaction(SIGPIPE, &action, &previous_) != 0) {
+      throw std::runtime_error("sigaction failed");
+    }
+  }
+
+  ~ScopedDefaultSigpipeDisposition() {(void)::sigaction(SIGPIPE, &previous_, nullptr);}
+
+private:
+  struct sigaction previous_ {};
+};
+
+class ScopedFileDescriptor
+{
+public:
+  explicit ScopedFileDescriptor(int descriptor)
+  : descriptor_(descriptor) {}
+
+  ~ScopedFileDescriptor() {close();}
+
+  int get() const {return descriptor_;}
+
+  void close()
+  {
+    if (descriptor_ >= 0) {
+      (void)::close(descriptor_);
+      descriptor_ = -1;
+    }
+  }
+
+private:
+  int descriptor_{-1};
 };
 
 std::vector<rclcpp::Parameter> minimal_parameters(const std::filesystem::path & output)
@@ -513,6 +588,147 @@ TEST_F(RecorderNodeTest, PeriodicRateStatusReportsExactCallbackCountsOffTheInges
   executor.remove_node(publisher_node);
   EXPECT_TRUE(recorder->drain_and_stop(2s));
   EXPECT_NE(recorder->status_json().find("\"rate_status_alive\":false"), std::string::npos);
+}
+
+TEST_F(RecorderNodeTest, PeriodicRateStatusEmitsHeartbeatWithoutTopicArrivals)
+{
+  ScopedRateStatusLogCapture capture;
+  TestDirectory directory;
+  auto parameters = minimal_parameters(directory.path());
+  parameters.emplace_back(
+    "capture.topics", std::vector<std::string>{"/rate_status_silent_topic"});
+  parameters.emplace_back("status.rate_summary_period_ms", 50);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto recorder = std::make_shared<RecorderNode>(options);
+
+  std::vector<CapturedRateStatus> logs;
+  const auto deadline = std::chrono::steady_clock::now() + 1s;
+  while (logs.empty() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(10ms);
+    logs = capture.snapshot();
+  }
+
+  ASSERT_FALSE(logs.empty());
+  EXPECT_NE(logs.front().message.find("\"batch_count\":1"), std::string::npos);
+  EXPECT_NE(logs.front().message.find("\"coverage_complete\":true"), std::string::npos);
+  EXPECT_NE(
+    logs.front().message.find("\"topic_coverage_truncated\":false"),
+    std::string::npos);
+  EXPECT_EQ(json_uint(logs.front().message, "graph_coverage_faults"), 0U);
+  EXPECT_EQ(json_uint(logs.front().message, "graph_snapshot_failures"), 0U);
+  EXPECT_EQ(json_uint(logs.front().message, "endpoint_query_failures"), 0U);
+  EXPECT_EQ(json_uint(logs.front().message, "subscription_failures"), 0U);
+  EXPECT_EQ(json_uint(logs.front().message, "ambiguous_topic_types"), 0U);
+  EXPECT_NE(logs.front().message.find("\"topics\":[]"), std::string::npos);
+  EXPECT_TRUE(recorder->drain_and_stop(2s));
+}
+
+TEST_F(RecorderNodeTest, DedicatedRatePipeReaderLossDoesNotTerminateRecorder)
+{
+  TestDirectory directory;
+  const std::filesystem::path fifo_path = directory.path() / "rate_status.fifo";
+  ASSERT_EQ(::mkfifo(fifo_path.c_str(), 0600), 0);
+  ScopedEnvironmentVariable rate_pipe("BLACKBOXRS_RATE_STATUS_PIPE", fifo_path.string());
+  ScopedDefaultSigpipeDisposition default_sigpipe;
+  ScopedFileDescriptor reader(::open(fifo_path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC));
+  ASSERT_GE(reader.get(), 0);
+
+  auto parameters = minimal_parameters(directory.path() / "capture");
+  parameters.emplace_back(
+    "capture.topics", std::vector<std::string>{"/rate_status_pipe_loss"});
+  parameters.emplace_back("status.rate_summary_period_ms", 50);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto recorder = std::make_shared<RecorderNode>(options);
+
+  std::string received;
+  std::array<char, 4096> buffer{};
+  const auto heartbeat_deadline = std::chrono::steady_clock::now() + 1s;
+  while (received.find('\n') == std::string::npos &&
+    std::chrono::steady_clock::now() < heartbeat_deadline)
+  {
+    const ssize_t count = ::read(reader.get(), buffer.data(), buffer.size());
+    if (count > 0) {
+      received.append(buffer.data(), static_cast<std::size_t>(count));
+    } else if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+      FAIL() << "rate FIFO read failed with errno " << errno;
+    }
+    std::this_thread::sleep_for(5ms);
+  }
+  ASSERT_NE(received.find("RATE_STATUS "), std::string::npos);
+  reader.close();
+
+  std::string status;
+  const auto failure_deadline = std::chrono::steady_clock::now() + 1s;
+  do {
+    status = recorder->status_json();
+    if (status.find("\"rate_status_alive\":false") != std::string::npos) {
+      break;
+    }
+    std::this_thread::sleep_for(5ms);
+  } while (std::chrono::steady_clock::now() < failure_deadline);
+
+  EXPECT_NE(status.find("\"rate_status_alive\":false"), std::string::npos);
+  EXPECT_EQ(json_uint(status, "rate_status_failures"), 1U);
+  EXPECT_TRUE(recorder->drain_and_stop(2s));
+  EXPECT_NE(recorder->status_json().find("\"state\":\"STOPPED_CLEAN\""), std::string::npos);
+}
+
+TEST_F(RecorderNodeTest, RateStatusReportsDiscoverAllCoverageTruncation)
+{
+  ScopedRateStatusLogCapture capture;
+  TestDirectory directory;
+  auto publisher_node = std::make_shared<rclcpp::Node>("rate_coverage_test_publisher");
+  auto publisher_one =
+    publisher_node->create_publisher<std_msgs::msg::String>("/rate_coverage_one", 10);
+  auto publisher_two =
+    publisher_node->create_publisher<std_msgs::msg::String>("/rate_coverage_two", 10);
+  ASSERT_NE(publisher_one, nullptr);
+  ASSERT_NE(publisher_two, nullptr);
+
+  auto parameters = minimal_parameters(directory.path());
+  for (rclcpp::Parameter & parameter : parameters) {
+    if (parameter.get_name() == "capture.max_topics") {
+      parameter = rclcpp::Parameter("capture.max_topics", 1);
+    }
+  }
+  parameters.emplace_back("capture.discover_all", true);
+  parameters.emplace_back("capture.discovery_period_ms", 10);
+  parameters.emplace_back("status.rate_summary_period_ms", 50);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto recorder = std::make_shared<RecorderNode>(options);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(publisher_node);
+  executor.add_node(recorder);
+  std::string incomplete_status;
+  const auto deadline = std::chrono::steady_clock::now() + 2s;
+  while (incomplete_status.empty() && std::chrono::steady_clock::now() < deadline) {
+    executor.spin_some();
+    for (const CapturedRateStatus & log : capture.snapshot()) {
+      if (log.message.find("\"coverage_complete\":false") != std::string::npos) {
+        incomplete_status = log.message;
+        break;
+      }
+    }
+    std::this_thread::sleep_for(5ms);
+  }
+
+  ASSERT_FALSE(incomplete_status.empty());
+  EXPECT_NE(
+    incomplete_status.find("\"topic_coverage_truncated\":true"),
+    std::string::npos);
+  EXPECT_EQ(json_uint(incomplete_status, "graph_coverage_faults"), 0U);
+  EXPECT_EQ(json_uint(incomplete_status, "graph_snapshot_failures"), 0U);
+  EXPECT_EQ(json_uint(incomplete_status, "endpoint_query_failures"), 0U);
+  EXPECT_EQ(json_uint(incomplete_status, "subscription_failures"), 0U);
+  EXPECT_EQ(json_uint(incomplete_status, "ambiguous_topic_types"), 0U);
+
+  executor.remove_node(recorder);
+  executor.remove_node(publisher_node);
+  EXPECT_TRUE(recorder->drain_and_stop(2s));
 }
 
 TEST_F(RecorderNodeTest, OversizedArrivalsStillSatisfyHeartbeatAtCallbackReceipt)
