@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from blackboxrs.core.config import CaptureConfig, RuntimeConfig
+from blackboxrs.cli.daemon import _native_rate_bridge_has_full_coverage
+from blackboxrs.core.config import BlackBoxConfig, CaptureConfig, RuntimeConfig
 from blackboxrs.core.event_bus import EventBus
 from blackboxrs.core.session import Session
 from blackboxrs.recording.native import resolve_current_native_session
@@ -29,6 +30,23 @@ class _FakeProcess:
     def wait(self, timeout=None):
         self.returncode = 0
         return 0
+
+
+class _AvailableChunkStream:
+    """Pipe stand-in whose blocking read path must never be selected."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = iter([*chunks, b""])
+        self.closed = False
+
+    def read1(self, _size: int) -> bytes:
+        return next(self._chunks)
+
+    def read(self, _size: int) -> bytes:
+        raise AssertionError("blocking buffered read was used")
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def test_native_process_uses_installed_executable_and_daemon_parameters(
@@ -59,7 +77,7 @@ def test_native_process_uses_installed_executable_and_daemon_parameters(
     monkeypatch.setattr("subprocess.Popen", fake_popen)
     monkeypatch.setattr("os.killpg", lambda pid, sig: signals.append((pid, sig)))
     config = CaptureConfig(backend="cpp", topics=["/imu/data"], native_output_dir=str(tmp_path))
-    process = NativeCaptureProcess(config, RuntimeConfig())
+    process = NativeCaptureProcess(config, RuntimeConfig(), publish_rate_events=True)
 
     process.start()
 
@@ -71,6 +89,7 @@ def test_native_process_uses_installed_executable_and_daemon_parameters(
     node_params = params["/blackbox/blackbox_capture"]["ros__parameters"]
     assert node_params["capture.topics"] == ["/imu/data"]
     assert node_params["capture.discover_all"] is False
+    assert node_params["status.rate_summary_period_ms"] == 1000
     assert resolve_current_native_session(tmp_path) == tmp_path / "capture_ready"
 
     process.stop()
@@ -341,3 +360,243 @@ def test_native_process_discards_oversized_unterminated_status_line(
 
     assert process.latest_status is None
     assert len(process.output_tail.encode()) <= 64 * 1024
+
+
+def test_native_process_bridges_batched_cpp_rates_into_ros_events(tmp_path: Path):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    status = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "session_id": "native",
+        "window_start_monotonic_ns": 1_000_000_000,
+        "window_end_monotonic_ns": 2_000_000_000,
+        "batch_index": 0,
+        "batch_count": 1,
+        "topics_truncated": False,
+        "topics": [
+            {
+                "topic": "/imu/data",
+                "message_count": 400,
+                "frequency_hz": 400.0,
+                "interval_ms": 2.5,
+            },
+            {
+                "topic": "/joint_states",
+                "message_count": 100,
+                "frequency_hz": 100.0,
+                "interval_ms": 10.0,
+            },
+        ],
+    }
+
+    process._inspect_output_line(f"RATE_STATUS {json.dumps(status)}".encode())
+
+    first = events.get_nowait()
+    second = events.get_nowait()
+    assert [first.data["topic"], second.data["topic"]] == [
+        "/imu/data",
+        "/joint_states",
+    ]
+    assert first.source == "ros_monitor"
+    assert first.event_type == "ros.frequency"
+    assert first.data["frequency_hz"] == 400.0
+    assert first.data["interval_ms"] == 2.5
+    assert first.metadata["capture_backend"] == "cpp"
+    assert first.metadata["frequency_source"] == "native_cpp"
+    assert first.metadata["message_count"] == 400
+    assert first.metadata["native_capture_session_id"] == "native"
+    assert process.rate_bridge_counters == {
+        "status_lines": 1,
+        "events_published": 2,
+        "status_rejected": 0,
+    }
+
+
+def test_native_process_consumes_available_rate_line_without_full_buffer(tmp_path: Path):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    status = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "session_id": "native",
+        "window_start_monotonic_ns": 1,
+        "window_end_monotonic_ns": 1_000_000_001,
+        "batch_index": 0,
+        "batch_count": 1,
+        "topics_truncated": False,
+        "topics": [
+            {
+                "topic": "/imu/data",
+                "message_count": 100,
+                "frequency_hz": 100.0,
+                "interval_ms": 10.0,
+            }
+        ],
+    }
+    stream = _AvailableChunkStream(
+        [f"RATE_STATUS {json.dumps(status)}\n".encode()]
+    )
+
+    process._drain_output(stream)  # type: ignore[arg-type]
+
+    event = events.get_nowait()
+    assert event.data["topic"] == "/imu/data"
+    assert stream.closed is True
+
+
+def test_native_process_assembles_batches_and_aggregates_type_churn(tmp_path: Path):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+        rate_topic_filters=["/imu/*"],
+    )
+
+    def batch(index: int, topics: list[dict[str, object]]) -> bytes:
+        return (
+            "RATE_STATUS "
+            + json.dumps(
+                {
+                    "schema_version": "blackboxrs.capture_rate_status.v1",
+                    "session_id": "native",
+                    "window_start_monotonic_ns": 1_000_000_000,
+                    "window_end_monotonic_ns": 2_000_000_000,
+                    "batch_index": index,
+                    "batch_count": 2,
+                    "topics_truncated": False,
+                    "topics": topics,
+                }
+            )
+        ).encode()
+
+    process._inspect_output_line(
+        batch(
+            0,
+            [
+                {
+                    "topic": "/imu/data",
+                    "message_count": 40,
+                    "frequency_hz": 40.0,
+                    "interval_ms": 25.0,
+                }
+            ],
+        )
+    )
+    assert events.empty()
+    process._inspect_output_line(
+        batch(
+            1,
+            [
+                {
+                    "topic": "/imu/data",
+                    "message_count": 60,
+                    "frequency_hz": 60.0,
+                    "interval_ms": 1000.0 / 60.0,
+                },
+                {
+                    "topic": "/joint_states",
+                    "message_count": 50,
+                    "frequency_hz": 50.0,
+                    "interval_ms": 20.0,
+                },
+                {
+                    "topic": "/blackbox/internal",
+                    "message_count": 10,
+                    "frequency_hz": 10.0,
+                    "interval_ms": 100.0,
+                },
+            ],
+        )
+    )
+
+    event = events.get_nowait()
+    assert events.empty()
+    assert event.data == {
+        "topic": "/imu/data",
+        "frequency_hz": 100.0,
+        "interval_ms": 10.0,
+    }
+    assert event.metadata["message_count"] == 100
+    assert event.metadata["rate_batch_count"] == 2
+    assert process.rate_bridge_counters == {
+        "status_lines": 2,
+        "events_published": 1,
+        "status_rejected": 0,
+    }
+
+
+def test_native_process_rejects_malformed_rate_status_atomically(tmp_path: Path):
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    status = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "window_start_monotonic_ns": 10,
+        "window_end_monotonic_ns": 20,
+        "topics_truncated": False,
+        "topics": [
+            {
+                "topic": "relative_topic",
+                "message_count": 1,
+                "frequency_hz": 1.0,
+                "interval_ms": 1000.0,
+            }
+        ],
+    }
+
+    process._inspect_output_line(f"RATE_STATUS {json.dumps(status)}".encode())
+
+    fault = events.get_nowait()
+    assert fault.source == "native_capture"
+    assert fault.event_type == "capture.native_rate_bridge_fault"
+    assert fault.data["state"] == "RATE_STATUS_REJECTED"
+    assert events.empty()
+    assert process.rate_bridge_counters == {
+        "status_lines": 1,
+        "events_published": 0,
+        "status_rejected": 1,
+    }
+
+
+@pytest.mark.parametrize(
+    ("topics", "filters", "expected"),
+    [
+        ([], [], True),
+        (["/imu/data"], [], False),
+        (["/imu/data", "/joint_states"], ["/imu/data"], True),
+        (["/imu/data"], ["/imu/*"], False),
+        (["/imu/data"], ["/joint_states"], False),
+    ],
+)
+def test_native_rate_bridge_requires_full_monitor_coverage(
+    topics: list[str], filters: list[str], expected: bool
+):
+    config = BlackBoxConfig.default()
+    config.capture.backend = "cpp"
+    config.capture.topics = topics
+    config.ros_monitor.topic_filters = filters
+
+    assert _native_rate_bridge_has_full_coverage(config) is expected

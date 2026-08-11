@@ -33,6 +33,7 @@ from blackboxrs.ros_monitor.monitor import RosMonitor
 
 def _make_monitor(
     topic_filters: list[str] | None = None,
+    native_frequency_bridge: bool = False,
 ) -> tuple[RosMonitor, EventBus, MagicMock]:
     bus = EventBus(default_queue_maxsize=64)
     config = RosMonitorConfig(
@@ -41,7 +42,12 @@ def _make_monitor(
         track_latency=False,
         topic_filters=topic_filters or [],
     )
-    monitor = RosMonitor(bus, config, Session())
+    monitor = RosMonitor(
+        bus,
+        config,
+        Session(),
+        native_frequency_bridge=native_frequency_bridge,
+    )
     fake_node = MagicMock()
     monitor._node = fake_node  # type: ignore[assignment]
     return monitor, bus, fake_node
@@ -168,6 +174,25 @@ class TestPollGraphPruning:
         # /drop/b was filtered out; only /keep/a should be subscribed.
         assert set(monitor._subscriptions) == {"/keep/a"}
         fake_node.destroy_subscription.assert_not_called()
+
+    def test_native_frequency_bridge_skips_python_data_subscriptions(self):
+        monitor, bus, fake_node = _make_monitor(native_frequency_bridge=True)
+        existing = SimpleNamespace(name="old-python-subscription")
+        monitor._subscriptions = {"/old": existing}
+        monitor._introspector = SimpleNamespace(
+            snapshot=lambda: _snapshot(["/imu/data", "/joint_states"]),
+        )
+        events = bus.subscribe()
+
+        monitor._poll_graph()
+
+        fake_node.create_subscription.assert_not_called()
+        fake_node.destroy_subscription.assert_called_once_with(existing)
+        assert monitor._subscriptions == {}
+        topology = events.get_nowait()
+        assert topology.source == "ros_monitor"
+        assert topology.event_type == "ros.topology"
+        assert topology.data["topics"] == ["/imu/data", "/joint_states"]
 
 
 class TestFrequencyTrackerForget:

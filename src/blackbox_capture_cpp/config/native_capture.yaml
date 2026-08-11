@@ -67,4 +67,8 @@
     buffer.post_trigger_seconds: 10.0
 
     status.publish_period_ms: 1000
+    # Disabled unless the Python supervisor enables the bounded RATE_STATUS
+    # bridge. A positive period emits callback-arrival summaries off the ingest
+    # thread; zero preserves the standalone recorder's original stdout surface.
+    status.rate_summary_period_ms: 0
     shutdown.drain_timeout_ms: 5000

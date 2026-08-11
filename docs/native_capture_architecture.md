@@ -23,6 +23,9 @@ flowchart TD
     MCAP --> READER[Python NativeCaptureReader]
     READER --> INTEL[Incidents, timelines, causes, fingerprints, reports, prevention]
     CAP --> STATUS[/blackbox/capture_status]
+    CAP --> RATE[Bounded RATE_STATUS batches]
+    RATE --> BRIDGE[Python low-rate event bridge]
+    BRIDGE --> INTEL
 ```
 
 The package and executable contracts are:
@@ -34,6 +37,8 @@ The package and executable contracts are:
   when `BLACKBOX_CAPTURE_ENABLE_EXPERIMENTAL_COMPOSITION=ON`
 - status topic: `/blackbox/capture_status`, `std_msgs/msg/String`, JSON schema
   `blackboxrs.capture_status.v1`
+- supervised rate stream: bounded `RATE_STATUS` stdout batches, JSON schema
+  `blackboxrs.capture_rate_status.v1`
 - benchmark package and executable: `blackbox_capture_bench publisher`
 
 Standalone execution is the deployment default. The component entry point makes
@@ -150,6 +155,24 @@ record. The record carries the last observed delta plus `coalesced_count` and
 `anomaly_count`. Clock activation and deactivation remain clock events but do not
 increment the anomaly counter. Configured forward and backward thresholds avoid
 classifying ordinary simulated-clock ticks as jumps.
+
+## Native rate bridge
+
+When the C++ capture scope covers every topic requested by the ROS monitor, the
+recorder also owns live frequency observation. The ingest callback increments a
+preallocated per-topic atomic only. A dedicated native summary thread samples
+those counters at a configured period and emits `RATE_STATUS` lines in batches
+of at most 64 topics, below the supervisor's fixed line limit. Zero-arrival
+topics are omitted so a summary cannot falsely refresh dead-topic liveness.
+
+`NativeCaptureProcess` validates each bounded batch and adapts it into the
+existing `ros.frequency` event contract. The Python ROS monitor continues to
+produce low-rate topology, QoS, and TF facts, but it does not create typed data
+subscriptions or deserialize every captured message. If native capture is
+configured for only a subset of the ROS monitor's topic scope, the bridge is
+disabled and the established Python frequency path remains active. This
+coverage check prevents silent monitoring gaps and preserves existing public
+configuration and detector contracts.
 
 ## Clocks and triggers
 

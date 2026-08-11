@@ -80,6 +80,8 @@ namespace
 
 using namespace std::chrono_literals;
 
+constexpr std::size_t kRateStatusTopicsPerBatch = 64U;
+
 uint64_t monotonic_now_ns() noexcept
 {
   return static_cast<uint64_t>(
@@ -347,6 +349,11 @@ public:
     if (graph_thread_.joinable()) {
       graph_thread_.join();
     }
+    rate_status_running_.store(false, std::memory_order_release);
+    rate_status_cv_.notify_all();
+    if (rate_status_thread_.joinable()) {
+      rate_status_thread_.join();
+    }
 
     const uint64_t timeout_ns = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(timeout).count());
@@ -414,6 +421,10 @@ public:
            << subscription_failures_.load(std::memory_order_acquire) << ','
            << "\"runtime_callback_faults\":"
            << runtime_callback_faults_.load(std::memory_order_acquire) << ','
+           << "\"rate_status_failures\":"
+           << rate_status_failures_.load(std::memory_order_acquire) << ','
+           << "\"rate_status_alive\":"
+           << (rate_status_alive_.load(std::memory_order_acquire) ? "true" : "false") << ','
            << "\"accepting\":"
            << (accepting_.load(std::memory_order_acquire) ? "true" : "false") << ','
            << "\"writer_alive\":"
@@ -765,6 +776,12 @@ private:
       checked_positive<int64_t>(
         node_.declare_parameter<int64_t>("status.publish_period_ms", 1000),
         "status.publish_period_ms"));
+    const int64_t rate_status_period_ms =
+      node_.declare_parameter<int64_t>("status.rate_summary_period_ms", 0);
+    if (rate_status_period_ms < 0) {
+      throw std::invalid_argument("status.rate_summary_period_ms must be zero or positive");
+    }
+    rate_status_period_ = std::chrono::milliseconds(rate_status_period_ms);
     drain_timeout_ = std::chrono::milliseconds(
       checked_positive<int64_t>(
         node_.declare_parameter<int64_t>("shutdown.drain_timeout_ms", 5000),
@@ -830,8 +847,18 @@ private:
     topic_registration_queued_.resize(static_cast<std::size_t>(max_topics_) + 1U, 0U);
     topic_registration_acked_ = std::make_unique<std::atomic<uint8_t>[]>(
       static_cast<std::size_t>(max_topics_) + 1U);
+    if (rate_status_period_.count() > 0) {
+      message_arrival_counts_ =
+        std::make_unique<std::atomic<uint64_t>[]>(static_cast<std::size_t>(max_topics_) + 1U);
+      rate_status_counts_ =
+        std::make_unique<uint64_t[]>(static_cast<std::size_t>(max_topics_) + 1U);
+    }
     for (std::size_t index = 0U; index <= static_cast<std::size_t>(max_topics_); ++index) {
       topic_registration_acked_[index].store(0U, std::memory_order_relaxed);
+      if (message_arrival_counts_) {
+        message_arrival_counts_[index].store(0U, std::memory_order_relaxed);
+        rate_status_counts_[index] = 0U;
+      }
     }
     topic_shed_tiers_.resize(static_cast<std::size_t>(max_topics_) + 1U, kDefaultShedTier);
     shed_watermarks_ = make_shed_watermarks(event_ring_->data_capacity(), high_watermark_ratio_);
@@ -881,12 +908,24 @@ private:
       "graph state");
     const uint64_t segment_state = checked_multiply(
       retention_max_segments_ + 1U, 1024U, "segment state");
+    const uint64_t rate_status_state = rate_status_period_.count() > 0 ?
+      checked_add(
+      checked_multiply(
+        static_cast<uint64_t>(max_topics_) + 1U, sizeof(std::atomic<uint64_t>),
+        "rate status counters"),
+      checked_multiply(
+        static_cast<uint64_t>(max_topics_) + 1U, sizeof(uint64_t),
+        "rate status snapshot"),
+      "rate status state") :
+      0U;
     capture_memory_budget_bytes_ = checked_add(
       capture_memory_budget_bytes_, writer_scratch, "capture memory estimate");
     capture_memory_budget_bytes_ = checked_add(
       capture_memory_budget_bytes_, bounded_graph_state, "capture memory estimate");
     capture_memory_budget_bytes_ = checked_add(
       capture_memory_budget_bytes_, segment_state, "capture memory estimate");
+    capture_memory_budget_bytes_ = checked_add(
+      capture_memory_budget_bytes_, rate_status_state, "capture memory estimate");
     if (capture_memory_budget_bytes_ > configured_memory_budget_bytes_) {
       throw std::invalid_argument(
               "buffer.memory_budget_bytes is smaller than the capture-owned memory estimate");
@@ -923,6 +962,11 @@ private:
       refresh_graph(true);
       graph_running_.store(true, std::memory_order_release);
       graph_thread_ = std::thread([this]() {graph_wait_loop();});
+      if (rate_status_period_.count() > 0) {
+        rate_status_window_start_ns_ = monotonic_now_ns();
+        rate_status_running_.store(true, std::memory_order_release);
+        rate_status_thread_ = std::thread([this]() noexcept {rate_status_loop();});
+      }
       set_pressure_state(kNormal);
       publish_status();
       const std::filesystem::path session_directory = "capture_" + session_id_;
@@ -938,6 +982,11 @@ private:
       graph_running_.store(false, std::memory_order_release);
       if (graph_thread_.joinable()) {
         graph_thread_.join();
+      }
+      rate_status_running_.store(false, std::memory_order_release);
+      rate_status_cv_.notify_all();
+      if (rate_status_thread_.joinable()) {
+        rate_status_thread_.join();
       }
       drain_deadline_ns_.store(monotonic_now_ns(), std::memory_order_release);
       writer_running_.store(false, std::memory_order_release);
@@ -1083,6 +1132,101 @@ private:
       graph_wait_faults_.fetch_add(1U, std::memory_order_relaxed);
       graph_coverage_faults_.fetch_add(1U, std::memory_order_relaxed);
       RCLCPP_ERROR(node_.get_logger(), "graph waiter stopped: %s", error.what());
+    }
+  }
+
+  void rate_status_loop() noexcept
+  {
+    rate_status_alive_.store(true, std::memory_order_release);
+    try {
+      std::unique_lock<std::mutex> lock(rate_status_mutex_);
+      while (rate_status_running_.load(std::memory_order_acquire)) {
+        const bool stopping = rate_status_cv_.wait_for(
+          lock, rate_status_period_, [this]() {
+            return !rate_status_running_.load(std::memory_order_acquire);
+          });
+        lock.unlock();
+        const uint64_t window_end_ns = monotonic_now_ns();
+        emit_rate_status(rate_status_window_start_ns_, window_end_ns);
+        rate_status_window_start_ns_ = window_end_ns;
+        lock.lock();
+        if (stopping) {
+          break;
+        }
+      }
+    } catch (const std::exception & error) {
+      rate_status_failures_.fetch_add(1U, std::memory_order_relaxed);
+      try {
+        RCLCPP_ERROR(node_.get_logger(), "native rate status thread stopped: %s", error.what());
+      } catch (...) {
+      }
+    } catch (...) {
+      rate_status_failures_.fetch_add(1U, std::memory_order_relaxed);
+    }
+    rate_status_alive_.store(false, std::memory_order_release);
+  }
+
+  void emit_rate_status(uint64_t window_start_ns, uint64_t window_end_ns)
+  {
+    if (window_end_ns <= window_start_ns) {
+      return;
+    }
+
+    std::size_t topic_count = 0U;
+    for (uint32_t topic_id = 1U; topic_id <= max_topics_; ++topic_id) {
+      const uint64_t count =
+        message_arrival_counts_[topic_id].exchange(0U, std::memory_order_acq_rel);
+      rate_status_counts_[topic_id] = count;
+      topic_count += count == 0U ? 0U : 1U;
+    }
+    if (topic_count == 0U) {
+      return;
+    }
+
+    const std::size_t batch_count =
+      (topic_count + kRateStatusTopicsPerBatch - 1U) / kRateStatusTopicsPerBatch;
+    const double elapsed_ns = static_cast<double>(window_end_ns - window_start_ns);
+    uint32_t next_topic_id = 1U;
+    for (std::size_t batch_index = 0U; batch_index < batch_count; ++batch_index) {
+      std::ostringstream stream;
+      stream << '{'
+             << "\"schema_version\":\"blackboxrs.capture_rate_status.v1\","
+             << "\"session_id\":\"" << json_escape(session_id_) << "\","
+             << "\"window_start_monotonic_ns\":" << window_start_ns << ','
+             << "\"window_end_monotonic_ns\":" << window_end_ns << ','
+             << "\"batch_index\":" << batch_index << ','
+             << "\"batch_count\":" << batch_count << ','
+             << "\"topics_truncated\":false,\"topics\":[";
+      std::size_t emitted_in_batch = 0U;
+      while (next_topic_id <= max_topics_ &&
+        emitted_in_batch < kRateStatusTopicsPerBatch)
+      {
+        const uint32_t topic_id = next_topic_id++;
+        const uint64_t count = rate_status_counts_[topic_id];
+        if (count == 0U) {
+          continue;
+        }
+        const std::string topic = topic_name_for_id(topic_id);
+        if (topic.empty()) {
+          rate_status_failures_.fetch_add(1U, std::memory_order_relaxed);
+          continue;
+        }
+        if (emitted_in_batch != 0U) {
+          stream << ',';
+        }
+        const double frequency_hz = static_cast<double>(count) * 1.0e9 / elapsed_ns;
+        const double interval_ms = elapsed_ns / static_cast<double>(count) / 1.0e6;
+        stream << "{\"topic\":\"" << json_escape(topic)
+               << "\",\"message_count\":" << count
+               << ",\"frequency_hz\":" << std::setprecision(12) << frequency_hz
+               << ",\"interval_ms\":" << std::setprecision(12) << interval_ms << '}';
+        ++emitted_in_batch;
+      }
+      stream << "]}";
+      if (emitted_in_batch != 0U) {
+        const std::string payload = stream.str();
+        RCLCPP_INFO(node_.get_logger(), "RATE_STATUS %s", payload.c_str());
+      }
     }
   }
 
@@ -1710,6 +1854,12 @@ private:
     const uint64_t sequence = next_sequence();
     const uint64_t size = message ? static_cast<uint64_t>(message->size()) : 0U;
     metrics_->record_received(topic_id, size);
+    // The low-rate Python bridge samples this preallocated counter array from
+    // its own native thread. Callback receipt remains one relaxed atomic add;
+    // JSON construction and stdout logging never run on the ingest lane.
+    if (message_arrival_counts_) {
+      message_arrival_counts_[topic_id].fetch_add(1U, std::memory_order_relaxed);
+    }
     if (!accepting_.load(std::memory_order_acquire)) {
       const DropReason reason = writer_faulted_.load(std::memory_order_acquire) ?
         DropReason::kStorageFault : DropReason::kShutdownCutoff;
@@ -2808,6 +2958,7 @@ private:
   bool discover_all_{false};
   std::chrono::milliseconds discovery_period_{100};
   std::chrono::milliseconds status_period_{1000};
+  std::chrono::milliseconds rate_status_period_{0};
   std::chrono::milliseconds flush_period_{250};
   std::chrono::milliseconds failure_delay_{0};
   std::chrono::milliseconds drain_timeout_{5000};
@@ -2865,6 +3016,8 @@ private:
   std::vector<uint8_t> best_effort_topic_ids_;
   std::vector<uint8_t> topic_registration_queued_;
   std::unique_ptr<std::atomic<uint8_t>[]> topic_registration_acked_;
+  std::unique_ptr<std::atomic<uint64_t>[]> message_arrival_counts_;
+  std::unique_ptr<uint64_t[]> rate_status_counts_;
   // Shedding priority per topic ID, sized once from capture.max_topics so the
   // ingest callback resolves a tier with one indexed load and no allocation.
   std::vector<uint8_t> topic_shed_tiers_;
@@ -2906,6 +3059,14 @@ private:
   std::atomic<bool> topic_coverage_truncated_{false};
   std::atomic<bool> node_coverage_truncated_{false};
   std::thread graph_thread_;
+
+  std::atomic<bool> rate_status_running_{false};
+  std::atomic<bool> rate_status_alive_{false};
+  std::atomic<uint64_t> rate_status_failures_{0};
+  uint64_t rate_status_window_start_ns_{0};
+  std::thread rate_status_thread_;
+  std::mutex rate_status_mutex_;
+  std::condition_variable rate_status_cv_;
 
   std::atomic<bool> writer_running_{false};
   std::atomic<bool> writer_alive_{false};

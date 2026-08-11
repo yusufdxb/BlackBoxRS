@@ -42,6 +42,12 @@ actual retained interval. Python reads that evidence through
 `NativeCaptureReader`; it does not reimplement MCAP details or move semantic
 incident logic into C++.
 
+When native capture covers the ROS monitor's topic scope, C++ also computes
+bounded per-topic rate summaries from the already-captured callbacks. Python
+receives only low-rate `ros.frequency` facts instead of creating duplicate typed
+subscriptions and deserializing every message a second time. Graph, QoS, TF,
+causal analysis, reporting, and prevention keep their existing contracts.
+
 The existing Python capture backend remains the default:
 
 ```yaml

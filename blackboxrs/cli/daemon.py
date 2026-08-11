@@ -14,6 +14,7 @@ import logging
 import os
 import signal
 import tempfile
+from glob import has_magic
 from pathlib import Path
 from threading import Event
 from typing import Any, Protocol
@@ -112,6 +113,18 @@ class _Component(Protocol):
     def stop(self) -> None: ...
 
 
+def _native_rate_bridge_has_full_coverage(config: BlackBoxConfig) -> bool:
+    """Return whether native capture covers every Python rate subscription."""
+    if config.capture.backend != "cpp" or not config.ros_monitor.enabled:
+        return False
+    if not config.capture.topics:
+        return True
+    filters = config.ros_monitor.topic_filters
+    if not filters or any(has_magic(pattern) for pattern in filters):
+        return False
+    return set(filters).issubset(config.capture.topics)
+
+
 # ---------------------------------------------------------------------------
 # Daemon
 # ---------------------------------------------------------------------------
@@ -186,19 +199,7 @@ class BlackBoxDaemon:
 
         self._running = True
         self._stop_event.clear()
-
-        # Native capture is opt-in. Python monitoring and incident reasoning
-        # remain active because they are the intelligence plane.
-        if self._config.capture.backend == "cpp":
-            from blackboxrs.recording import NativeCaptureProcess  # noqa: E402
-
-            native_capture = NativeCaptureProcess(
-                self._config.capture,
-                self._config.runtime,
-                self._event_bus,
-                self._session,
-            )
-            self._register(native_capture)
+        native_rate_bridge = _native_rate_bridge_has_full_coverage(self._config)
 
         # --- Logging pipeline (always enabled) ----------------------------
         from blackboxrs.logging import LoggingPipeline  # noqa: E402
@@ -214,6 +215,22 @@ class BlackBoxDaemon:
             engine = AnomalyEngine(self._event_bus, self._config.anomaly_engine, self._session)
             self._register(engine)
 
+        # Native capture starts after its low-rate Python consumers and before
+        # ROS producers. Python keeps incident reasoning, while C++ owns rate
+        # observation whenever its capture scope fully covers the ROS monitor.
+        if self._config.capture.backend == "cpp":
+            from blackboxrs.recording import NativeCaptureProcess  # noqa: E402
+
+            native_capture = NativeCaptureProcess(
+                self._config.capture,
+                self._config.runtime,
+                self._event_bus,
+                self._session,
+                publish_rate_events=native_rate_bridge,
+                rate_topic_filters=self._config.ros_monitor.topic_filters,
+            )
+            self._register(native_capture)
+
         # --- Rosbag2 recorder --------------------------------------------
         # Start after the anomaly engine so it reacts to emitted anomaly
         # events, but before the producers so it can see the first
@@ -228,7 +245,12 @@ class BlackBoxDaemon:
         if self._config.ros_monitor.enabled:
             from blackboxrs.ros_monitor import RosMonitor  # noqa: E402
 
-            ros_mon = RosMonitor(self._event_bus, self._config.ros_monitor, self._session)
+            ros_mon = RosMonitor(
+                self._event_bus,
+                self._config.ros_monitor,
+                self._session,
+                native_frequency_bridge=native_rate_bridge,
+            )
             self._register(ros_mon)
 
         # --- System monitor -----------------------------------------------

@@ -27,10 +27,13 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdarg>
+#include <cstdio>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -39,6 +42,7 @@
 
 #include "blackbox_capture/recorder.hpp"
 #include "mcap/reader.hpp"
+#include "rcutils/logging.h"
 #include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rclcpp/parameter.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -53,6 +57,58 @@ namespace
 {
 
 using namespace std::chrono_literals;
+
+struct CapturedRateStatus
+{
+  std::string message;
+  std::thread::id thread_id;
+};
+
+std::mutex g_rate_status_log_mutex;
+std::vector<CapturedRateStatus> g_rate_status_logs;
+
+void capture_rate_status_log(
+  const rcutils_log_location_t *, int, const char *, rcutils_time_point_value_t,
+  const char * format, va_list * arguments)
+{
+  std::array<char, 65536> buffer{};
+  va_list copy;
+  va_copy(copy, *arguments);
+  const int length = std::vsnprintf(buffer.data(), buffer.size(), format, copy);
+  va_end(copy);
+  if (length <= 0 || static_cast<std::size_t>(length) >= buffer.size()) {
+    return;
+  }
+  const std::string message(buffer.data(), static_cast<std::size_t>(length));
+  if (message.rfind("RATE_STATUS ", 0U) != 0U) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(g_rate_status_log_mutex);
+  g_rate_status_logs.push_back(CapturedRateStatus{message, std::this_thread::get_id()});
+}
+
+class ScopedRateStatusLogCapture
+{
+public:
+  ScopedRateStatusLogCapture()
+  : previous_(rcutils_logging_get_output_handler())
+  {
+    std::lock_guard<std::mutex> lock(g_rate_status_log_mutex);
+    g_rate_status_logs.clear();
+    rcutils_logging_set_output_handler(capture_rate_status_log);
+  }
+
+  ~ScopedRateStatusLogCapture() {rcutils_logging_set_output_handler(previous_);}
+
+  std::vector<CapturedRateStatus> snapshot() const
+  {
+    std::lock_guard<std::mutex> lock(g_rate_status_log_mutex);
+    return g_rate_status_logs;
+  }
+
+private:
+  rcutils_logging_output_handler_t previous_;
+};
 
 class TestDirectory
 {
@@ -114,6 +170,17 @@ uint64_t json_uint(const std::string & json, const std::string & field)
     throw std::runtime_error("missing JSON field: " + field);
   }
   return std::stoull(json.substr(position + prefix.size()));
+}
+
+uint64_t rate_message_count(const std::string & status, const std::string & topic)
+{
+  const std::string prefix =
+    "\"topic\":\"" + topic + "\",\"message_count\":";
+  const std::size_t position = status.find(prefix);
+  if (position == std::string::npos) {
+    return 0U;
+  }
+  return std::stoull(status.substr(position + prefix.size()));
 }
 
 std::set<std::string> schema_names_for_topic(
@@ -245,6 +312,7 @@ TEST_F(RecorderNodeTest, GracefulDrainPublishesAuthoritativeStoppedState)
   EXPECT_NE(status.find("\"accepting\":false"), std::string::npos);
   EXPECT_NE(status.find("\"writer_alive\":false"), std::string::npos);
   EXPECT_NE(status.find("\"writer_faulted\":false"), std::string::npos);
+  EXPECT_EQ(node->get_parameter("status.rate_summary_period_ms").as_int(), 0);
 
   for (const auto & entry : std::filesystem::recursive_directory_iterator(directory.path())) {
     EXPECT_NE(entry.path().extension(), ".partial");
@@ -338,6 +406,89 @@ TEST_F(RecorderNodeTest, CallbackBeginningAfterStopIsSequencedAndAccounted)
   executor.remove_node(recorder);
   executor.remove_node(publisher_node);
   EXPECT_TRUE(recorder->drain_and_stop(2s));
+}
+
+TEST_F(RecorderNodeTest, PeriodicRateStatusReportsExactCallbackCountsOffTheIngestThread)
+{
+  ScopedRateStatusLogCapture capture;
+  TestDirectory directory;
+  auto publisher_node = std::make_shared<rclcpp::Node>("rate_status_test_publisher");
+  auto publisher =
+    publisher_node->create_publisher<std_msgs::msg::String>("/rate_status_test", 10);
+  auto parameters = minimal_parameters(directory.path());
+  parameters.emplace_back(
+    "capture.topics", std::vector<std::string>{"/rate_status_test"});
+  parameters.emplace_back("capture.discovery_period_ms", 10);
+  parameters.emplace_back("status.rate_summary_period_ms", 200);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto recorder = std::make_shared<RecorderNode>(options);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(publisher_node);
+  executor.add_node(recorder);
+  const auto discovery_deadline = std::chrono::steady_clock::now() + 2s;
+  while (publisher->get_subscription_count() == 0U &&
+    std::chrono::steady_clock::now() < discovery_deadline)
+  {
+    executor.spin_some();
+    std::this_thread::sleep_for(10ms);
+  }
+  ASSERT_GT(publisher->get_subscription_count(), 0U);
+
+  constexpr uint64_t kMessages = 7U;
+  std_msgs::msg::String message;
+  message.data = "rate sample";
+  for (uint64_t index = 0U; index < kMessages; ++index) {
+    publisher->publish(message);
+  }
+
+  uint64_t reported = 0U;
+  std::vector<CapturedRateStatus> logs;
+  const auto report_deadline = std::chrono::steady_clock::now() + 2s;
+  while (reported < kMessages && std::chrono::steady_clock::now() < report_deadline) {
+    executor.spin_some();
+    std::this_thread::sleep_for(10ms);
+    logs = capture.snapshot();
+    reported = 0U;
+    for (const CapturedRateStatus & log : logs) {
+      reported += rate_message_count(log.message, "/rate_status_test");
+    }
+  }
+
+  ASSERT_EQ(reported, kMessages);
+  ASSERT_FALSE(logs.empty());
+  const std::thread::id executor_thread = std::this_thread::get_id();
+  bool found_topic = false;
+  for (const CapturedRateStatus & log : logs) {
+    if (rate_message_count(log.message, "/rate_status_test") == 0U) {
+      continue;
+    }
+    found_topic = true;
+    EXPECT_NE(log.thread_id, executor_thread);
+    EXPECT_NE(
+      log.message.find(
+        "RATE_STATUS {\"schema_version\":"
+        "\"blackboxrs.capture_rate_status.v1\""),
+      std::string::npos);
+    EXPECT_NE(log.message.find("\"session_id\":"), std::string::npos);
+    EXPECT_NE(log.message.find("\"batch_index\":0"), std::string::npos);
+    EXPECT_NE(log.message.find("\"batch_count\":1"), std::string::npos);
+    EXPECT_NE(log.message.find("\"topics_truncated\":false"), std::string::npos);
+    EXPECT_NE(log.message.find("\"frequency_hz\":"), std::string::npos);
+    EXPECT_NE(log.message.find("\"interval_ms\":"), std::string::npos);
+    const uint64_t start_ns = json_uint(log.message, "window_start_monotonic_ns");
+    const uint64_t end_ns = json_uint(log.message, "window_end_monotonic_ns");
+    EXPECT_LT(start_ns, end_ns);
+  }
+  EXPECT_TRUE(found_topic);
+  EXPECT_EQ(json_uint(recorder->status_json(), "rate_status_failures"), 0U);
+  EXPECT_NE(recorder->status_json().find("\"rate_status_alive\":true"), std::string::npos);
+
+  executor.remove_node(recorder);
+  executor.remove_node(publisher_node);
+  EXPECT_TRUE(recorder->drain_and_stop(2s));
+  EXPECT_NE(recorder->status_json().find("\"rate_status_alive\":false"), std::string::npos);
 }
 
 TEST_F(RecorderNodeTest, OversizedArrivalsStillSatisfyHeartbeatAtCallbackReceipt)
@@ -470,6 +621,16 @@ TEST_F(RecorderNodeTest, RejectsNegativeDurationBeforeStartingThreads)
   TestDirectory directory;
   auto parameters = minimal_parameters(directory.path());
   parameters.emplace_back("storage.segment_max_duration_sec", -1.0);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  EXPECT_THROW((void)std::make_shared<RecorderNode>(options), std::invalid_argument);
+}
+
+TEST_F(RecorderNodeTest, RejectsNegativeRateSummaryPeriodBeforeStartingThreads)
+{
+  TestDirectory directory;
+  auto parameters = minimal_parameters(directory.path());
+  parameters.emplace_back("status.rate_summary_period_ms", -1);
   rclcpp::NodeOptions options;
   options.parameter_overrides(parameters);
   EXPECT_THROW((void)std::make_shared<RecorderNode>(options), std::invalid_argument);

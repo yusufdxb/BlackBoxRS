@@ -84,10 +84,12 @@ class RosMonitor:
         event_bus: EventBus,
         config: RosMonitorConfig,
         session: Session,
+        native_frequency_bridge: bool = False,
     ) -> None:
         self._event_bus = event_bus
         self._config = config
         self._session = session
+        self._native_frequency_bridge = native_frequency_bridge
 
         self._node: Node | None = None  # type: ignore[assignment]
         self._executor: Any = None
@@ -143,9 +145,10 @@ class RosMonitor:
 
         # Emit frequency events at half the poll interval (at least 1 s).
         freq_sec = max(poll_sec / 2.0, 1.0)
-        self._freq_timer = self._node.create_timer(
-            freq_sec, self._emit_frequency_events
-        )
+        if not self._native_frequency_bridge:
+            self._freq_timer = self._node.create_timer(
+                freq_sec, self._emit_frequency_events
+            )
 
         # Start the TF snapshot producer. Failures are non-fatal so a
         # missing tf2_msgs install or a strange node clock cannot take
@@ -172,8 +175,9 @@ class RosMonitor:
         )
         self._thread.start()
         logger.info(
-            "ROS monitor started (poll=%.1fs, node=%s%s)",
+            "ROS monitor started (poll=%.1fs, frequency_source=%s, node=%s%s)",
             poll_sec,
+            "native_cpp" if self._native_frequency_bridge else "python",
             _NODE_NAMESPACE,
             f"/{_NODE_NAME}",
         )
@@ -251,6 +255,8 @@ class RosMonitor:
         for topic_info in snapshot.topics:
             topic = topic_info.name
             live_topics.add(topic)
+            if self._native_frequency_bridge:
+                continue
             if topic in self._subscriptions:
                 continue
             if not self._topic_allowed(topic):
@@ -262,7 +268,9 @@ class RosMonitor:
         # objects plus stale frequency windows for publishers that no
         # longer exist — bad for long-running recorders that outlive
         # many nodes.
-        self._prune_stale_subscriptions(live_topics)
+        self._prune_stale_subscriptions(
+            set() if self._native_frequency_bridge else live_topics
+        )
 
     def _prune_stale_subscriptions(self, live_topics: set[str]) -> None:
         """Drop subscriptions whose topics are no longer on the graph.
