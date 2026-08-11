@@ -220,6 +220,8 @@ jobs:
             ros-humble-ament-lint-common \
             ros-humble-mcap-vendor \
             ros-humble-rclcpp-components \
+            ros-humble-ros2bag \
+            ros-humble-rosbag2-storage-mcap \
             ros-humble-std-msgs
           rm -rf /var/lib/apt/lists/*
 
@@ -272,6 +274,8 @@ jobs:
             ros-humble-ament-lint-common \
             ros-humble-mcap-vendor \
             ros-humble-rclcpp-components \
+            ros-humble-ros2bag \
+            ros-humble-rosbag2-storage-mcap \
             ros-humble-std-msgs
           rm -rf /var/lib/apt/lists/*
 
