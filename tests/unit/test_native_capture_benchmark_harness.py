@@ -69,6 +69,26 @@ def test_expected_storage_fault_accepts_incomplete_exit_and_skips_dds_gate() -> 
     )
 
 
+def test_native_partial_segment_preserves_retained_counts_but_nulls_session_totals() -> None:
+    serialized_retained = 73
+    serialized_retained_bytes = 8192
+
+    committed, committed_bytes, scope_complete = benchmark._serialized_session_totals(
+        backend="native",
+        serialized_retained=serialized_retained,
+        serialized_retained_bytes=serialized_retained_bytes,
+        retention_evicted_segments=0,
+        partial_segment_count=1,
+        clean_process_close=False,
+    )
+
+    assert committed is None
+    assert committed_bytes is None
+    assert scope_complete is False
+    assert serialized_retained == 73
+    assert serialized_retained_bytes == 8192
+
+
 def test_both_backends_use_identical_publisher_command(tmp_path: Path) -> None:
     parser = benchmark.build_parser()
     native = parser.parse_args(["--backend", "native", "--scenario", "custom"])

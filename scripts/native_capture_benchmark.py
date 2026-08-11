@@ -563,6 +563,26 @@ def _requires_publisher_delivery_reconciliation(
     )
 
 
+def _serialized_session_totals(
+    *,
+    backend: str,
+    serialized_retained: int | None,
+    serialized_retained_bytes: int | None,
+    retention_evicted_segments: int | float | None,
+    partial_segment_count: int,
+    clean_process_close: bool,
+) -> tuple[int | None, int | None, bool]:
+    """Return reconstructable session totals and whether their scope is complete."""
+    scope_complete = (
+        retention_evicted_segments == 0
+        and partial_segment_count == 0
+        and (backend == "native" or clean_process_close)
+    )
+    if not scope_complete:
+        return None, None, False
+    return serialized_retained, serialized_retained_bytes, True
+
+
 def _machine() -> dict[str, Any]:
     return {
         "os": platform.system(),
@@ -1493,15 +1513,27 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         retention_evicted_segments = 0
         retention_evicted_bytes = 0
     clean_process_close = capture_exit_code in (0, 130) and not forced_shutdown
-    serialized_scope_complete = retention_evicted_segments == 0 and (
-        args.backend == "native" or clean_process_close
+    (
+        serialized_committed,
+        serialized_committed_bytes,
+        serialized_scope_complete,
+    ) = _serialized_session_totals(
+        backend=args.backend,
+        serialized_retained=serialized_retained,
+        serialized_retained_bytes=serialized_retained_bytes,
+        retention_evicted_segments=retention_evicted_segments,
+        partial_segment_count=len(partial_segments),
+        clean_process_close=clean_process_close,
     )
-    serialized_committed = serialized_retained if serialized_scope_complete else None
-    serialized_committed_bytes = serialized_retained_bytes if serialized_scope_complete else None
     if isinstance(retention_evicted_segments, (int, float)) and retention_evicted_segments > 0:
         warnings.append(
             "rolling retention evicted finalized segments; payload-only session totals cannot be "
             "reconstructed from the retained MCAP files"
+        )
+    if partial_segments:
+        warnings.append(
+            "a partial segment remains; finalized-file payload counts are retained, but "
+            "payload-only session totals cannot be reconstructed"
         )
     clock_offset_drift = clock_offsets.drift_ns if clock_offsets is not None else 0
     clock_alignment_valid = args.backend == "native" or (

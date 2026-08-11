@@ -117,6 +117,18 @@ device-endurance consideration this design has not yet addressed.
 - `write` and `trigger_to_flush` percentiles are null in every artifact; that
   instrumentation does not yet export samples.
 
+### CI bag fidelity gate
+
+CI replays the committed `examples/bags/go2_sim_odom_imu.mcap` fixture through
+the installed standalone C++ recorder under both Fast DDS and Cyclone DDS. The
+gate compares all 909 selected CDR payloads in per-topic order, checks the three
+ROS schema type names, verifies finalized MCAP sidecar sizes and checksums, and
+requires clean shutdown with zero recorder drops, storage errors, RMW losses,
+graph faults, subscription faults, QoS faults, and callback faults. Each run
+uploads a `blackboxrs.native_bag_gate.v1` JSON artifact containing per-topic
+counts and payload-sequence digests. Capture files are created in a temporary
+directory and removed after verification.
+
 Reproduce with:
 
 ```bash
@@ -247,22 +259,27 @@ Publisher `sent` and recorder `received` are different boundaries. The current
 recorder aggregate also includes graph and other control chronology, so it cannot
 be subtracted from publisher output to estimate DDS delivery loss. The
 `serialized_committed` is payload-only but downstream of recorder admission.
-For a supervisor-generated, exactly matched workload with no rolling eviction,
-the artifact now requires `sent == serialized_committed + serialized_dropped`.
-A mismatch is an invalid experiment with unexplained DDS or pre-callback loss,
-not a successful throughput result. External parameter files and evicted
-sessions cannot establish that comparison and carry an explicit warning.
+For a supervisor-generated, exactly matched workload with no rolling eviction or
+partial segment, the artifact requires
+`sent == serialized_committed + serialized_dropped`. A mismatch is an invalid
+experiment with unexplained DDS or pre-callback loss, not a successful throughput
+result. External parameter files, evicted sessions, and partial sessions cannot
+establish that comparison and carry an explicit warning. A partial MCAP may
+contain payloads committed before a storage fault, but the supervisor does not
+parse an incomplete file to upgrade those payloads into a session total. It
+reports `serialized_committed` as null rather than incorrectly treating the
+unrecoverable total as zero.
 
 `dropped` includes both pre-admission rejection and post-admission loss such as
 writer-fault discard, so it is not added to `admitted`. Final recorder
 reconciliation checks `received == committed + dropped` and also checks that
 committed never exceeds admitted.
 
-When rolling retention has evicted a segment, payload-only counts from files are
-reported as `serialized_retained`; `serialized_committed` becomes null because
-the session-wide payload count is no longer reconstructable from remaining
-MCAP. Total finalized storage bytes can still be reported from retained plus
-explicitly evicted byte accounting.
+When rolling retention has evicted a segment or a partial segment remains,
+payload-only counts from finalized files are reported as `serialized_retained`;
+`serialized_committed` becomes null because the session-wide payload count is no
+longer reconstructable. Total finalized storage bytes can still be reported from
+retained plus explicitly evicted byte accounting.
 
 ## Long-run stability
 
