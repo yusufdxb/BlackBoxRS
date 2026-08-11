@@ -106,6 +106,17 @@ jobs:
         run: |
           docker build -f docker/Dockerfile.humble -t blackboxrs:humble-ci .
 
+      - name: Verify installed native recorder
+        run: |
+          docker run --rm blackboxrs:humble-ci \
+            /bin/bash -c '
+              set -euo pipefail
+              prefix="$(ros2 pkg prefix blackbox_capture_cpp)"
+              test "$prefix" = /opt/blackboxrs/native_install
+              ros2 pkg executables blackbox_capture_cpp | grep -F "blackbox_capture_cpp blackbox_capture"
+              ! ldd "$prefix/lib/blackbox_capture_cpp/blackbox_capture" | grep -F "not found"
+            '
+
       - name: Run live ROS integration test
         run: |
           docker run --rm --init \
@@ -114,6 +125,29 @@ jobs:
             python3 -m pytest -q \
               tests/integration/test_ros_live.py \
               tests/integration/test_observer_live.py
+
+      - name: Prove native fidelity from shipping image
+        run: |
+          mkdir -p artifacts
+          for gate_spec in "rmw_fastrtps_cpp:83" "rmw_cyclonedds_cpp:84"; do
+            gate_rmw="${gate_spec%%:*}"
+            gate_domain="${gate_spec##*:}"
+            docker run --rm --init \
+              -e ROS_LOCALHOST_ONLY=1 \
+              -e ROS_DOMAIN_ID="$gate_domain" \
+              -e RMW_IMPLEMENTATION="$gate_rmw" \
+              -v "$PWD/artifacts:/artifacts" \
+              blackboxrs:humble-ci \
+              python3 scripts/native_capture_bag_gate.py \
+                --report "/artifacts/native_container_bag_gate_${gate_rmw}.json"
+          done
+
+      - name: Upload shipping-image fidelity proof
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-container-bag-fidelity
+          path: artifacts/native_container_bag_gate_*.json
 
   native-build:
     name: Native build + GoogleTest (${{ matrix.compiler }})

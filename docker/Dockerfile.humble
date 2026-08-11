@@ -1,6 +1,6 @@
-# BlackBoxRS — ROS 2 Humble container
+# BlackBoxRS ROS 2 Humble container
 #
-# Ships the BlackBoxRS daemon against a known-good ROS 2 environment.
+# Ships the BlackBoxRS daemon and native capture plane against a known-good ROS 2 environment.
 # This is the image used to reproduce the live-rclpy tests described
 # in the README; it is the ONLY image that the project claims to
 # support at present.  (Other ROS 2 distros may work, but are not
@@ -20,9 +20,32 @@
 #       -e ROS_DOMAIN_ID=42 \
 #       --entrypoint bash blackboxrs:humble
 #
-# The image is intentionally thin: just enough tooling to run the
-# daemon, execute live-ROS tests, and support rosbag2 recording. No
-# editor or extra application layers are bundled.
+# The runtime image contains no compiler or native test toolchain.
+
+FROM ros:humble-ros-base AS native-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+        python3-colcon-common-extensions \
+        ros-humble-mcap-vendor \
+        ros-humble-rclcpp-components \
+        ros-humble-std-msgs \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/blackboxrs-native-ws
+COPY src/blackbox_capture_cpp/ ./src/blackbox_capture_cpp/
+
+RUN . /opt/ros/humble/setup.sh \
+ && colcon --log-base /tmp/blackboxrs-colcon-log build \
+        --build-base /tmp/blackboxrs-colcon-build \
+        --install-base /opt/blackboxrs/native_install \
+        --merge-install \
+        --packages-select blackbox_capture_cpp \
+        --event-handlers console_direct+ \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 
 FROM ros:humble-ros-base
 
@@ -30,18 +53,28 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# python3-pip is not in the base image; install it alongside the
-# few rclpy deps the monitor actually touches (std_msgs is used by
-# the live test).
+# Include the two CI-verified RMW implementations and common ROS interface
+# packages so generic native subscriptions can load their type support.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         python3-pip \
+        ros-humble-geometry-msgs \
+        ros-humble-mcap-vendor \
+        ros-humble-nav-msgs \
+        ros-humble-rclcpp-components \
+        ros-humble-rmw-cyclonedds-cpp \
+        ros-humble-rmw-fastrtps-cpp \
         ros-humble-ros2bag \
         ros-humble-rosbag2-storage-default-plugins \
+        ros-humble-rosbag2-storage-mcap \
+        ros-humble-sensor-msgs \
         ros-humble-std-msgs \
+        ros-humble-tf2-msgs \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/blackboxrs
+
+COPY --from=native-builder /opt/blackboxrs/native_install/ ./native_install/
 
 # Copy only the metadata first so the dep-install layer is cached
 # across source edits.
@@ -53,11 +86,13 @@ COPY blackboxrs/ ./blackboxrs/
 # robust here than editable mode because the ROS base image does not
 # ship a new-enough build backend for PEP 660 by default.
 RUN pip3 install --no-cache-dir --upgrade "pip>=24" "setuptools<80" wheel \
- && pip3 install --no-cache-dir ".[dev]"
+ && pip3 install --no-cache-dir ".[dev,replay]"
 
 # Keep the live-ROS integration test in the image so CI can verify the
 # real rclpy path without bind-mounting the repository.
 COPY tests/ ./tests/
+COPY scripts/native_capture_bag_gate.py ./scripts/native_capture_bag_gate.py
+COPY examples/bags/go2_sim_odom_imu.mcap ./examples/bags/go2_sim_odom_imu.mcap
 
 # Make the CLI discoverable in a ROS-sourced shell.
 ENV PATH="/usr/local/bin:${PATH}"
@@ -69,5 +104,5 @@ VOLUME ["/root/.blackboxrs"]
 # Default: source ROS, then run the daemon in the foreground.
 # The `source` call has to happen inside the shell, so we use bash
 # -c rather than exec-form.
-ENTRYPOINT ["/bin/bash", "-lc", "source /opt/ros/humble/setup.bash && exec \"$@\"", "--"]
+ENTRYPOINT ["/bin/bash", "-lc", "source /opt/ros/humble/setup.bash && source /opt/blackboxrs/native_install/setup.bash && exec \"$@\"", "--"]
 CMD ["robot-blackbox", "start", "--foreground"]
