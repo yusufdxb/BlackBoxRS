@@ -2,7 +2,7 @@
 
 ## Purpose and proof boundary
 
-This audit maps the existing BlackBoxRS capture path before a native recorder is introduced. It identifies the current contracts that must be preserved, the limits that motivate a C++ capture plane, and the Python responsibilities that should remain unchanged.
+This audit maps the BlackBoxRS capture path immediately before a native recorder was introduced. It identifies the contracts that must be preserved, the limits that motivate a C++ capture plane, and the Python responsibilities that should remain unchanged. It is intentionally a baseline audit rather than a description of the later native implementation.
 
 The findings are based on source, tests, configuration, CI, committed fixtures, generated incident bundles, and local validation at commit `55e50f4`. Static inspection does not prove live robot behavior, sustained high-rate DDS capture, disk-pressure behavior, or hardware-specific performance.
 
@@ -10,27 +10,19 @@ The findings are based on source, tests, configuration, CI, committed fixtures, 
 
 BlackBoxRS 0.4.1 is a Python package, not currently an `ament` workspace. One daemon process coordinates several thread-owning components through an in-process `EventBus`:
 
-```text
-ROS 2 graph and messages                 Host OS
-          |                                 |
-          v                                 v
-     RosMonitor                        SystemMonitor
-          |                                 |
-          +---------------+-----------------+
-                          v
-                  bounded EventBus
-                    /      |      \
-                   v       v       v
-            AnomalyEngine JSONL   rosbag2 trigger
-                   |      writer    supervisor
-                   +-------+
-                           v
-                rotating telemetry logs
-                           |
-                           v
-                 Python incident builder
-            timeline, causes, fingerprint,
-               report, prevention rules
+```mermaid
+flowchart TD
+    ROS[ROS 2 graph and messages] --> RM[RosMonitor]
+    HOST[Host OS] --> SM[SystemMonitor]
+    RM --> BUS[bounded EventBus]
+    SM --> BUS
+    BUS --> AE[AnomalyEngine]
+    BUS --> LOG[JSONL writer]
+    AE --> BAG[rosbag2 trigger supervisor]
+    AE --> BUS
+    LOG --> ROT[rotating telemetry logs]
+    ROT --> INC[Python incident builder]
+    INC --> OUT[timeline, causes, fingerprint, report, prevention rules]
 ```
 
 The daemon starts the JSONL logger first, then the anomaly engine, optional rosbag2 recorder, ROS monitor, system monitor, and optional Prometheus exporter. It stops them in reverse order. Producers therefore stop before the two primary consumers, but the consumers do not drain their remaining queues during shutdown.
@@ -43,6 +35,24 @@ The public runtime roles are:
 - `observer`: DDS-visible ROS monitoring runs offboard. `apply_runtime_role()` disables the system monitor so local CPU, memory, disk, GPU, and process data are not mislabeled as robot data. Incident bundles carry `observer_host` and `observed_host`.
 
 The native recorder should preserve the same role distinction without assuming a specific processor, GPU, device path, RMW implementation, or network topology. Generic DDS evidence capture is meaningful in either role. Local process and disk-health evidence must continue to identify which host it describes.
+
+### Configuration boundary
+
+The pre-native configuration is a nested dataclass tree loaded from YAML. Missing keys use defaults, unknown keys warn by default, and strict loading rejects them. Capture-relevant defaults are:
+
+| Concern | Baseline configuration | Architectural implication |
+|---|---|---|
+| Event fan-out | `event_bus_queue_maxsize: 1024` | Bounds each subscriber by object count, not bytes |
+| ROS graph sampling | `poll_interval_sec: 1.0` | Discovery and churn evidence is sampled at one-second resolution |
+| Generic topic filter | empty `topic_filters` | All discoverable topics are candidates, subject to runtime type resolution |
+| JSONL retention | 50 MiB per file, 20 files, no age limit | Nominal retained telemetry is about 1 GiB, excluding oversize-record behavior |
+| System telemetry | one-second interval | Appropriate for health context, not a high-rate capture path |
+| Dead-topic timeout | 5 seconds | Detector behavior depends on sampled frequency events and later heartbeat events |
+| TF snapshots | 1 Hz, 60-second dynamic-edge garbage collection | Semantic TF state is deliberately lower-rate than raw `/tf` traffic |
+| Process snapshots | one-second sampling, at most 64 matching processes | Payload cardinality is bounded, but matching and detector maps remain Python state |
+| Triggered rosbag2 | disabled, 30-second post-trigger duration, at most 10 recordings | Compatibility recorder is opt-in and has no pre-trigger history |
+
+There is no capture-backend selector, capture memory ceiling, payload-size limit, segment budget, post-trigger byte cap, queue-watermark policy, or recorder-level drop ledger in this baseline. Those are additive native-plane configuration contracts. Existing keys, detector thresholds, observer-role behavior, rosbag2 settings, and Python defaults should remain stable unless a versioned migration is provided.
 
 ## Existing capture contracts
 
@@ -184,6 +194,14 @@ One current integration mismatch needs correction during interoperability work: 
 
 The incident schema also lacks capture-quality metadata. It cannot currently report backend, received/committed/dropped counts, dropped bytes, highest queue use, storage errors, clock anomalies, or capture start/end. Those fields are required before Python can make confidence claims over native evidence.
 
+### Prevention and preflight boundary
+
+Prevention is downstream intelligence, not capture-plane work. The Python rule deriver validates a finalized incident bundle, requires a sufficiently confident evidence-linked hypothesis, and only auto-maps two detector classes: `DeadTopicDetector` to `topic_present`, and `QoSMismatchDetector` to `qos_match`. The resulting YAML rule retains incident, fingerprint, trigger, detector, and source-event provenance.
+
+The preflight runner owns seven check kinds: `topic_present`, `qos_match`, `node_running`, `env_var`, `param_value`, `resource_threshold`, and `custom_python`. Active checks fail closed when execution is unavailable, malformed, or unknown, and the CLI distinguishes pass, block/error, and warnings through exit codes 0, 1, and 2. ROS graph checks create their own short-lived `rclpy` query node; host and custom checks remain Python integrations.
+
+Native capture should improve the evidence supplied to rule derivation, including explicit incompleteness, but must not duplicate rule policy or preflight execution in C++. An incident with measured capture loss must carry that limitation into cause confidence and automatic-adoption decisions rather than presenting the same trust level as complete evidence.
+
 ## Offline replay and GO2 evidence
 
 Offline replay reads topic names and recorded timestamps from MCAP or SQLite rosbag2 storage without deserializing payloads. It sorts all arrivals in memory, emits one `ros.frequency` event per arrival, pins the process-global virtual clock to bag time, and runs the real `DeadTopicDetector`. Fault injection can silence one topic after a cutoff. Only dead-topic replay is implemented; this is not a general replay of all seven detectors or message semantics.
@@ -272,13 +290,14 @@ The C++ backend is ready for opt-in deployment only when all of the following ar
 
 The architectural justification is therefore specific: C++ is warranted for bounded serialized ingestion, clocked chronology, backpressure accounting, and durable segment writing. It is not warranted as a rewrite of BlackBoxRS incident intelligence.
 
-## Validation performed
+## Baseline validation performed
 
-- Confirmed the initial and final worktree state was clean before this document was added.
+The following checks were recorded against pre-native commit `55e50f4`:
+
 - Inventoried all source, docs, tests, CI, fixtures, examples, and build metadata.
 - Traced daemon startup/shutdown, queues, ROS subscriptions, graph polling, TF handling, all seven detectors, JSONL writer/reader, rosbag2 supervision, offline replay, incident construction, bundle integrity, observer mode, process signals, preflight, benchmarking, and public CLI commands.
 - Verified default configuration values by importing the dataclass tree.
-- Ran `python3 .../inspect_workspace.py`, which confirmed there was no existing `package.xml` or ROS 2 package.
+- Ran a ROS 2 workspace inventory, which confirmed there was no existing `package.xml` or ROS 2 package.
 - Ran `.venv/bin/ruff check .`: passed.
 - Ran `.venv/bin/pytest --collect-only -q`: 596 tests collected.
 - Ran `.venv/bin/pytest -q`: 595 passed, 1 skipped in 53.92 seconds.

@@ -19,21 +19,33 @@
 // THE SOFTWARE.
 
 #include <gtest/gtest.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
+#include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "blackbox_capture/recorder.hpp"
+#include "mcap/reader.hpp"
+#include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rclcpp/parameter.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/int32.hpp"
+#include "std_msgs/msg/string.hpp"
+
+extern char ** environ;
 
 namespace blackbox_capture
 {
@@ -94,6 +106,115 @@ std::vector<rclcpp::Parameter> minimal_parameters(const std::filesystem::path & 
   };
 }
 
+uint64_t json_uint(const std::string & json, const std::string & field)
+{
+  const std::string prefix = "\"" + field + "\":";
+  const std::size_t position = json.find(prefix);
+  if (position == std::string::npos) {
+    throw std::runtime_error("missing JSON field: " + field);
+  }
+  return std::stoull(json.substr(position + prefix.size()));
+}
+
+std::set<std::string> schema_names_for_topic(
+  const std::filesystem::path & root, const std::string & topic)
+{
+  std::set<std::string> schemas;
+  for (const auto & entry : std::filesystem::recursive_directory_iterator(root)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".mcap" ||
+      entry.path().filename().string().find(".partial.") != std::string::npos)
+    {
+      continue;
+    }
+    mcap::McapReader reader;
+    const mcap::Status open_status = reader.open(entry.path().string());
+    EXPECT_TRUE(open_status.ok()) << open_status.message;
+    if (!open_status.ok()) {
+      continue;
+    }
+    for (const mcap::MessageView & view : reader.readMessages()) {
+      if (view.channel != nullptr && view.channel->topic == topic && view.schema != nullptr) {
+        schemas.insert(view.schema->name);
+      }
+    }
+    reader.close();
+  }
+  return schemas;
+}
+
+struct ChildProcessResult
+{
+  int spawn_error{0};
+  int wait_error{0};
+  int wait_status{0};
+  bool timed_out{false};
+
+  bool succeeded() const
+  {
+    return spawn_error == 0 && wait_error == 0 && !timed_out &&
+           WIFEXITED(wait_status) && WEXITSTATUS(wait_status) == 0;
+  }
+};
+
+ChildProcessResult run_type_churn_publisher(
+  const std::string & type, rclcpp::executors::SingleThreadedExecutor & executor)
+{
+  // A subprocess gives each publisher a fresh DDS participant. This models
+  // independently restarted ROS nodes without making the publisher fixture
+  // share Fast DDS topic/type state with the recorder under test.
+  ChildProcessResult result;
+  const std::filesystem::path helper =
+    std::filesystem::canonical("/proc/self/exe").parent_path() /
+    "test_type_churn_publisher";
+  std::string executable = helper.string();
+  std::string argument_type = type;
+  std::string topic = "/type_flip";
+  std::array<char *, 4> arguments{
+    executable.data(), argument_type.data(), topic.data(), nullptr};
+  pid_t process_id = -1;
+  result.spawn_error = ::posix_spawn(
+    &process_id, executable.c_str(), nullptr, nullptr, arguments.data(), environ);
+  if (result.spawn_error != 0) {
+    return result;
+  }
+
+  const auto deadline = std::chrono::steady_clock::now() + 7s;
+  while (std::chrono::steady_clock::now() < deadline) {
+    const pid_t waited = ::waitpid(process_id, &result.wait_status, WNOHANG);
+    if (waited == process_id) {
+      return result;
+    }
+    if (waited < 0 && errno != EINTR) {
+      result.wait_error = errno;
+      return result;
+    }
+    executor.spin_some();
+    std::this_thread::sleep_for(5ms);
+  }
+
+  result.timed_out = true;
+  (void)::kill(process_id, SIGKILL);
+  while (::waitpid(process_id, &result.wait_status, 0) < 0 && errno == EINTR) {
+  }
+  return result;
+}
+
+bool wait_for_no_publishers(
+  const std::shared_ptr<RecorderNode> & recorder,
+  rclcpp::executors::SingleThreadedExecutor & executor,
+  std::chrono::milliseconds timeout)
+{
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    executor.spin_some();
+    if (recorder->get_publishers_info_by_topic("/type_flip").empty()) {
+      return true;
+    }
+    std::this_thread::sleep_for(5ms);
+  }
+  return false;
+}
+
 class RecorderNodeTest : public ::testing::Test
 {
 protected:
@@ -121,10 +242,227 @@ TEST_F(RecorderNodeTest, GracefulDrainPublishesAuthoritativeStoppedState)
   const std::string status = node->status_json();
   EXPECT_NE(status.find("\"state\":\"STOPPED_CLEAN\""), std::string::npos);
   EXPECT_NE(status.find("\"durable\":"), std::string::npos);
+  EXPECT_NE(status.find("\"accepting\":false"), std::string::npos);
+  EXPECT_NE(status.find("\"writer_alive\":false"), std::string::npos);
+  EXPECT_NE(status.find("\"writer_faulted\":false"), std::string::npos);
 
   for (const auto & entry : std::filesystem::recursive_directory_iterator(directory.path())) {
     EXPECT_NE(entry.path().extension(), ".partial");
   }
+}
+
+TEST_F(RecorderNodeTest, RuntimeStorageFailureStopsAdmissionAndForcesIncompleteDrain)
+{
+  TestDirectory directory;
+  auto parameters = minimal_parameters(directory.path());
+  parameters.emplace_back("storage.failure_injection_fail_after_bytes", 64);
+  parameters.emplace_back("storage.flush_period_ms", 10);
+  parameters.emplace_back("capture.max_payload_bytes", 4096);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto node = std::make_shared<RecorderNode>(options);
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+
+  const auto deadline = std::chrono::steady_clock::now() + 2s;
+  std::string status;
+  do {
+    executor.spin_some();
+    status = node->status_json();
+    if (status.find("\"writer_faulted\":true") != std::string::npos) {
+      break;
+    }
+    std::this_thread::sleep_for(10ms);
+  } while (std::chrono::steady_clock::now() < deadline);
+
+  EXPECT_NE(status.find("\"state\":\"STORAGE_FAULT\""), std::string::npos);
+  EXPECT_NE(status.find("\"accepting\":false"), std::string::npos);
+  EXPECT_NE(status.find("\"writer_faulted\":true"), std::string::npos);
+  EXPECT_NE(status.find("\"writer_alive\":true"), std::string::npos);
+  executor.remove_node(node);
+  EXPECT_FALSE(node->drain_and_stop(2s));
+  status = node->status_json();
+  EXPECT_NE(status.find("\"state\":\"STOPPED_INCOMPLETE\""), std::string::npos);
+  EXPECT_NE(status.find("\"writer_alive\":false"), std::string::npos);
+}
+
+TEST_F(RecorderNodeTest, CallbackBeginningAfterStopIsSequencedAndAccounted)
+{
+  TestDirectory directory;
+  auto publisher_node = std::make_shared<rclcpp::Node>("cutoff_test_publisher");
+  auto publisher = publisher_node->create_publisher<std_msgs::msg::String>("/cutoff_test", 10);
+  auto parameters = minimal_parameters(directory.path());
+  parameters.emplace_back("capture.topics", std::vector<std::string>{"/cutoff_test"});
+  parameters.emplace_back("capture.discovery_period_ms", 10);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto recorder = std::make_shared<RecorderNode>(options);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(publisher_node);
+  executor.add_node(recorder);
+  const auto discovery_deadline = std::chrono::steady_clock::now() + 2s;
+  while (publisher->get_subscription_count() == 0U &&
+    std::chrono::steady_clock::now() < discovery_deadline)
+  {
+    executor.spin_some();
+    std::this_thread::sleep_for(10ms);
+  }
+  ASSERT_GT(publisher->get_subscription_count(), 0U);
+
+  const std::string before = recorder->status_json();
+  const uint64_t received_before = json_uint(before, "received");
+  const uint64_t dropped_before = json_uint(before, "dropped");
+  const uint64_t sequence_before = json_uint(before, "last_sequence");
+  recorder->request_stop();
+  std_msgs::msg::String message;
+  message.data = "callback after admission closed";
+  publisher->publish(message);
+
+  std::string after;
+  const auto callback_deadline = std::chrono::steady_clock::now() + 2s;
+  do {
+    executor.spin_some();
+    after = recorder->status_json();
+    if (json_uint(after, "dropped") > dropped_before) {
+      break;
+    }
+    std::this_thread::sleep_for(10ms);
+  } while (std::chrono::steady_clock::now() < callback_deadline);
+
+  EXPECT_EQ(json_uint(after, "received"), received_before + 1U);
+  EXPECT_EQ(json_uint(after, "dropped"), dropped_before + 1U);
+  EXPECT_EQ(json_uint(after, "last_sequence"), sequence_before + 1U);
+  EXPECT_NE(after.find("\"reason\":6,\"count\":1"), std::string::npos);
+
+  executor.remove_node(recorder);
+  executor.remove_node(publisher_node);
+  EXPECT_TRUE(recorder->drain_and_stop(2s));
+}
+
+TEST_F(RecorderNodeTest, OversizedArrivalsStillSatisfyHeartbeatAtCallbackReceipt)
+{
+  TestDirectory directory;
+  auto publisher_node = std::make_shared<rclcpp::Node>("oversize_test_publisher");
+  auto publisher = publisher_node->create_publisher<std_msgs::msg::String>("/oversize_test", 10);
+  auto parameters = minimal_parameters(directory.path());
+  parameters.emplace_back("capture.topics", std::vector<std::string>{"/oversize_test"});
+  parameters.emplace_back("capture.discovery_period_ms", 10);
+  parameters.emplace_back("trigger.dead_topic_timeout_sec", 0.3);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto recorder = std::make_shared<RecorderNode>(options);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(publisher_node);
+  executor.add_node(recorder);
+  const auto discovery_deadline = std::chrono::steady_clock::now() + 2s;
+  while (publisher->get_subscription_count() == 0U &&
+    std::chrono::steady_clock::now() < discovery_deadline)
+  {
+    executor.spin_some();
+    std::this_thread::sleep_for(10ms);
+  }
+  ASSERT_GT(publisher->get_subscription_count(), 0U);
+
+  std_msgs::msg::String message;
+  message.data.assign(2048U, 'x');
+  const auto publish_deadline = std::chrono::steady_clock::now() + 800ms;
+  while (std::chrono::steady_clock::now() < publish_deadline) {
+    publisher->publish(message);
+    executor.spin_some();
+    std::this_thread::sleep_for(10ms);
+  }
+  const std::string status = recorder->status_json();
+  EXPECT_NE(status.find("\"reason\":3"), std::string::npos);
+
+  executor.remove_node(recorder);
+  executor.remove_node(publisher_node);
+  EXPECT_TRUE(recorder->drain_and_stop(2s));
+  for (const auto & entry : std::filesystem::directory_iterator(directory.path())) {
+    EXPECT_NE(entry.path().filename().string().rfind("incident_", 0U), 0U);
+  }
+}
+
+TEST_F(RecorderNodeTest, PublisherTypeChangeGetsANewDurableTopicDefinition)
+{
+  TestDirectory directory;
+  auto parameters = minimal_parameters(directory.path());
+  parameters.emplace_back("capture.topics", std::vector<std::string>{"/type_flip"});
+  parameters.emplace_back("capture.discovery_period_ms", 10);
+  parameters.emplace_back("storage.segment_max_duration_sec", 10.0);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto recorder = std::make_shared<RecorderNode>(options);
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(recorder);
+  const ChildProcessResult string_result = run_type_churn_publisher("string", executor);
+  ASSERT_TRUE(string_result.succeeded())
+    << "string publisher process failed: spawn_error=" << string_result.spawn_error
+    << " wait_error=" << string_result.wait_error
+    << " wait_status=" << string_result.wait_status
+    << " timed_out=" << string_result.timed_out;
+  ASSERT_TRUE(wait_for_no_publishers(recorder, executor, 2s));
+
+  const auto graph_settle_deadline = std::chrono::steady_clock::now() + 100ms;
+  while (std::chrono::steady_clock::now() < graph_settle_deadline) {
+    executor.spin_some();
+    std::this_thread::sleep_for(5ms);
+  }
+
+  const ChildProcessResult integer_result = run_type_churn_publisher("int32", executor);
+  ASSERT_TRUE(integer_result.succeeded())
+    << "integer publisher process failed: spawn_error=" << integer_result.spawn_error
+    << " wait_error=" << integer_result.wait_error
+    << " wait_status=" << integer_result.wait_status
+    << " timed_out=" << integer_result.timed_out;
+  const std::string status = recorder->status_json();
+  EXPECT_EQ(json_uint(status, "graph_coverage_faults"), 0U);
+  EXPECT_EQ(json_uint(status, "subscription_failures"), 0U);
+
+  executor.remove_node(recorder);
+  EXPECT_TRUE(recorder->drain_and_stop(2s));
+  const std::set<std::string> schemas = schema_names_for_topic(directory.path(), "/type_flip");
+  EXPECT_NE(schemas.find("std_msgs/msg/String"), schemas.end());
+  EXPECT_NE(schemas.find("std_msgs/msg/Int32"), schemas.end());
+}
+
+TEST_F(RecorderNodeTest, PublisherFanoutCannotOverflowBoundedQosMetadata)
+{
+  TestDirectory directory;
+  auto parameters = minimal_parameters(directory.path());
+  parameters.emplace_back("capture.topics", std::vector<std::string>{"/publisher_fanout"});
+  parameters.emplace_back("capture.discovery_period_ms", 10);
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto recorder = std::make_shared<RecorderNode>(options);
+  auto publisher_node = std::make_shared<rclcpp::Node>("fanout_publishers");
+  std::vector<rclcpp::Publisher<std_msgs::msg::String>::SharedPtr> publishers;
+  for (std::size_t index = 0U; index < 20U; ++index) {
+    publishers.push_back(
+      publisher_node->create_publisher<std_msgs::msg::String>("/publisher_fanout", 10));
+  }
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(recorder);
+  executor.add_node(publisher_node);
+  const auto discovery_deadline = std::chrono::steady_clock::now() + 2s;
+  while (publishers.front()->get_subscription_count() == 0U &&
+    std::chrono::steady_clock::now() < discovery_deadline)
+  {
+    executor.spin_some();
+    std::this_thread::sleep_for(10ms);
+  }
+  ASSERT_GT(publishers.front()->get_subscription_count(), 0U);
+  EXPECT_EQ(json_uint(recorder->status_json(), "graph_coverage_faults"), 0U);
+
+  std_msgs::msg::String message;
+  message.data = "fanout";
+  publishers.front()->publish(message);
+  executor.spin_some();
+  executor.remove_node(publisher_node);
+  executor.remove_node(recorder);
+  EXPECT_TRUE(recorder->drain_and_stop(2s));
 }
 
 TEST_F(RecorderNodeTest, RejectsNegativeDurationBeforeStartingThreads)
@@ -176,6 +514,25 @@ TEST_F(RecorderNodeTest, PrunesOldSessionsBeforePublishingTheCurrentSession)
 
   EXPECT_FALSE(std::filesystem::exists(old_session));
   EXPECT_TRUE(std::filesystem::exists(directory.path() / "current_session.json"));
+  EXPECT_TRUE(node->drain_and_stop(2s));
+}
+
+TEST_F(RecorderNodeTest, AcceptsGraduatedPriorityTiersAndTheLegacyAlias)
+{
+  TestDirectory directory;
+  auto parameters = minimal_parameters(directory.path());
+  parameters.emplace_back(
+    "capture.priority_tier_0", std::vector<std::string>{"/cmd_vel", "/joint_states", "/imu/data"});
+  parameters.emplace_back("capture.priority_tier_1", std::vector<std::string>{"/tf"});
+  parameters.emplace_back("capture.priority_tier_2", std::vector<std::string>{"/tf_static"});
+  parameters.emplace_back("capture.high_priority_topics", std::vector<std::string>{"/diagnostics"});
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  auto node = std::make_shared<RecorderNode>(options);
+
+  EXPECT_EQ(
+    node->get_parameter("capture.priority_tier_0").as_string_array().size(), 3U);
+  EXPECT_EQ(node->get_parameter("capture.priority_tier_1").as_string_array().front(), "/tf");
   EXPECT_TRUE(node->drain_and_stop(2s));
 }
 

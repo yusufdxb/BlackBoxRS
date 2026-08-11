@@ -35,6 +35,8 @@ CURRENT_CAPTURE_SCHEMA = "blackboxrs.current_capture.v1"
 SERIALIZED_MESSAGE = 1 << 0
 ROS_TIME_VALID = 1 << 16
 _UINT32_MODULUS = 1 << 32
+_CURRENT_POINTER_BYTES = 64 * 1024
+_METADATA_BYTES = 4 * 1024 * 1024
 _KNOWN_CONTROL_KINDS = {"graph", "drop", "trigger", "clock", "status", "storage"}
 _VALID_SOURCES = {
     "ros_monitor",
@@ -96,13 +98,21 @@ class NativeCaptureFormatError(NativeCaptureError):
     """Raised for invalid native data when strict reading is requested."""
 
 
+def _load_bounded_json(path: Path, maximum_bytes: int) -> Any:
+    with path.open("rb") as stream:
+        encoded = stream.read(maximum_bytes + 1)
+    if len(encoded) > maximum_bytes:
+        raise ValueError(f"JSON metadata exceeds {maximum_bytes} bytes")
+    return json.loads(encoded.decode("utf-8"))
+
+
 def resolve_current_native_session(output_directory: str | Path) -> Path | None:
     """Resolve the recorder-published current session without path traversal."""
     root = Path(output_directory).expanduser()
     pointer = root / "current_session.json"
     try:
-        metadata = json.loads(pointer.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        metadata = _load_bounded_json(pointer, _CURRENT_POINTER_BYTES)
+    except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return None
     if not isinstance(metadata, dict) or metadata.get("schema_version") != CURRENT_CAPTURE_SCHEMA:
         return None
@@ -299,8 +309,12 @@ class NativeCaptureReader:
         self._capture_started_monotonic_ns: int | None = None
         self._capture_ended_monotonic_ns: int | None = None
         self._clean_values: list[bool] = []
+        self._authoritative_clean: bool | None = None
+        self._partial_segment_present = False
         self._recovered = False
         self._recovery_discarded_tail_bytes: int | None = None
+        self._recovery_unwritten_tail_loss_unknown = False
+        self._recovery_last_sequence_low32: int | None = None
         self._recovery_corruption_reason: str | None = None
         self._malformed_records = 0
         self._sequence_gaps: list[tuple[int, int]] = []
@@ -371,6 +385,10 @@ class NativeCaptureReader:
             reasons.append("topic_coverage_truncated")
         if self._node_coverage_truncated:
             reasons.append("node_coverage_truncated")
+        if self._recovered:
+            reasons.append("recovered_segment")
+        if self._recovery_unwritten_tail_loss_unknown:
+            reasons.append("recovery_unwritten_tail_loss_unknown")
         if self._delivery_scope != "callback_received":
             # Without an authoritative delivery scope from the recorder we cannot
             # account for pre-callback (DDS) loss at all, so completeness is not
@@ -379,14 +397,12 @@ class NativeCaptureReader:
             # from silently reading as complete while the session it came from
             # recorded RMW message loss.
             reasons.append("delivery_scope_unverified")
-        clean: bool | None
-        if not self._clean_values:
+        clean = self._effective_clean()
+        if clean is None:
             clean = None
             reasons.append("clean_state_unknown")
-        else:
-            clean = all(self._clean_values)
-            if not clean:
-                reasons.append("unclean_segment")
+        elif not clean:
+            reasons.append("unclean_segment")
 
         reasons = list(dict.fromkeys(reasons))
         if not self._segments:
@@ -430,6 +446,10 @@ class NativeCaptureReader:
             clean=clean,
             recovered=self._recovered,
             recovery_discarded_tail_bytes=self._recovery_discarded_tail_bytes,
+            recovery_unwritten_tail_loss_unknown=(
+                self._recovery_unwritten_tail_loss_unknown
+            ),
+            recovery_last_sequence_low32=self._recovery_last_sequence_low32,
             recovery_corruption_reason=self._recovery_corruption_reason,
             segments=len(self._segments),
             retained_events=self._retained_events,
@@ -646,6 +666,7 @@ class NativeCaptureReader:
         partials = sorted((self.path / "segments").glob("*.partial.mcap"))
         partials.extend(sorted(self.path.glob("*.partial.mcap")))
         for partial in partials:
+            self._partial_segment_present = True
             self._issue(
                 "partial_segment_present",
                 "Capture session contains an unfinalized partial segment",
@@ -884,6 +905,7 @@ class NativeCaptureReader:
                 path,
             )
         else:
+            self._authoritative_clean = clean
             self._clean_values.append(clean)
         for target, source in {
             "received": "received",
@@ -1038,6 +1060,39 @@ class NativeCaptureReader:
             )
         else:
             self._recovery_discarded_tail_bytes = discarded
+        input_was_clean = _optional_bool(metadata.get("input_was_clean"))
+        if input_was_clean is None:
+            self._issue(
+                "recovery_input_clean_invalid",
+                "Recovery input_was_clean must be a boolean",
+                metadata_path,
+            )
+        tail_unknown = metadata.get("unwritten_tail_loss_unknown")
+        if tail_unknown is None and input_was_clean is not None:
+            # v1 recovery sidecars written before this field was introduced
+            # cannot prove what remained in process or middleware memory.
+            self._recovery_unwritten_tail_loss_unknown = not input_was_clean
+        else:
+            parsed_tail_unknown = _optional_bool(tail_unknown)
+            if parsed_tail_unknown is None:
+                self._issue(
+                    "recovery_unwritten_tail_loss_invalid",
+                    "Recovery unwritten_tail_loss_unknown must be a boolean",
+                    metadata_path,
+                )
+            else:
+                self._recovery_unwritten_tail_loss_unknown = parsed_tail_unknown
+        raw_last_sequence = metadata.get("last_recovered_sequence_low32")
+        if raw_last_sequence is not None:
+            last_sequence = _optional_nonnegative_int(raw_last_sequence)
+            if last_sequence is None or last_sequence >= _UINT32_MODULUS:
+                self._issue(
+                    "recovery_last_sequence_invalid",
+                    "Recovery last_recovered_sequence_low32 must fit uint32",
+                    metadata_path,
+                )
+            else:
+                self._recovery_last_sequence_low32 = last_sequence
         reason = metadata.get("corruption_reason")
         if not isinstance(reason, str):
             self._issue(
@@ -1297,6 +1352,12 @@ class NativeCaptureReader:
                     self._observe_event(event)
                     self._records_read += 1
                     yield event
+        except api.crc_error as exc:
+            # A chunk CRC failure is bit rot or tampering, not truncation, and
+            # it derives from ValueError rather than McapError, so it has to be
+            # caught by name. Stop reading this segment and continue with the
+            # next one: one damaged chunk must not make the bundle unbuildable.
+            self._issue("chunk_crc_mismatch", str(exc), segment.path)
         except (OSError, api.mcap_error, EOFError, RuntimeError, struct.error) as exc:
             self._issue("truncated_or_invalid_segment", str(exc), segment.path)
         self._validate_segment_records(segment, record_count, first_sequence, last_sequence)
@@ -1445,6 +1506,7 @@ class NativeCaptureReader:
         received = self._value("received")
         dropped = self._value("dropped")
         committed = self._value("committed")
+        durable = self._durable
         if (
             self._final_quality_loaded
             and received is not None
@@ -1457,6 +1519,32 @@ class NativeCaptureReader:
                 f"received={received}, committed={committed}, dropped={dropped}",
                 self.path,
             )
+        if durable is not None and committed is not None and durable > committed:
+            self._issue(
+                "durable_count_exceeds_committed",
+                f"durable={durable}, committed={committed}",
+                self.path,
+            )
+            self._authoritative_clean = False
+        if (
+            self._authoritative_clean is True
+            and durable is not None
+            and committed is not None
+            and durable != committed
+        ):
+            self._issue(
+                "clean_capture_not_fully_durable",
+                f"clean capture has durable={durable}, committed={committed}",
+                self.path,
+            )
+            self._authoritative_clean = False
+        if self._authoritative_clean is True and any(value is False for value in self._clean_values):
+            self._issue(
+                "clean_state_contradiction",
+                "Final quality is clean but at least one segment sidecar is unclean",
+                self.path,
+            )
+            self._authoritative_clean = False
         captured = self._value("captured")
         if captured is not None and committed is not None and committed > captured:
             self._issue(
@@ -1469,8 +1557,7 @@ class NativeCaptureReader:
             and committed is not None
             and captured != committed
             and not self._is_incident_window
-            and self._clean_values
-            and all(self._clean_values)
+            and self._effective_clean() is True
         ):
             self._issue(
                 "clean_segment_uncommitted_events",
@@ -1518,21 +1605,53 @@ class NativeCaptureReader:
         last = payload.get("last_sequence", payload.get("last_dropped_sequence"))
         start = _optional_nonnegative_int(first)
         end = _optional_nonnegative_int(last)
-        if start is not None and end is not None and end >= start:
-            self._drop_ranges.append((start, end))
+        count = _optional_nonnegative_int(payload.get("count"))
+        if start is None or end is None or end < start:
+            return
+        # Recorder ledgers are cumulative by topic and reason. Their first and
+        # last sequence values describe a sparse envelope when committed events
+        # or drops from other ledgers occur between them. Only a range whose
+        # cardinality exactly matches its width proves a contiguous run. Using
+        # a sparse envelope to explain sequence gaps launders unrelated loss.
+        width = end - start + 1
+        if count != width:
+            self._issue(
+                "sparse_drop_range_unverifiable",
+                f"Drop ledger count={count!r} does not prove contiguous range {start}..{end}",
+                self.path,
+            )
+            return
+        self._drop_ranges.append((start, end))
 
     def _gap_accounted(self, gap: tuple[int, int]) -> bool:
         return any(start <= gap[0] and end >= gap[1] for start, end in self._drop_ranges)
+
+    def _effective_clean(self) -> bool | None:
+        """Return session lifecycle cleanliness without trusting segment close flags.
+
+        A segment sidecar proves that one MCAP file finalized. It cannot prove
+        that the recorder process reached a clean terminal state. Session and
+        incident directories therefore require final capture quality, while a
+        directly addressed standalone segment may still use its own sidecar.
+        Partial or recovered evidence is always non-clean.
+        """
+        if self._partial_segment_present or self._recovered:
+            return False
+        if self._final_quality_loaded:
+            return self._authoritative_clean
+        if self.path.is_file() and self._clean_values:
+            return all(self._clean_values)
+        return None
 
     def _value(self, name: str) -> int | None:
         return int(self._counts[name] or 0) if name in self._count_seen else None
 
     def _load_json(self, path: Path, code: str) -> dict[str, Any] | None:
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw = _load_bounded_json(path, _METADATA_BYTES)
         except FileNotFoundError:
             return None
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             self._issue(code, str(exc), path)
             return None
         if not isinstance(raw, dict):
@@ -1566,10 +1685,15 @@ class NativeCaptureReader:
         )
 
 
+class _UnavailableCRCValidationError(Exception):
+    """Never raised: stands in when the mcap build exposes no CRC error type."""
+
+
 @dataclass(frozen=True, slots=True)
 class _McapApi:
     nonseeking_reader: Any
     mcap_error: type[Exception]
+    crc_error: type[Exception]
 
 
 def _load_mcap() -> _McapApi:
@@ -1581,7 +1705,19 @@ def _load_mcap() -> _McapApi:
             "Native capture reading requires the optional 'mcap' package. "
             "Install BlackBoxRS with the replay extra: pip install 'blackboxrs[replay]'."
         ) from exc
-    return _McapApi(reader_module.NonSeekingReader, exceptions_module.McapError)
+    # CRCValidationError derives from ValueError, not McapError, so importing it
+    # explicitly is the only way the reader can distinguish a CRC failure from a
+    # decode failure. Older or vendored mcap builds may not expose it.
+    crc_error: type[Exception] = _UnavailableCRCValidationError
+    try:
+        stream_module = importlib.import_module("mcap.stream_reader")
+    except ImportError:
+        pass
+    else:
+        candidate = getattr(stream_module, "CRCValidationError", None)
+        if isinstance(candidate, type) and issubclass(candidate, Exception):
+            crc_error = candidate
+    return _McapApi(reader_module.NonSeekingReader, exceptions_module.McapError, crc_error)
 
 
 def _validate_control_envelope(envelope: Mapping[str, Any]) -> None:

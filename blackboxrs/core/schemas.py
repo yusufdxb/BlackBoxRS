@@ -99,6 +99,8 @@ class CaptureQuality(BaseModel):
     clean: bool | None = None
     recovered: bool = False
     recovery_discarded_tail_bytes: int | None = Field(default=None, ge=0)
+    recovery_unwritten_tail_loss_unknown: bool = False
+    recovery_last_sequence_low32: int | None = Field(default=None, ge=0, le=(1 << 32) - 1)
     recovery_corruption_reason: str | None = None
     segments: int = Field(default=0, ge=0)
     retained_events: int | None = Field(default=None, ge=0)

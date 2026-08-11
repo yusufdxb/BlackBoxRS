@@ -109,6 +109,18 @@ std::size_t TriggerEngine::evaluate(
   std::size_t emitted = 0U;
   for (uint32_t topic_id = 1U; topic_id < states_.size(); ++topic_id) {
     TopicState & state = states_[topic_id];
+    if (!state.configured || !state.pending_rate_trigger_valid) {
+      continue;
+    }
+    if (emitted >= output_capacity) {
+      return emitted;
+    }
+    output[emitted++] = state.pending_rate_trigger;
+    state.pending_rate_trigger_valid = false;
+  }
+
+  for (uint32_t topic_id = 1U; topic_id < states_.size(); ++topic_id) {
+    TopicState & state = states_[topic_id];
     if (!state.configured) {
       continue;
     }
@@ -156,24 +168,36 @@ std::size_t TriggerEngine::evaluate(
       state.high_first_seen_ns = 0U;
     }
 
-    if (rate <= low_threshold && !state.low_active && emitted < output_capacity) {
-      output[emitted++] = TriggerEvent{TriggerCode::kRateLow,
+    if (rate <= low_threshold && !state.low_active) {
+      const TriggerEvent event{TriggerCode::kRateLow,
         state.config.severity,
         topic_id,
         state.window_start_ns,
         monotonic_ns,
         rate,
         low_threshold};
+      if (emitted < output_capacity) {
+        output[emitted++] = event;
+      } else {
+        state.pending_rate_trigger = event;
+        state.pending_rate_trigger_valid = true;
+      }
       state.low_active = true;
       state.low_first_seen_ns = state.window_start_ns;
-    } else if (rate >= high_threshold && !state.high_active && emitted < output_capacity) {
-      output[emitted++] = TriggerEvent{TriggerCode::kRateHigh,
+    } else if (rate >= high_threshold && !state.high_active) {
+      const TriggerEvent event{TriggerCode::kRateHigh,
         state.config.severity,
         topic_id,
         state.window_start_ns,
         monotonic_ns,
         rate,
         high_threshold};
+      if (emitted < output_capacity) {
+        output[emitted++] = event;
+      } else {
+        state.pending_rate_trigger = event;
+        state.pending_rate_trigger_valid = true;
+      }
       state.high_active = true;
       state.high_first_seen_ns = state.window_start_ns;
     }

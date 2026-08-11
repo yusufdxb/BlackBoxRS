@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -126,6 +127,103 @@ std::size_t count_messages(const std::filesystem::path & path, std::string * con
   return count;
 }
 
+std::vector<uint32_t> read_message_sequences(const std::filesystem::path & path)
+{
+  mcap::McapReader reader;
+  const mcap::Status status = reader.open(path.string());
+  EXPECT_TRUE(status.ok()) << status.message;
+  std::vector<uint32_t> sequences;
+  for (const mcap::MessageView & view : reader.readMessages()) {
+    sequences.push_back(view.message.sequence);
+  }
+  reader.close();
+  return sequences;
+}
+
+std::vector<mcap::ByteOffset> chunk_offsets(const std::filesystem::path & path)
+{
+  mcap::McapReader reader;
+  const mcap::Status open_status = reader.open(path.string());
+  EXPECT_TRUE(open_status.ok()) << open_status.message;
+  std::vector<mcap::ByteOffset> offsets;
+  if (!open_status.ok() || reader.dataSource() == nullptr) {
+    return offsets;
+  }
+  mcap::TypedRecordReader records(
+    *reader.dataSource(), sizeof(mcap::Magic), std::filesystem::file_size(path));
+  records.onChunk = [&](const mcap::Chunk &, mcap::ByteOffset offset) {
+      offsets.push_back(offset);
+    };
+  while (records.next()) {
+  }
+  reader.close();
+  return offsets;
+}
+
+void corrupt_payload(
+  const std::filesystem::path & path, std::byte marker,
+  std::size_t marker_size)
+{
+  std::fstream stream(path, std::ios::binary | std::ios::in | std::ios::out);
+  ASSERT_TRUE(stream.good());
+  std::vector<char> bytes(
+    (std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+  const std::vector<char> marker_bytes(marker_size, static_cast<char>(marker));
+  const auto marker_position = std::search(
+    bytes.begin(), bytes.end(), marker_bytes.begin(), marker_bytes.end());
+  ASSERT_NE(marker_position, bytes.end());
+  const std::streamoff offset =
+    static_cast<std::streamoff>(std::distance(bytes.begin(), marker_position) + 8);
+  stream.clear();
+  stream.seekp(offset);
+  const char corrupt = static_cast<char>(0xa5);
+  stream.write(&corrupt, 1);
+  stream.close();
+}
+
+struct McapLayout
+{
+  std::size_t chunks{0U};
+  std::size_t message_indexes{0U};
+  std::size_t chunk_indexes{0U};
+  std::size_t footers{0U};
+  bool chunk_crc_present{false};
+  uint64_t summary_start{UINT64_MAX};
+  uint64_t summary_offset_start{UINT64_MAX};
+};
+
+McapLayout inspect_layout(const std::filesystem::path & path)
+{
+  mcap::McapReader reader;
+  const mcap::Status open_status = reader.open(path.string());
+  EXPECT_TRUE(open_status.ok()) << open_status.message;
+  McapLayout layout{};
+  if (!open_status.ok() || reader.dataSource() == nullptr) {
+    return layout;
+  }
+  mcap::TypedRecordReader records(
+    *reader.dataSource(), sizeof(mcap::Magic), std::filesystem::file_size(path));
+  records.onChunk = [&](const mcap::Chunk & chunk, mcap::ByteOffset) {
+      ++layout.chunks;
+      layout.chunk_crc_present = layout.chunk_crc_present || chunk.uncompressedCrc != 0U;
+    };
+  records.onMessageIndex = [&](const mcap::MessageIndex &, mcap::ByteOffset) {
+      ++layout.message_indexes;
+    };
+  records.onChunkIndex = [&](const mcap::ChunkIndex &, mcap::ByteOffset) {
+      ++layout.chunk_indexes;
+    };
+  records.onFooter = [&](const mcap::Footer & footer, mcap::ByteOffset) {
+      ++layout.footers;
+      layout.summary_start = footer.summaryStart;
+      layout.summary_offset_start = footer.summaryOffsetStart;
+    };
+  while (records.next()) {
+  }
+  reader.close();
+  return layout;
+}
+
 TEST(SegmentWriterTest, WritesReadableMcapAndVersionedSidecar) {
   TestDirectory directory;
   SegmentWriter writer(options_for(directory.path()));
@@ -174,6 +272,55 @@ TEST(SegmentWriterTest, WritesReadableMcapAndVersionedSidecar) {
     std::string::npos);
   EXPECT_NE(session_json.find("\"monotonic_anchor_ns\":"), std::string::npos);
   EXPECT_NE(session_json.find("\"system_time_anchor_ns\":"), std::string::npos);
+}
+
+TEST(SegmentWriterTest, WritesChecksummedChunksWithoutOnlineIndexesOrSummary)
+{
+  TestDirectory directory;
+  SegmentWriter writer(options_for(directory.path(), "bounded-index"));
+  ASSERT_TRUE(writer.open().ok());
+  ASSERT_TRUE(writer.register_topic(test_topic()).ok());
+  PayloadArena arena({64U, 8U, 512U});
+  const std::vector<std::byte> payload(64U, std::byte{0x17});
+  write_payload(writer, arena, make_event(1U, 10U, 64U), payload);
+  write_payload(writer, arena, make_event(2U, 20U, 64U), payload);
+  ASSERT_TRUE(writer.close().ok()) << writer.last_status().message;
+
+  const auto & path = writer.closed_segments().front().path;
+  EXPECT_EQ(count_messages(path), 2U);
+  const McapLayout layout = inspect_layout(path);
+  EXPECT_GT(layout.chunks, 0U);
+  EXPECT_TRUE(layout.chunk_crc_present);
+  EXPECT_EQ(layout.message_indexes, 0U);
+  EXPECT_EQ(layout.chunk_indexes, 0U);
+  EXPECT_EQ(layout.footers, 1U);
+  EXPECT_EQ(layout.summary_start, 0U);
+  EXPECT_EQ(layout.summary_offset_start, 0U);
+}
+
+TEST(SegmentWriterTest, StaleLegacyMetadataTemporaryDoesNotBlockFinalization)
+{
+  TestDirectory directory;
+  SegmentWriter writer(options_for(directory.path(), "stale-metadata"));
+  ASSERT_TRUE(writer.open().ok());
+  ASSERT_TRUE(writer.register_topic(test_topic()).ok());
+  PayloadArena arena({64U, 8U, 512U});
+  const std::vector<std::byte> payload(32U, std::byte{0x21});
+  write_payload(writer, arena, make_event(1U, 10U, 32U), payload);
+
+  const auto sidecar = directory.path() / "capture_stale-metadata" / "segments" /
+    "0000000000000000.json";
+  const auto stale_temporary = sidecar.string() + ".tmp";
+  {
+    std::ofstream stream(stale_temporary);
+    ASSERT_TRUE(stream.good());
+    stream << "stale";
+  }
+
+  ASSERT_TRUE(writer.close().ok()) << writer.last_status().message;
+  EXPECT_TRUE(std::filesystem::exists(sidecar));
+  EXPECT_TRUE(std::filesystem::exists(stale_temporary));
+  EXPECT_EQ(count_messages(writer.closed_segments().front().path), 1U);
 }
 
 TEST(SegmentWriterTest, PersistsControlEnvelopeWithDualClockAndGlobalSequence) {
@@ -373,7 +520,10 @@ TEST(SegmentWriterTest, RecoversMessagesFromTruncatedCleanSegment) {
   ASSERT_TRUE(status.ok()) << status.message;
   EXPECT_TRUE(result.recovered);
   EXPECT_FALSE(result.input_was_clean);
+  EXPECT_TRUE(result.unwritten_tail_loss_unknown);
   EXPECT_EQ(result.recovered_messages, 2U);
+  ASSERT_TRUE(result.last_recovered_sequence_low32.has_value());
+  EXPECT_EQ(*result.last_recovered_sequence_low32, 2U);
   EXPECT_GT(result.discarded_tail_bytes, 0U);
   EXPECT_LE(result.discarded_tail_bytes, original_size - 32U);
   EXPECT_EQ(count_messages(recovered), 2U);
@@ -386,45 +536,258 @@ TEST(SegmentWriterTest, RecoversMessagesFromTruncatedCleanSegment) {
     recovery_json.find("blackboxrs.capture_recovery.v1"),
     std::string::npos);
   EXPECT_NE(recovery_json.find("\"recovered_messages\":2"), std::string::npos);
+  EXPECT_NE(
+    recovery_json.find("\"unwritten_tail_loss_unknown\":true"),
+    std::string::npos);
+  EXPECT_NE(
+    recovery_json.find("\"last_recovered_sequence_low32\":2"),
+    std::string::npos);
 }
 
-TEST(SegmentWriterTest, RefusesToReissuePayloadFromCorruptChunk)
+TEST(SegmentWriterTest, RecoveryReplacesOwnedStalePartialAndSidecar)
+{
+  TestDirectory directory;
+  SegmentWriter writer(options_for(directory.path(), "retry-recovery"));
+  ASSERT_TRUE(writer.open().ok());
+  ASSERT_TRUE(writer.register_topic(test_topic()).ok());
+  PayloadArena arena({64U, 8U, 512U});
+  const std::vector<std::byte> payload(16U, std::byte{0x2c});
+  write_payload(writer, arena, make_event(9U, 90U, 16U), payload);
+  ASSERT_TRUE(writer.close().ok());
+
+  const auto source = writer.closed_segments().front().path;
+  const auto recovered = directory.path() / "retry.mcap";
+  const auto stale_partial = recovered.string() + ".partial";
+  const auto stale_sidecar = recovered.string() + ".recovery.json";
+  {
+    std::ofstream stream(stale_partial, std::ios::binary);
+    ASSERT_TRUE(stream.good());
+    stream << "incomplete";
+  }
+  {
+    std::ofstream stream(stale_sidecar);
+    ASSERT_TRUE(stream.good());
+    stream << "stale";
+  }
+
+  RecoveryResult result{};
+  const CaptureStatus status = SegmentWriter::recover_partial(source, recovered, result);
+  ASSERT_TRUE(status.ok()) << status.message;
+  EXPECT_TRUE(result.recovered);
+  EXPECT_TRUE(result.input_was_clean);
+  EXPECT_FALSE(result.unwritten_tail_loss_unknown);
+  EXPECT_EQ(count_messages(recovered), 1U);
+  EXPECT_FALSE(std::filesystem::exists(stale_partial));
+  EXPECT_TRUE(std::filesystem::exists(stale_sidecar));
+  std::ifstream sidecar_stream(stale_sidecar);
+  const std::string sidecar_json((std::istreambuf_iterator<char>(sidecar_stream)),
+    std::istreambuf_iterator<char>());
+  EXPECT_NE(sidecar_json.find("blackboxrs.capture_recovery.v1"), std::string::npos);
+}
+
+TEST(SegmentWriterTest, RecoveryDoesNotTreatJunkBeforeTrailingMagicAsClean)
+{
+  TestDirectory directory;
+  SegmentWriter writer(options_for(directory.path(), "junk-before-magic"));
+  ASSERT_TRUE(writer.open().ok());
+  ASSERT_TRUE(writer.register_topic(test_topic()).ok());
+  PayloadArena arena({64U, 8U, 512U});
+  const std::vector<std::byte> payload(16U, std::byte{0x33});
+  write_payload(writer, arena, make_event(1U, 10U, 16U), payload);
+  ASSERT_TRUE(writer.close().ok());
+  const auto source = writer.closed_segments().front().path;
+
+  std::ifstream input(source, std::ios::binary);
+  ASSERT_TRUE(input.good());
+  std::vector<char> bytes(
+    (std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  ASSERT_GE(bytes.size(), sizeof(mcap::Magic));
+  bytes.insert(bytes.end() - static_cast<std::ptrdiff_t>(sizeof(mcap::Magic)), '\x7f');
+  std::ofstream output(source, std::ios::binary | std::ios::trunc);
+  ASSERT_TRUE(output.good());
+  output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  output.close();
+
+  RecoveryResult result{};
+  const auto recovered = directory.path() / "junk-before-magic-recovered.mcap";
+  const CaptureStatus status = SegmentWriter::recover_partial(source, recovered, result);
+  ASSERT_TRUE(status.ok()) << status.message;
+  EXPECT_TRUE(result.recovered);
+  EXPECT_FALSE(result.input_was_clean);
+  EXPECT_TRUE(result.unwritten_tail_loss_unknown);
+  EXPECT_GT(result.discarded_tail_bytes, 0U);
+  EXPECT_EQ(result.corruption_reason, "trailing or structurally invalid bytes");
+}
+
+TEST(SegmentWriterTest, RecoveryRejectsInputThatAliasesOwnedOutputPaths)
+{
+  TestDirectory directory;
+  SegmentWriter writer(options_for(directory.path(), "alias-source"));
+  ASSERT_TRUE(writer.open().ok());
+  ASSERT_TRUE(writer.register_topic(test_topic()).ok());
+  PayloadArena arena({64U, 8U, 512U});
+  const std::vector<std::byte> payload(16U, std::byte{0x31});
+  write_payload(writer, arena, make_event(1U, 10U, 16U), payload);
+  ASSERT_TRUE(writer.close().ok());
+  const auto source = writer.closed_segments().front().path;
+
+  for (const char * suffix : {".partial", ".recovery.json"}) {
+    const auto recovery_output = directory.path() / "alias";
+    const std::filesystem::path input = recovery_output.string() + suffix;
+    std::filesystem::copy_file(source, input);
+    const uint64_t original_bytes = std::filesystem::file_size(input);
+    RecoveryResult result{};
+    const CaptureStatus status =
+      SegmentWriter::recover_partial(input, recovery_output, result);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.code, CaptureStatusCode::kInvalidArgument);
+    EXPECT_TRUE(std::filesystem::exists(input));
+    EXPECT_EQ(std::filesystem::file_size(input), original_bytes);
+  }
+}
+
+TEST(SegmentWriterTest, RecoveryRejectsForgedUncompressedChunkSize)
+{
+  TestDirectory directory;
+  SegmentWriter writer(options_for(directory.path(), "forged-chunk"));
+  ASSERT_TRUE(writer.open().ok());
+  ASSERT_TRUE(writer.register_topic(test_topic()).ok());
+  PayloadArena arena({64U, 8U, 512U});
+  const std::vector<std::byte> payload(32U, std::byte{0x42});
+  write_payload(writer, arena, make_event(1U, 10U, 32U), payload);
+  ASSERT_TRUE(writer.close().ok());
+  const auto source = writer.closed_segments().front().path;
+
+  mcap::McapReader reader;
+  ASSERT_TRUE(reader.open(source.string()).ok());
+  ASSERT_NE(reader.dataSource(), nullptr);
+  mcap::ByteOffset chunk_offset = 0U;
+  mcap::TypedRecordReader records(
+    *reader.dataSource(), sizeof(mcap::Magic), std::filesystem::file_size(source));
+  records.onChunk = [&](const mcap::Chunk &, mcap::ByteOffset offset) {
+      chunk_offset = offset;
+    };
+  while (chunk_offset == 0U && records.next()) {
+  }
+  reader.close();
+  ASSERT_NE(chunk_offset, 0U);
+
+  // Chunk record header (opcode + length), start time, then end time precede
+  // the little-endian uncompressed-size field.
+  constexpr uint64_t forged_size = 1024ULL * 1024ULL * 1024ULL;
+  std::fstream stream(source, std::ios::binary | std::ios::in | std::ios::out);
+  ASSERT_TRUE(stream.good());
+  stream.seekp(static_cast<std::streamoff>(chunk_offset + 1U + 8U + 8U + 8U));
+  for (std::size_t byte = 0U; byte < sizeof(forged_size); ++byte) {
+    stream.put(static_cast<char>((forged_size >> (byte * 8U)) & 0xffU));
+  }
+  stream.close();
+
+  RecoveryResult result{};
+  const auto recovered = directory.path() / "forged-recovered.mcap";
+  const CaptureStatus status = SegmentWriter::recover_partial(source, recovered, result);
+  EXPECT_FALSE(status.ok());
+  EXPECT_EQ(status.code, CaptureStatusCode::kCorruptData);
+  EXPECT_FALSE(std::filesystem::exists(recovered));
+}
+
+TEST(SegmentWriterTest, RecoveryStopsAtCorruptChunkAndPreservesOnlyStrictPrefix)
 {
   TestDirectory directory;
   SegmentWriter writer(options_for(directory.path(), "corrupt-recovery"));
   ASSERT_TRUE(writer.open().ok());
   ASSERT_TRUE(writer.register_topic(test_topic()).ok());
   PayloadArena arena({64U, 16U, 512U});
-  std::vector<std::byte> payload(32U, std::byte{0x5a});
-  write_payload(
-    writer, arena,
-    make_event(1U, 10U, static_cast<uint32_t>(payload.size())), payload);
+  constexpr std::size_t kPayloadSize = 32U;
+  for (uint32_t sequence = 1U; sequence <= 3U; ++sequence) {
+    const std::vector<std::byte> payload(
+      kPayloadSize, static_cast<std::byte>(sequence * 0x11U));
+    write_payload(
+      writer, arena,
+      make_event(sequence, sequence * 10U, static_cast<uint32_t>(payload.size())), payload);
+    ASSERT_TRUE(writer.flush().ok());
+  }
   ASSERT_TRUE(writer.close().ok());
 
   const auto source = writer.closed_segments().front().path;
-  std::fstream stream(source, std::ios::binary | std::ios::in | std::ios::out);
-  ASSERT_TRUE(stream.good());
-  std::vector<char> bytes(
-    (std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-  const std::vector<char> marker(payload.size(), static_cast<char>(0x5a));
-  const auto marker_position = std::search(
-    bytes.begin(), bytes.end(), marker.begin(), marker.end());
-  ASSERT_NE(marker_position, bytes.end());
-  const std::streamoff offset =
-    static_cast<std::streamoff>(std::distance(bytes.begin(), marker_position) + 8);
-  stream.clear();
-  stream.seekp(offset);
-  const char corrupt = static_cast<char>(0xa5);
-  stream.write(&corrupt, 1);
-  stream.close();
+  const std::vector<mcap::ByteOffset> offsets = chunk_offsets(source);
+  ASSERT_EQ(offsets.size(), 3U);
+  const uint64_t input_size = std::filesystem::file_size(source);
+  corrupt_payload(source, std::byte{0x22}, kPayloadSize);
 
   RecoveryResult result{};
   const auto recovered = directory.path() / "corrupt-recovered.mcap";
   const CaptureStatus status = SegmentWriter::recover_partial(source, recovered, result);
-  EXPECT_FALSE(status.ok());
-  EXPECT_EQ(status.code, CaptureStatusCode::kCorruptData);
-  EXPECT_FALSE(result.recovered);
-  EXPECT_FALSE(std::filesystem::exists(recovered));
+  ASSERT_TRUE(status.ok()) << status.message;
+  EXPECT_TRUE(result.recovered);
+  EXPECT_FALSE(result.input_was_clean);
+  EXPECT_TRUE(result.unwritten_tail_loss_unknown);
+  EXPECT_EQ(result.recovered_messages, 1U);
+  ASSERT_TRUE(result.last_recovered_sequence_low32.has_value());
+  EXPECT_EQ(*result.last_recovered_sequence_low32, 1U);
+  EXPECT_EQ(result.discarded_tail_bytes, input_size - offsets[1]);
+  EXPECT_EQ(result.corruption_reason, "partial MCAP contains a chunk CRC mismatch");
+  EXPECT_EQ(read_message_sequences(recovered), std::vector<uint32_t>({1U}));
+  EXPECT_FALSE(std::filesystem::exists(recovered.string() + ".partial"));
+  const std::filesystem::path sidecar = recovered.string() + ".recovery.json";
+  ASSERT_TRUE(std::filesystem::exists(sidecar));
+  std::ifstream sidecar_stream(sidecar);
+  const std::string sidecar_json((std::istreambuf_iterator<char>(sidecar_stream)),
+    std::istreambuf_iterator<char>());
+  EXPECT_NE(
+    sidecar_json.find(
+      "\"discarded_tail_bytes\":" + std::to_string(input_size - offsets[1])),
+    std::string::npos);
+  EXPECT_NE(
+    sidecar_json.find(
+      "\"corruption_reason\":\"partial MCAP contains a chunk CRC mismatch\""),
+    std::string::npos);
+
+  RecoveryResult retry_result{};
+  const CaptureStatus retry_status =
+    SegmentWriter::recover_partial(source, recovered, retry_result);
+  EXPECT_FALSE(retry_status.ok());
+  EXPECT_EQ(read_message_sequences(recovered), std::vector<uint32_t>({1U}));
+}
+
+TEST(SegmentWriterTest, RecoveryOfCorruptFirstChunkReissuesNoMessages)
+{
+  TestDirectory directory;
+  SegmentWriter writer(options_for(directory.path(), "first-chunk-corrupt"));
+  ASSERT_TRUE(writer.open().ok());
+  ASSERT_TRUE(writer.register_topic(test_topic()).ok());
+  PayloadArena arena({64U, 16U, 512U});
+  constexpr std::size_t kPayloadSize = 32U;
+  for (uint32_t sequence = 1U; sequence <= 2U; ++sequence) {
+    const std::vector<std::byte> payload(
+      kPayloadSize, static_cast<std::byte>(sequence * 0x33U));
+    write_payload(
+      writer, arena,
+      make_event(sequence, sequence * 10U, static_cast<uint32_t>(payload.size())), payload);
+    ASSERT_TRUE(writer.flush().ok());
+  }
+  ASSERT_TRUE(writer.close().ok());
+
+  const auto source = writer.closed_segments().front().path;
+  const std::vector<mcap::ByteOffset> offsets = chunk_offsets(source);
+  ASSERT_EQ(offsets.size(), 2U);
+  const uint64_t input_size = std::filesystem::file_size(source);
+  corrupt_payload(source, std::byte{0x33}, kPayloadSize);
+
+  RecoveryResult result{};
+  const auto recovered = directory.path() / "first-chunk-recovered.mcap";
+  const CaptureStatus status = SegmentWriter::recover_partial(source, recovered, result);
+  ASSERT_TRUE(status.ok()) << status.message;
+  EXPECT_TRUE(result.recovered);
+  EXPECT_FALSE(result.input_was_clean);
+  EXPECT_TRUE(result.unwritten_tail_loss_unknown);
+  EXPECT_EQ(result.recovered_messages, 0U);
+  EXPECT_FALSE(result.last_recovered_sequence_low32.has_value());
+  EXPECT_EQ(result.discarded_tail_bytes, input_size - offsets.front());
+  EXPECT_EQ(result.corruption_reason, "partial MCAP contains a chunk CRC mismatch");
+  EXPECT_TRUE(read_message_sequences(recovered).empty());
+  EXPECT_FALSE(std::filesystem::exists(recovered.string() + ".partial"));
+  EXPECT_TRUE(std::filesystem::exists(recovered.string() + ".recovery.json"));
 }
 
 }  // namespace

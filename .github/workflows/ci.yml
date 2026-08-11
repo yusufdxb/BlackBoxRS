@@ -246,6 +246,47 @@ jobs:
           . /opt/ros/humble/setup.sh
           ament_uncrustify src/blackbox_capture_cpp src/blackbox_capture_bench
 
+  native-fuzz-smoke:
+    name: Native libFuzzer build + smoke
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    container: ros:humble-ros-base
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+
+      - name: Install fuzz build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            clang \
+            python3-colcon-common-extensions \
+            ros-humble-mcap-vendor \
+            ros-humble-rclcpp-components \
+            ros-humble-std-msgs
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Build fuzz targets
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          . /opt/ros/humble/setup.sh
+          colcon build \
+            --packages-select blackbox_capture_cpp \
+            --event-handlers console_direct+ \
+            --cmake-args \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DBUILD_TESTING=OFF \
+              -DBLACKBOX_CAPTURE_BUILD_FUZZERS=ON
+
+      - name: Run bounded fuzz smoke
+        run: |
+          for target in segment_parser event_decoder topic_metadata; do
+            build/blackbox_capture_cpp/fuzz_${target} -runs=100
+          done
+
   native-integration:
     name: Native ROS + Python interoperability + benchmark smoke
     runs-on: ubuntu-22.04
@@ -253,6 +294,12 @@ jobs:
     container: ros:humble-ros-base
     env:
       ROS_LOCALHOST_ONLY: "1"
+      # Pinned rather than left to the container default. This job runs
+      # several ros2 capture cycles back to back with almost no settle time,
+      # and the default Fast DDS build loses the delivery-count race between
+      # consecutive runs, which surfaces as an unexplained reconciliation
+      # failure rather than as a discovery error.
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
 
     steps:
       - name: Check out repo
@@ -270,6 +317,7 @@ jobs:
             ros-humble-ament-lint-common \
             ros-humble-mcap-vendor \
             ros-humble-rclcpp-components \
+            ros-humble-rmw-cyclonedds-cpp \
             ros-humble-std-msgs
           rm -rf /var/lib/apt/lists/*
           python3 -m pip install --no-cache-dir --upgrade pip

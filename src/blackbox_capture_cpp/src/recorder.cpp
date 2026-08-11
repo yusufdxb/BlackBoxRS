@@ -58,6 +58,7 @@
 #include "blackbox_capture/payload_arena.hpp"
 #include "blackbox_capture/ring_buffer.hpp"
 #include "blackbox_capture/segment_writer.hpp"
+#include "blackbox_capture/shedding_policy.hpp"
 #include "blackbox_capture/topic_registry.hpp"
 #include "blackbox_capture/trigger_engine.hpp"
 #include "rcl/time.h"
@@ -67,7 +68,9 @@
 #include "rclcpp/generic_subscription.hpp"
 #include "rclcpp/qos.hpp"
 #include "rclcpp/qos_event.hpp"
+#ifdef BLACKBOX_CAPTURE_ENABLE_EXPERIMENTAL_COMPOSITION
 #include "rclcpp_components/register_node_macro.hpp"
+#endif
 #include "std_msgs/msg/string.hpp"
 
 namespace blackbox_capture
@@ -316,7 +319,7 @@ public:
     }
 
     request_stop();
-    state_.store(kDraining, std::memory_order_release);
+    set_pressure_state(kDraining);
 
     // The callback group is mutually exclusive, but a composed executor may
     // still be executing its current callback when another thread requests a
@@ -334,6 +337,9 @@ public:
     if (status_timer_) {
       status_timer_->cancel();
     }
+    jump_handler_.reset();
+    drain_reclaimed_unlocked();
+    emit_clock_events_unlocked();
     subscriptions_.clear();
     producer_active_.clear(std::memory_order_release);
 
@@ -408,6 +414,14 @@ public:
            << subscription_failures_.load(std::memory_order_acquire) << ','
            << "\"runtime_callback_faults\":"
            << runtime_callback_faults_.load(std::memory_order_acquire) << ','
+           << "\"accepting\":"
+           << (accepting_.load(std::memory_order_acquire) ? "true" : "false") << ','
+           << "\"writer_alive\":"
+           << (writer_alive_.load(std::memory_order_acquire) ? "true" : "false") << ','
+           << "\"writer_faulted\":"
+           << (writer_faulted_.load(std::memory_order_acquire) ? "true" : "false") << ','
+           << "\"trigger_intent_lost\":"
+           << trigger_intent_lost_.load(std::memory_order_acquire) << ','
            << "\"rmw_messages_lost\":"
            << rmw_messages_lost_.load(std::memory_order_acquire) << ','
            << "\"rmw_event_callbacks_unavailable\":"
@@ -466,6 +480,65 @@ private:
     kInvariantFault = 8,
   };
 
+  void set_pressure_state(State desired) noexcept
+  {
+    uint8_t current = state_.load(std::memory_order_acquire);
+    while (current == kStarting || current == kNormal || current == kHighWatermark ||
+      current == kShedding)
+    {
+      if (state_.compare_exchange_weak(
+          current, desired, std::memory_order_acq_rel,
+          std::memory_order_acquire))
+      {
+        return;
+      }
+    }
+  }
+
+  bool latch_fault_state(State fault) noexcept
+  {
+    uint8_t current = state_.load(std::memory_order_acquire);
+    while (current != kStoppedClean && current != kStoppedIncomplete) {
+      if (current == kInvariantFault || current == kStorageFault) {
+        return false;
+      }
+      if (state_.compare_exchange_weak(
+          current, fault, std::memory_order_acq_rel,
+          std::memory_order_acquire))
+      {
+        emit_health_status(fault);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void emit_health_status(State fault) noexcept
+  {
+    const uint8_t mask = fault == kStorageFault ? 1U : 2U;
+    if ((health_status_emitted_.fetch_or(mask, std::memory_order_acq_rel) & mask) != 0U) {
+      return;
+    }
+    try {
+      const std::string status = status_json();
+      RCLCPP_ERROR(node_.get_logger(), "HEALTH_STATUS %s", status.c_str());
+    } catch (...) {
+    }
+  }
+
+  void latch_writer_fault() noexcept
+  {
+    accepting_.store(false, std::memory_order_release);
+    writer_faulted_.store(true, std::memory_order_release);
+    (void)latch_fault_state(kStorageFault);
+  }
+
+  void latch_invariant_fault() noexcept
+  {
+    accepting_.store(false, std::memory_order_release);
+    (void)latch_fault_state(kInvariantFault);
+  }
+
   struct ProducerGuard
   {
     explicit ProducerGuard(std::atomic_flag & flag)
@@ -498,6 +571,7 @@ private:
     std::size_t publishers{0};
     std::size_t subscribers{0};
     uint64_t qos_signature{0};
+    uint64_t publisher_identity_signature{0};
   };
 
   struct TopicCommand
@@ -507,6 +581,12 @@ private:
     std::array<char, 256> type{};
     std::array<char, 16> serialization{};
     std::array<char, 768> qos{};
+  };
+
+  struct TriggerCommand
+  {
+    uint64_t sequence{0};
+    uint64_t monotonic_ns{0};
   };
 
   struct IncidentRecord
@@ -529,8 +609,25 @@ private:
     excluded_topics_ = node_.declare_parameter<std::vector<std::string>>(
       "capture.exclude_topics",
       std::vector<std::string>{"/rosout", "/parameter_events", "/blackbox/capture_status"});
-    high_priority_topics_ = node_.declare_parameter<std::vector<std::string>>(
-      "capture.high_priority_topics", std::vector<std::string>{"/tf_static"});
+    // Priority tiers, most important first. Anything not listed lands in the
+    // default (least important) tier and is therefore shed first. The defaults
+    // mirror config/native_capture.yaml: robot control and state evidence is
+    // never shed by policy, transforms go before it, and static transforms,
+    // which are latched and cheap to re-read, go before those.
+    priority_tiers_[0] = node_.declare_parameter<std::vector<std::string>>(
+      "capture.priority_tier_0",
+      std::vector<std::string>{"/cmd_vel", "/joint_states", "/imu/data"});
+    priority_tiers_[1] = node_.declare_parameter<std::vector<std::string>>(
+      "capture.priority_tier_1", std::vector<std::string>{"/tf"});
+    priority_tiers_[2] = node_.declare_parameter<std::vector<std::string>>(
+      "capture.priority_tier_2", std::vector<std::string>{"/tf_static"});
+    // Superseded by the tier lists and kept so existing deployments keep
+    // working: a high-priority topic is a tier 0 topic.
+    const std::vector<std::string> legacy_high_priority =
+      node_.declare_parameter<std::vector<std::string>>(
+      "capture.high_priority_topics", std::vector<std::string>{});
+    priority_tiers_[0].insert(
+      priority_tiers_[0].end(), legacy_high_priority.begin(), legacy_high_priority.end());
 
     discovery_period_ = std::chrono::milliseconds(
       checked_positive<int64_t>(
@@ -701,7 +798,9 @@ private:
         topics.erase(std::unique(topics.begin(), topics.end()), topics.end());
       };
     resolve_all(configured_topics_);
-    resolve_all(high_priority_topics_);
+    for (std::vector<std::string> & tier : priority_tiers_) {
+      resolve_all(tier);
+    }
   }
 
   void initialize_core()
@@ -715,6 +814,8 @@ private:
       std::make_unique<SpscRingBuffer<PayloadHandle>>(event_capacity_ + 1U, 0U);
     topic_commands_ =
       std::make_unique<SpscRingBuffer<TopicCommand>>(static_cast<std::size_t>(max_topics_) + 1U);
+    trigger_commands_ =
+      std::make_unique<SpscRingBuffer<TriggerCommand>>(static_cast<std::size_t>(max_topics_) + 12U);
     arena_ = std::make_unique<PayloadArena>(
       PayloadArenaConfig{
         payload_block_size_, payload_block_count_, max_payload_bytes_});
@@ -726,6 +827,14 @@ private:
       static_cast<std::size_t>(DropReason::kCount),
       0U);
     best_effort_topic_ids_.resize(static_cast<std::size_t>(max_topics_) + 1U, 0U);
+    topic_registration_queued_.resize(static_cast<std::size_t>(max_topics_) + 1U, 0U);
+    topic_registration_acked_ = std::make_unique<std::atomic<uint8_t>[]>(
+      static_cast<std::size_t>(max_topics_) + 1U);
+    for (std::size_t index = 0U; index <= static_cast<std::size_t>(max_topics_); ++index) {
+      topic_registration_acked_[index].store(0U, std::memory_order_relaxed);
+    }
+    topic_shed_tiers_.resize(static_cast<std::size_t>(max_topics_) + 1U, kDefaultShedTier);
+    shed_watermarks_ = make_shed_watermarks(event_ring_->data_capacity(), high_watermark_ratio_);
     active_incident_segments_.reserve(retention_max_segments_);
 
     SegmentWriterOptions writer_options{};
@@ -753,6 +862,7 @@ private:
         static_cast<uint64_t>(event_ring_->memory_bytes()),
         static_cast<uint64_t>(reclaim_ring_->memory_bytes()),
         static_cast<uint64_t>(topic_commands_->memory_bytes()),
+        static_cast<uint64_t>(trigger_commands_->memory_bytes()),
         static_cast<uint64_t>(registry_->memory_bytes()),
         static_cast<uint64_t>(metrics_->memory_bytes()),
         static_cast<uint64_t>(triggers_->memory_bytes()),
@@ -808,11 +918,12 @@ private:
 
     try {
       writer_running_.store(true, std::memory_order_release);
+      writer_alive_.store(true, std::memory_order_release);
       writer_thread_ = std::thread([this]() noexcept {writer_thread_entry();});
       refresh_graph(true);
       graph_running_.store(true, std::memory_order_release);
       graph_thread_ = std::thread([this]() {graph_wait_loop();});
-      state_.store(kNormal, std::memory_order_release);
+      set_pressure_state(kNormal);
       publish_status();
       const std::filesystem::path session_directory = "capture_" + session_id_;
       const std::string current_session =
@@ -834,6 +945,7 @@ private:
       if (writer_thread_.joinable()) {
         writer_thread_.join();
       } else {
+        writer_alive_.store(false, std::memory_order_release);
         (void)writer_->close();
       }
       drain_reclaimed();
@@ -933,6 +1045,7 @@ private:
         },
         threshold);
     } catch (const std::exception & error) {
+      runtime_callback_faults_.fetch_add(1U, std::memory_order_relaxed);
       RCLCPP_WARN(node_.get_logger(), "ROS clock jump callbacks unavailable: %s", error.what());
     }
   }
@@ -944,14 +1057,14 @@ private:
       callback();
     } catch (const std::exception & error) {
       runtime_callback_faults_.fetch_add(1U, std::memory_order_relaxed);
-      state_.store(kInvariantFault, std::memory_order_release);
+      latch_invariant_fault();
       try {
         RCLCPP_ERROR(node_.get_logger(), "%s callback failed: %s", name, error.what());
       } catch (...) {
       }
     } catch (...) {
       runtime_callback_faults_.fetch_add(1U, std::memory_order_relaxed);
-      state_.store(kInvariantFault, std::memory_order_release);
+      latch_invariant_fault();
     }
   }
 
@@ -975,7 +1088,9 @@ private:
 
   void discovery_tick()
   {
-    if (stop_requested_.load(std::memory_order_acquire)) {
+    if (stop_requested_.load(std::memory_order_acquire) ||
+      !accepting_.load(std::memory_order_acquire))
+    {
       return;
     }
     if (graph_dirty_.exchange(false, std::memory_order_acq_rel)) {
@@ -993,16 +1108,22 @@ private:
     drain_reclaimed_unlocked();
 
     std::map<std::string, std::vector<std::string>> discovered;
-    try {
-      discovered = node_.get_topic_names_and_types();
-    } catch (const std::exception & error) {
-      graph_snapshot_failures_.fetch_add(1U, std::memory_order_relaxed);
-      graph_coverage_faults_.fetch_add(1U, std::memory_order_relaxed);
-      enqueue_control_unlocked(
-        "graph", 0U, EventFlag::kGraphEvent,
-        "{\"change\":\"snapshot_failed\",\"error\":\"" +
-        json_escape(error.what()) + "\"}");
-      return;
+    // The shipped configured-topic mode already has a bounded candidate set
+    // and obtains authoritative types from endpoint information below. Avoid a
+    // full graph-wide topic snapshot on its ingest callback lane. Broad graph
+    // enumeration is reserved for explicit discover_all operation.
+    if (discover_all_) {
+      try {
+        discovered = node_.get_topic_names_and_types();
+      } catch (const std::exception & error) {
+        graph_snapshot_failures_.fetch_add(1U, std::memory_order_relaxed);
+        graph_coverage_faults_.fetch_add(1U, std::memory_order_relaxed);
+        enqueue_control_unlocked(
+          "graph", 0U, EventFlag::kGraphEvent,
+          "{\"change\":\"snapshot_failed\",\"error\":\"" +
+          json_escape(error.what()) + "\"}");
+        return;
+      }
     }
 
     std::vector<std::string> candidates(configured_topics_.begin(), configured_topics_.end());
@@ -1025,27 +1146,6 @@ private:
       if (is_excluded(topic)) {
         continue;
       }
-      std::vector<std::string> types;
-      const auto type_iterator = discovered.find(topic);
-      if (type_iterator != discovered.end()) {
-        types = type_iterator->second;
-      } else {
-        const auto subscription = subscriptions_.find(topic);
-        if (subscription != subscriptions_.end()) {
-          types.push_back(subscription->second.type);
-        }
-      }
-      if (types.size() > 1U) {
-        ambiguous_topic_types_.fetch_add(1U, std::memory_order_relaxed);
-        graph_coverage_faults_.fetch_add(1U, std::memory_order_relaxed);
-        enqueue_control_unlocked(
-          "graph", 0U, EventFlag::kGraphEvent,
-          "{\"change\":\"ambiguous_topic_type\",\"topic\":\"" +
-          json_escape(topic) + "\",\"type_count\":" + std::to_string(types.size()) +
-          "}");
-        continue;
-      }
-
       std::vector<rclcpp::TopicEndpointInfo> publishers;
       std::vector<rclcpp::TopicEndpointInfo> subscribers;
       try {
@@ -1064,11 +1164,52 @@ private:
 
       const std::size_t publisher_count = count_external(publishers);
       const std::size_t subscriber_count = count_external(subscribers);
+      std::set<std::string> publisher_types;
+      for (const auto & publisher : publishers) {
+        if (!(publisher.node_name() == node_.get_name() &&
+          publisher.node_namespace() == node_.get_namespace()) &&
+          !publisher.topic_type().empty())
+        {
+          publisher_types.insert(publisher.topic_type());
+        }
+      }
+      std::vector<std::string> types(publisher_types.begin(), publisher_types.end());
+      if (types.empty()) {
+        const auto subscription = subscriptions_.find(topic);
+        if (subscription != subscriptions_.end()) {
+          types.push_back(subscription->second.type);
+        } else {
+          const auto type_iterator = discovered.find(topic);
+          if (type_iterator != discovered.end()) {
+            types = type_iterator->second;
+            std::sort(types.begin(), types.end());
+            types.erase(std::unique(types.begin(), types.end()), types.end());
+          }
+        }
+      }
       const std::string type = types.empty() ? std::string{} : types.front();
-      const uint64_t qos_signature = endpoint_signature(topic, publishers);
+      const uint64_t qos_signature = offered_qos_signature(publishers);
+      const uint64_t publisher_identity_signature = endpoint_identity_signature(publishers);
+      if (types.size() > 1U) {
+        ambiguous_topic_types_.fetch_add(1U, std::memory_order_relaxed);
+        graph_coverage_faults_.fetch_add(1U, std::memory_order_relaxed);
+        enqueue_control_unlocked(
+          "graph", 0U, EventFlag::kGraphEvent,
+          "{\"change\":\"ambiguous_topic_type\",\"topic\":\"" +
+          json_escape(topic) + "\",\"type_count\":" + std::to_string(types.size()) +
+          "}");
+        current_topics.emplace(
+          topic,
+          GraphTopic{
+            std::string{}, publisher_count, subscriber_count, qos_signature,
+            publisher_identity_signature});
+        continue;
+      }
       current_topics.emplace(
         topic,
-        GraphTopic{type, publisher_count, subscriber_count, qos_signature});
+        GraphTopic{
+          type, publisher_count, subscriber_count, qos_signature,
+          publisher_identity_signature});
 
       const auto previous = graph_topics_.find(topic);
       if (force || previous == graph_topics_.end()) {
@@ -1087,6 +1228,11 @@ private:
         if (previous->second.qos_signature != qos_signature) {
           emit_graph_qos(topic, type, publishers);
         }
+        if (previous->second.publisher_identity_signature != publisher_identity_signature) {
+          emit_graph_topic(
+            "publisher_set_changed", topic, type, publisher_count,
+            subscriber_count);
+        }
         if (previous->second.type != type) {
           emit_graph_topic("type_changed", topic, type, publisher_count, subscriber_count);
         }
@@ -1098,15 +1244,16 @@ private:
       }
 
       if (!type.empty() && publisher_count > 0U) {
+        const uint64_t subscription_qos_signature = adaptive_qos_signature(topic, publishers);
         const auto existing = subscriptions_.find(topic);
         if (existing == subscriptions_.end() || existing->second.type != type ||
-          existing->second.qos_signature != qos_signature)
+          existing->second.qos_signature != subscription_qos_signature)
         {
           if (existing != subscriptions_.end()) {
             (void)triggers_->deconfigure_topic(existing->second.topic_id);
             subscriptions_.erase(existing);
           }
-          create_subscription(topic, type, publishers, qos_signature);
+          create_subscription(topic, type, publishers, subscription_qos_signature);
         }
       } else if (discover_all_ && !is_configured(topic) && publisher_count == 0U) {
         const auto existing = subscriptions_.find(topic);
@@ -1182,21 +1329,106 @@ private:
              }));
   }
 
-  uint64_t endpoint_signature(
+  static void hash_bytes(uint64_t & hash, const uint8_t * data, std::size_t size)
+  {
+    for (std::size_t index = 0; index < size; ++index) {
+      hash ^= data[index];
+      hash *= 1099511628211ULL;
+    }
+  }
+
+  static void hash_string(uint64_t & hash, const std::string & value)
+  {
+    hash_bytes(
+      hash, reinterpret_cast<const uint8_t *>(value.data()), value.size());
+    constexpr uint8_t separator = 0xffU;
+    hash_bytes(hash, &separator, 1U);
+  }
+
+  static uint64_t qos_profile_signature(const rmw_qos_profile_t & profile)
+  {
+    uint64_t hash = 1469598103934665603ULL;
+    const std::array<uint64_t, 12> values{
+      static_cast<uint64_t>(profile.reliability),
+      static_cast<uint64_t>(profile.durability),
+      static_cast<uint64_t>(profile.history),
+      static_cast<uint64_t>(profile.depth),
+      profile.deadline.sec,
+      profile.deadline.nsec,
+      profile.lifespan.sec,
+      profile.lifespan.nsec,
+      static_cast<uint64_t>(profile.liveliness),
+      profile.liveliness_lease_duration.sec,
+      profile.liveliness_lease_duration.nsec,
+      profile.avoid_ros_namespace_conventions ? 1U : 0U};
+    hash_bytes(
+      hash, reinterpret_cast<const uint8_t *>(values.data()),
+      values.size() * sizeof(values.front()));
+    return hash;
+  }
+
+  uint64_t offered_qos_signature(
+    const std::vector<rclcpp::TopicEndpointInfo> & endpoints) const
+  {
+    uint64_t count = 0U;
+    uint64_t xor_accumulator = 0U;
+    uint64_t sum_accumulator = 0U;
+    for (const auto & endpoint : endpoints) {
+      if (endpoint.node_name() == node_.get_name() &&
+        endpoint.node_namespace() == node_.get_namespace())
+      {
+        continue;
+      }
+      const uint64_t signature =
+        qos_profile_signature(endpoint.qos_profile().get_rmw_qos_profile());
+      ++count;
+      xor_accumulator ^= signature;
+      sum_accumulator += signature * 0x9e3779b97f4a7c15ULL;
+    }
+    uint64_t hash = 1469598103934665603ULL;
+    const std::array<uint64_t, 3> aggregate{count, xor_accumulator, sum_accumulator};
+    hash_bytes(
+      hash, reinterpret_cast<const uint8_t *>(aggregate.data()),
+      aggregate.size() * sizeof(aggregate.front()));
+    return hash;
+  }
+
+  uint64_t endpoint_identity_signature(
+    const std::vector<rclcpp::TopicEndpointInfo> & endpoints) const
+  {
+    uint64_t count = 0U;
+    uint64_t xor_accumulator = 0U;
+    uint64_t sum_accumulator = 0U;
+    for (const auto & endpoint : endpoints) {
+      if (endpoint.node_name() == node_.get_name() &&
+        endpoint.node_namespace() == node_.get_namespace())
+      {
+        continue;
+      }
+      uint64_t endpoint_hash = 1469598103934665603ULL;
+      hash_string(endpoint_hash, endpoint.node_namespace());
+      hash_string(endpoint_hash, endpoint.node_name());
+      hash_string(endpoint_hash, endpoint.topic_type());
+      const auto & gid = endpoint.endpoint_gid();
+      hash_bytes(endpoint_hash, gid.data(), gid.size());
+      ++count;
+      xor_accumulator ^= endpoint_hash;
+      sum_accumulator += endpoint_hash * 0x9e3779b97f4a7c15ULL;
+    }
+    uint64_t hash = 1469598103934665603ULL;
+    const std::array<uint64_t, 3> aggregate{count, xor_accumulator, sum_accumulator};
+    hash_bytes(
+      hash, reinterpret_cast<const uint8_t *>(aggregate.data()),
+      aggregate.size() * sizeof(aggregate.front()));
+    return hash;
+  }
+
+  uint64_t adaptive_qos_signature(
     const std::string & topic,
     const std::vector<rclcpp::TopicEndpointInfo> & endpoints) const
   {
     const rclcpp::QoS requested = adaptive_qos(topic, endpoints);
-    const auto & profile = requested.get_rmw_qos_profile();
-    uint64_t hash = 1469598103934665603ULL;
-    const std::array<uint64_t, 4> values{
-      static_cast<uint64_t>(profile.reliability), static_cast<uint64_t>(profile.durability),
-      static_cast<uint64_t>(profile.history), static_cast<uint64_t>(profile.depth)};
-    for (const uint64_t value : values) {
-      hash ^= value;
-      hash *= 1099511628211ULL;
-    }
-    return hash;
+    return qos_profile_signature(requested.get_rmw_qos_profile());
   }
 
   rclcpp::QoS adaptive_qos(
@@ -1232,30 +1464,50 @@ private:
     const rclcpp::QoS & requested) const
   {
     const auto & request = requested.get_rmw_qos_profile();
-    std::ostringstream stream;
-    stream << "{\"requested\":{\"reliability\":"
-           << static_cast<int>(request.reliability) << ",\"durability\":"
-           << static_cast<int>(request.durability) << ",\"depth\":" << request.depth
-           << "},\"offered_count\":" << count_external(publishers)
-           << ",\"offered_profiles\":[";
-    bool first = true;
+    uint64_t offered_count = 0U;
+    uint64_t reliable_count = 0U;
+    uint64_t best_effort_count = 0U;
+    uint64_t transient_local_count = 0U;
+    uint64_t volatile_count = 0U;
+    uint64_t keep_last_count = 0U;
+    uint64_t keep_all_count = 0U;
+    uint64_t minimum_depth = UINT64_MAX;
+    uint64_t maximum_depth = 0U;
     for (const auto & publisher : publishers) {
       if (publisher.node_name() == node_.get_name() &&
         publisher.node_namespace() == node_.get_namespace())
       {
         continue;
       }
-      if (!first) {
-        stream << ',';
-      }
-      first = false;
       const auto & offered = publisher.qos_profile().get_rmw_qos_profile();
-      stream << "{\"reliability\":" << static_cast<int>(offered.reliability)
-             << ",\"durability\":" << static_cast<int>(offered.durability)
-             << ",\"history\":" << static_cast<int>(offered.history)
-             << ",\"depth\":" << offered.depth << '}';
+      ++offered_count;
+      reliable_count += offered.reliability == RMW_QOS_POLICY_RELIABILITY_RELIABLE ? 1U : 0U;
+      best_effort_count +=
+        offered.reliability == RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT ? 1U : 0U;
+      transient_local_count +=
+        offered.durability == RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL ? 1U : 0U;
+      volatile_count += offered.durability == RMW_QOS_POLICY_DURABILITY_VOLATILE ? 1U : 0U;
+      keep_last_count += offered.history == RMW_QOS_POLICY_HISTORY_KEEP_LAST ? 1U : 0U;
+      keep_all_count += offered.history == RMW_QOS_POLICY_HISTORY_KEEP_ALL ? 1U : 0U;
+      minimum_depth = std::min(minimum_depth, static_cast<uint64_t>(offered.depth));
+      maximum_depth = std::max(maximum_depth, static_cast<uint64_t>(offered.depth));
     }
-    stream << "]}";
+    if (offered_count == 0U) {
+      minimum_depth = 0U;
+    }
+    std::ostringstream stream;
+    stream << "{\"requested\":{\"reliability\":"
+           << static_cast<int>(request.reliability) << ",\"durability\":"
+           << static_cast<int>(request.durability) << ",\"depth\":" << request.depth
+           << "},\"offered\":{\"count\":" << offered_count
+           << ",\"reliable\":" << reliable_count
+           << ",\"best_effort\":" << best_effort_count
+           << ",\"transient_local\":" << transient_local_count
+           << ",\"volatile\":" << volatile_count
+           << ",\"keep_last\":" << keep_last_count
+           << ",\"keep_all\":" << keep_all_count
+           << ",\"depth_min\":" << minimum_depth
+           << ",\"depth_max\":" << maximum_depth << "}}";
     return stream.str();
   }
 
@@ -1295,12 +1547,18 @@ private:
     }
 
     const rclcpp::QoS qos = adaptive_qos(topic, publishers);
-    if (registration.created) {
+    // A registry entry and its writer command are separate state transitions.
+    // If the bounded command ring rejected an earlier attempt, register_topic()
+    // returns the existing ID on retry. Keep retrying the writer command until
+    // it is admitted, and never start delivering messages for an ID the writer
+    // has not been told how to encode.
+    if (topic_registration_queued_[registration.topic_id] == 0U) {
       TopicCommand command{};
       const std::string qos_json = qos_metadata(publishers, qos);
       if (!copy_fixed(command.topic, topic) || !copy_fixed(command.type, type) ||
         !copy_fixed(command.serialization, "cdr") || !copy_fixed(command.qos, qos_json))
       {
+        graph_coverage_faults_.fetch_add(1U, std::memory_order_relaxed);
         const uint64_t sequence = next_sequence();
         metrics_->record_received(registration.topic_id, 0U);
         metrics_->record_drop(
@@ -1316,7 +1574,11 @@ private:
         record_invariant_drop(registration.topic_id, 0U);
         return;
       }
+      topic_registration_queued_[registration.topic_id] = 1U;
       writer_cv_.notify_one();
+    }
+    if (topic_registration_acked_[registration.topic_id].load(std::memory_order_acquire) == 0U) {
+      return;
     }
 
     rclcpp::SubscriptionOptions options;
@@ -1347,13 +1609,17 @@ private:
           });
       };
 
+    if (registration.topic_id < topic_shed_tiers_.size()) {
+      topic_shed_tiers_[registration.topic_id] = shed_tier_for(topic);
+    }
+
     std::shared_ptr<rclcpp::GenericSubscription> subscription;
     try {
       subscription = node_.create_generic_subscription(
         topic, type, qos,
-        [this, topic_id = registration.topic_id, high_priority = is_high_priority(topic)](
+        [this, topic_id = registration.topic_id](
           std::shared_ptr<rclcpp::SerializedMessage> message) {
-          ingest_message(topic_id, high_priority, std::move(message));
+          ingest_message(topic_id, std::move(message));
         },
         options);
     } catch (const rclcpp::UnsupportedEventTypeException &) {
@@ -1361,9 +1627,9 @@ private:
       try {
         subscription = node_.create_generic_subscription(
           topic, type, qos,
-          [this, topic_id = registration.topic_id, high_priority = is_high_priority(topic)](
+          [this, topic_id = registration.topic_id](
             std::shared_ptr<rclcpp::SerializedMessage> message) {
-            ingest_message(topic_id, high_priority, std::move(message));
+            ingest_message(topic_id, std::move(message));
           },
           options);
       } catch (const std::exception & error) {
@@ -1437,35 +1703,45 @@ private:
   }
 
   void ingest_message(
-    uint32_t topic_id, bool high_priority,
+    uint32_t topic_id,
     std::shared_ptr<rclcpp::SerializedMessage> message) noexcept
   {
-    if (!accepting_.load(std::memory_order_acquire)) {
-      return;
-    }
     const uint64_t now = monotonic_now_ns();
     const uint64_t sequence = next_sequence();
     const uint64_t size = message ? static_cast<uint64_t>(message->size()) : 0U;
     metrics_->record_received(topic_id, size);
+    if (!accepting_.load(std::memory_order_acquire)) {
+      const DropReason reason = writer_faulted_.load(std::memory_order_acquire) ?
+        DropReason::kStorageFault : DropReason::kShutdownCutoff;
+      metrics_->record_drop(topic_id, reason, size, now, sequence);
+      return;
+    }
 
     ProducerGuard guard(producer_active_);
     if (!guard.acquired) {
       metrics_->record_drop(topic_id, DropReason::kInvariantFault, size, now, sequence);
-      state_.store(kInvariantFault, std::memory_order_release);
+      latch_invariant_fault();
       return;
     }
     drain_reclaimed_unlocked();
+    // Receipt semantics belong to the ROS callback boundary, not storage
+    // admission. Backpressure and payload exhaustion must not manufacture
+    // dead-topic or low-rate incidents while messages are still arriving.
+    triggers_->observe_message(topic_id, now);
     if (!accepting_.load(std::memory_order_acquire)) {
-      metrics_->record_drop(topic_id, DropReason::kShutdownCutoff, size, now, sequence);
+      const DropReason reason = writer_faulted_.load(std::memory_order_acquire) ?
+        DropReason::kStorageFault : DropReason::kShutdownCutoff;
+      metrics_->record_drop(topic_id, reason, size, now, sequence);
       return;
     }
 
     const std::size_t depth = event_ring_->size();
-    const std::size_t high_mark = static_cast<std::size_t>(
-      std::ceil(high_watermark_ratio_ * static_cast<double>(event_ring_->data_capacity())));
-    if (depth >= high_mark && !high_priority) {
+    const uint8_t tier = topic_id < topic_shed_tiers_.size() ?
+      topic_shed_tiers_[topic_id] :
+      kDefaultShedTier;
+    if (should_shed(shed_watermarks_, tier, depth)) {
       metrics_->record_drop(topic_id, DropReason::kLowPriorityShed, size, now, sequence);
-      state_.store(kShedding, std::memory_order_release);
+      set_pressure_state(kShedding);
       return;
     }
 
@@ -1495,21 +1771,20 @@ private:
     if (ros_time_valid) {
       event.header.flags |= to_underlying(EventFlag::kRosTimeValid);
     }
-    if (high_priority) {
+    if (tier == kCriticalShedTier) {
       event.header.flags |= to_underlying(EventFlag::kHighPriority);
     }
     event.payload = payload;
     if (!event_ring_->try_push(event, AdmissionClass::kData)) {
       (void)arena_->release(payload);
       metrics_->record_drop(topic_id, DropReason::kRingFull, size, now, sequence);
-      state_.store(kShedding, std::memory_order_release);
+      set_pressure_state(kShedding);
       return;
     }
     metrics_->record_admitted(topic_id, size);
     metrics_->observe_queue_depth(event_ring_->size(), event_ring_->capacity());
-    triggers_->observe_message(topic_id, now);
-    if (event_ring_->size() >= high_mark) {
-      state_.store(kHighWatermark, std::memory_order_release);
+    if (event_ring_->size() >= shed_watermarks_[static_cast<std::size_t>(kDefaultShedTier)]) {
+      set_pressure_state(kHighWatermark);
     }
     writer_cv_.notify_one();
   }
@@ -1542,9 +1817,9 @@ private:
               << ",\"confirmed_ns\":" << trigger.confirmed_ns << ",\"value\":"
               << trigger.value << ",\"threshold\":" << trigger.threshold
               << ",\"topic\":\"" << json_escape(topic) << "\"}";
-      enqueue_control_unlocked(
+      enqueue_trigger_unlocked(
         "trigger", trigger.topic_id, EventFlag::kTriggerEvent,
-        payload.str());
+        payload.str(), trigger.confirmed_ns);
     }
 
     const std::size_t depth = event_ring_->size();
@@ -1567,10 +1842,12 @@ private:
               << ",\"confirmed_ns\":" << queue_trigger.confirmed_ns
               << ",\"value\":" << queue_trigger.value << ",\"threshold\":"
               << queue_trigger.threshold << '}';
-      enqueue_control_unlocked("trigger", 0U, EventFlag::kTriggerEvent, payload.str());
+      enqueue_trigger_unlocked(
+        "trigger", 0U, EventFlag::kTriggerEvent, payload.str(),
+        queue_trigger.confirmed_ns);
     }
     if (depth < high_mark / 2U && !writer_faulted_.load(std::memory_order_acquire)) {
-      state_.store(kNormal, std::memory_order_release);
+      set_pressure_state(kNormal);
     }
   }
 
@@ -1590,7 +1867,6 @@ private:
       {
         continue;
       }
-      missing_topic_triggered_.insert(topic);
       std::ostringstream payload;
       payload << "{\"code\":" << static_cast<uint16_t>(TriggerCode::kDeadTopic)
               << ",\"severity\":" << static_cast<uint16_t>(Severity::kWarning)
@@ -1599,7 +1875,11 @@ private:
               << static_cast<float>(now - since) / 1.0e9F << ",\"threshold\":"
               << static_cast<float>(dead_topic_timeout_ns_) / 1.0e9F
               << ",\"topic\":\"" << json_escape(topic) << "\"}";
-      enqueue_control_unlocked("trigger", 0U, EventFlag::kTriggerEvent, payload.str());
+      if (enqueue_trigger_unlocked(
+          "trigger", 0U, EventFlag::kTriggerEvent, payload.str(), now))
+      {
+        missing_topic_triggered_.insert(topic);
+      }
     }
   }
 
@@ -1613,32 +1893,41 @@ private:
   void emit_clock_events_unlocked()
   {
     const uint64_t total = clock_event_count_.load(std::memory_order_acquire);
+    const uint64_t anomaly_total =
+      clock_anomaly_callback_count_.load(std::memory_order_acquire);
+    if (anomaly_total > accounted_clock_anomaly_count_) {
+      metrics_->record_clock_anomaly(anomaly_total - accounted_clock_anomaly_count_);
+      accounted_clock_anomaly_count_ = anomaly_total;
+    }
     if (total == emitted_clock_event_count_) {
       return;
     }
     const int64_t delta = clock_jump_delta_ns_.load(std::memory_order_relaxed);
     const int32_t change = clock_change_code_.load(std::memory_order_relaxed);
     const uint64_t coalesced_count = total - emitted_clock_event_count_;
-    const uint64_t anomaly_total =
-      clock_anomaly_callback_count_.load(std::memory_order_acquire);
     const uint64_t anomaly_count = anomaly_total - emitted_clock_anomaly_count_;
-    metrics_->record_clock_anomaly(anomaly_count);
-    enqueue_control_unlocked(
-      "clock", 0U, EventFlag::kClockEvent,
-      "{\"change_code\":" + std::to_string(change) + ",\"delta_ns\":" +
-      std::to_string(delta) + ",\"observed_count\":" + std::to_string(total) +
-      ",\"coalesced_count\":" + std::to_string(coalesced_count) +
-      ",\"anomaly_count\":" + std::to_string(anomaly_count) + "}");
+    if (!enqueue_control_unlocked(
+        "clock", 0U, EventFlag::kClockEvent,
+        "{\"change_code\":" + std::to_string(change) + ",\"delta_ns\":" +
+        std::to_string(delta) + ",\"observed_count\":" + std::to_string(total) +
+        ",\"coalesced_count\":" + std::to_string(coalesced_count) +
+        ",\"anomaly_count\":" + std::to_string(anomaly_count) + "}"))
+    {
+      return;
+    }
     emitted_clock_event_count_ = total;
     emitted_clock_anomaly_count_ = anomaly_total;
   }
 
   void status_tick()
   {
-    if (!accepting_.load(std::memory_order_acquire)) {
+    if (stop_requested_.load(std::memory_order_acquire)) {
       return;
     }
     publish_status();
+    if (!accepting_.load(std::memory_order_acquire)) {
+      return;
+    }
     ProducerGuard guard(producer_active_);
     if (!guard.acquired) {
       status_publish_failures_.fetch_add(1U, std::memory_order_relaxed);
@@ -1713,11 +2002,14 @@ private:
 
   bool enqueue_control_unlocked(
     const char * kind, uint32_t topic_id, EventFlag flag,
-    const std::string & payload_object)
+    const std::string & payload_object, uint64_t * sequence_out = nullptr)
   {
     (void)kind;
     const uint64_t now = monotonic_now_ns();
     const uint64_t sequence = next_sequence();
+    if (sequence_out != nullptr) {
+      *sequence_out = sequence;
+    }
     metrics_->record_received(topic_id, payload_object.size());
 
     PayloadHandle handle{};
@@ -1758,19 +2050,40 @@ private:
     return true;
   }
 
+  bool enqueue_trigger_unlocked(
+    const char * kind, uint32_t topic_id, EventFlag flag,
+    const std::string & payload_object, uint64_t confirmed_ns)
+  {
+    uint64_t sequence = 0U;
+    if (enqueue_control_unlocked(kind, topic_id, flag, payload_object, &sequence)) {
+      return true;
+    }
+    if (trigger_commands_->try_push(
+        TriggerCommand{sequence, confirmed_ns}, AdmissionClass::kControl))
+    {
+      writer_cv_.notify_one();
+      return true;
+    }
+    trigger_intent_lost_.fetch_add(1U, std::memory_order_relaxed);
+    latch_invariant_fault();
+    return false;
+  }
+
   void writer_thread_entry() noexcept
   {
     try {
       writer_loop();
     } catch (...) {
+      writer_alive_.store(false, std::memory_order_release);
       metrics_->record_storage_error();
-      state_.store(kStorageFault, std::memory_order_release);
-      writer_faulted_.store(true, std::memory_order_release);
+      latch_writer_fault();
       writer_clean_.store(false, std::memory_order_release);
       drain_incomplete_.store(true, std::memory_order_release);
-      discard_remaining_for_shutdown();
+      discard_remaining_for_shutdown(DropReason::kStorageFault);
       (void)writer_->close();
     }
+    writer_running_.store(false, std::memory_order_release);
+    writer_alive_.store(false, std::memory_order_release);
   }
 
   void writer_loop()
@@ -1778,7 +2091,7 @@ private:
     auto next_flush = std::chrono::steady_clock::now() + flush_period_;
     uint64_t last_dequeued_monotonic_ns = 0U;
     while (writer_running_.load(std::memory_order_acquire) || !event_ring_->empty() ||
-      !topic_commands_->empty())
+      !topic_commands_->empty() || !trigger_commands_->empty())
     {
       if (!writer_running_.load(std::memory_order_acquire) &&
         monotonic_now_ns() >= drain_deadline_ns_.load(std::memory_order_acquire))
@@ -1787,49 +2100,49 @@ private:
         break;
       }
 
+      drain_trigger_commands();
       drain_topic_commands();
       Event event{};
       if (event_ring_->try_pop(event)) {
         last_dequeued_monotonic_ns = event.header.monotonic_ns;
-        if (writer_faulted_.load(std::memory_order_acquire) || writer_->faulted()) {
-          metrics_->record_drop(
-            event.header.topic_id, DropReason::kStorageFault,
-            event.header.payload_size, event.header.monotonic_ns,
-            event.header.sequence);
-        } else {
-          const CaptureStatus status = writer_->write_event(event, *arena_);
-          if (status.ok()) {
-            metrics_->record_committed(event.header.topic_id, event.header.payload_size);
-            if (has_flag(event.header.flags, EventFlag::kTriggerEvent)) {
-              if (active_trigger_sequence_ == 0U) {
-                active_trigger_sequence_ = event.header.sequence;
-                trigger_start_ns_ = event.header.monotonic_ns;
-                begin_incident_capture();
-                rotate_writer();
-                collect_incident_segments(trigger_start_ns_);
-              }
-              const uint64_t deadline = event.header.monotonic_ns > UINT64_MAX - post_trigger_ns_ ?
-                UINT64_MAX :
-                event.header.monotonic_ns + post_trigger_ns_;
-              post_trigger_deadline_ns_ = std::max(post_trigger_deadline_ns_, deadline);
-            }
-            (void)sync_closed_segments();
-          } else {
-            metrics_->record_storage_error();
+        bool event_accounted = false;
+        try {
+          if (writer_faulted_.load(std::memory_order_acquire) || writer_->faulted()) {
             metrics_->record_drop(
               event.header.topic_id, DropReason::kStorageFault,
               event.header.payload_size, event.header.monotonic_ns,
               event.header.sequence);
-            state_.store(kStorageFault, std::memory_order_release);
-            writer_faulted_.store(true, std::memory_order_release);
+            event_accounted = true;
+          } else {
+            const CaptureStatus status = writer_->write_event(event, *arena_);
+            if (status.ok()) {
+              metrics_->record_committed(event.header.topic_id, event.header.payload_size);
+              event_accounted = true;
+              if (has_flag(event.header.flags, EventFlag::kTriggerEvent)) {
+                activate_trigger_intent(event.header.sequence, event.header.monotonic_ns);
+              }
+              (void)sync_closed_segments();
+            } else {
+              metrics_->record_storage_error();
+              metrics_->record_drop(
+                event.header.topic_id, DropReason::kStorageFault,
+                event.header.payload_size, event.header.monotonic_ns,
+                event.header.sequence);
+              event_accounted = true;
+              latch_writer_fault();
+            }
           }
+        } catch (...) {
+          if (!event_accounted) {
+            metrics_->record_drop(
+              event.header.topic_id, DropReason::kStorageFault,
+              event.header.payload_size, event.header.monotonic_ns,
+              event.header.sequence);
+          }
+          reclaim_writer_payload(event);
+          throw;
         }
-        if (event.payload.valid() &&
-          !reclaim_ring_->try_push(event.payload, AdmissionClass::kData))
-        {
-          metrics_->record_storage_error();
-          state_.store(kInvariantFault, std::memory_order_release);
-        }
+        reclaim_writer_payload(event);
         set_writer_counters();
       } else {
         std::unique_lock<std::mutex> lock(writer_mutex_);
@@ -1865,7 +2178,7 @@ private:
     const CaptureStatus close_status = writer_->close();
     if (!close_status.ok()) {
       metrics_->record_storage_error();
-      writer_faulted_.store(true, std::memory_order_release);
+      latch_writer_fault();
       writer_clean_.store(false, std::memory_order_release);
     } else {
       (void)sync_closed_segments();
@@ -1887,6 +2200,28 @@ private:
     }
   }
 
+  void activate_trigger_intent(uint64_t sequence, uint64_t monotonic_ns)
+  {
+    if (active_trigger_sequence_ == 0U) {
+      active_trigger_sequence_ = sequence;
+      trigger_start_ns_ = monotonic_ns;
+      begin_incident_capture();
+      rotate_writer();
+      collect_incident_segments(trigger_start_ns_);
+    }
+    const uint64_t deadline = monotonic_ns > UINT64_MAX - post_trigger_ns_ ?
+      UINT64_MAX : monotonic_ns + post_trigger_ns_;
+    post_trigger_deadline_ns_ = std::max(post_trigger_deadline_ns_, deadline);
+  }
+
+  void drain_trigger_commands()
+  {
+    TriggerCommand command{};
+    while (trigger_commands_->try_pop(command)) {
+      activate_trigger_intent(command.sequence, command.monotonic_ns);
+    }
+  }
+
   void drain_topic_commands()
   {
     TopicCommand command{};
@@ -1900,8 +2235,10 @@ private:
       const CaptureStatus status = writer_->register_topic(definition);
       if (!status.ok()) {
         metrics_->record_storage_error();
-        state_.store(kStorageFault, std::memory_order_release);
-        writer_faulted_.store(true, std::memory_order_release);
+        latch_writer_fault();
+      } else if (command.topic_id <= max_topics_) {
+        topic_registration_acked_[command.topic_id].store(1U, std::memory_order_release);
+        graph_dirty_.store(true, std::memory_order_release);
       }
     }
   }
@@ -1923,8 +2260,7 @@ private:
   void set_storage_fault() noexcept
   {
     metrics_->record_storage_error();
-    state_.store(kStorageFault, std::memory_order_release);
-    writer_faulted_.store(true, std::memory_order_release);
+    latch_writer_fault();
   }
 
   bool enforce_retention()
@@ -2196,6 +2532,10 @@ private:
         active_incident_links_complete_ = false;
         continue;
       }
+      if (info.file_bytes > retention_max_bytes_ - active_incident_segment_bytes_) {
+        active_incident_links_complete_ = false;
+        continue;
+      }
 
       const std::filesystem::path segment_link =
         active_incident_directory_ / info.path.filename();
@@ -2219,12 +2559,14 @@ private:
         continue;
       }
       active_incident_segments_.push_back(info);
+      active_incident_segment_bytes_ += info.file_bytes;
     }
   }
 
   void reset_active_incident() noexcept
   {
     active_incident_segments_.clear();
+    active_incident_segment_bytes_ = 0U;
     active_incident_directory_.clear();
     active_incident_links_complete_ = true;
     active_incident_storage_error_ = false;
@@ -2327,8 +2669,7 @@ private:
     const CaptureStatus status = writer_->flush();
     if (!status.ok()) {
       metrics_->record_storage_error();
-      state_.store(kStorageFault, std::memory_order_release);
-      writer_faulted_.store(true, std::memory_order_release);
+      latch_writer_fault();
       return;
     }
     const MetricsSnapshot snapshot = metrics_->aggregate_snapshot();
@@ -2346,19 +2687,19 @@ private:
     const CaptureStatus status = writer_->rotate();
     if (!status.ok()) {
       metrics_->record_storage_error();
-      state_.store(kStorageFault, std::memory_order_release);
-      writer_faulted_.store(true, std::memory_order_release);
+      latch_writer_fault();
     } else {
       (void)sync_closed_segments();
     }
   }
 
-  void discard_remaining_for_shutdown() noexcept
+  void discard_remaining_for_shutdown(
+    DropReason reason = DropReason::kShutdownCutoff) noexcept
   {
     Event event{};
     while (event_ring_->try_pop(event)) {
       metrics_->record_drop(
-        event.header.topic_id, DropReason::kShutdownCutoff,
+        event.header.topic_id, reason,
         event.header.payload_size, event.header.monotonic_ns,
         event.header.sequence);
       if (event.payload.valid()) {
@@ -2373,7 +2714,20 @@ private:
   {
     PayloadHandle handle{};
     while (reclaim_ring_ && reclaim_ring_->try_pop(handle)) {
-      (void)arena_->release(handle);
+      if (arena_->release(handle) != PayloadReleaseResult::kSuccess) {
+        metrics_->record_storage_error();
+        latch_invariant_fault();
+      }
+    }
+  }
+
+  void reclaim_writer_payload(const Event & event) noexcept
+  {
+    if (event.payload.valid() &&
+      !reclaim_ring_->try_push(event.payload, AdmissionClass::kData))
+    {
+      metrics_->record_storage_error();
+      latch_invariant_fault();
     }
   }
 
@@ -2386,7 +2740,7 @@ private:
     metrics_->record_drop(
       topic_id, DropReason::kInvariantFault, bytes, monotonic_now_ns(),
       sequence);
-    state_.store(kInvariantFault, std::memory_order_release);
+    latch_invariant_fault();
   }
 
   uint64_t next_sequence() noexcept
@@ -2416,10 +2770,15 @@ private:
            configured_topics_.end();
   }
 
-  bool is_high_priority(const std::string & topic) const
+  uint8_t shed_tier_for(const std::string & topic) const
   {
-    return std::find(high_priority_topics_.begin(), high_priority_topics_.end(), topic) !=
-           high_priority_topics_.end();
+    for (uint8_t tier = 0U; tier < kShedTierCount; ++tier) {
+      const std::vector<std::string> & topics = priority_tiers_[static_cast<std::size_t>(tier)];
+      if (std::find(topics.begin(), topics.end(), topic) != topics.end()) {
+        return tier;
+      }
+    }
+    return kDefaultShedTier;
   }
 
   bool is_excluded(const std::string & topic) const
@@ -2444,7 +2803,7 @@ private:
   std::string session_id_;
   std::vector<std::string> configured_topics_;
   std::vector<std::string> excluded_topics_;
-  std::vector<std::string> high_priority_topics_;
+  std::array<std::vector<std::string>, kShedTierCount> priority_tiers_;
   std::map<std::string, double> expected_rates_;
   bool discover_all_{false};
   std::chrono::milliseconds discovery_period_{100};
@@ -2496,6 +2855,7 @@ private:
   std::unique_ptr<SpscRingBuffer<Event>> event_ring_;
   std::unique_ptr<SpscRingBuffer<PayloadHandle>> reclaim_ring_;
   std::unique_ptr<SpscRingBuffer<TopicCommand>> topic_commands_;
+  std::unique_ptr<SpscRingBuffer<TriggerCommand>> trigger_commands_;
   std::unique_ptr<PayloadArena> arena_;
   std::unique_ptr<TopicRegistry> registry_;
   std::unique_ptr<CaptureMetrics> metrics_;
@@ -2503,6 +2863,12 @@ private:
   std::unique_ptr<SegmentWriter> writer_;
   std::vector<uint64_t> emitted_drop_counts_;
   std::vector<uint8_t> best_effort_topic_ids_;
+  std::vector<uint8_t> topic_registration_queued_;
+  std::unique_ptr<std::atomic<uint8_t>[]> topic_registration_acked_;
+  // Shedding priority per topic ID, sized once from capture.max_topics so the
+  // ingest callback resolves a tier with one indexed load and no allocation.
+  std::vector<uint8_t> topic_shed_tiers_;
+  ShedWatermarks shed_watermarks_{};
   mutable std::mutex registry_mutex_;
 
   std::unordered_map<std::string, SubscriptionState> subscriptions_;
@@ -2542,8 +2908,11 @@ private:
   std::thread graph_thread_;
 
   std::atomic<bool> writer_running_{false};
+  std::atomic<bool> writer_alive_{false};
   std::atomic<bool> writer_clean_{false};
   std::atomic<bool> writer_faulted_{false};
+  std::atomic<uint64_t> trigger_intent_lost_{0};
+  std::atomic<uint8_t> health_status_emitted_{0};
   std::atomic<bool> drain_incomplete_{false};
   std::atomic<uint64_t> drain_deadline_ns_{UINT64_MAX};
   std::thread writer_thread_;
@@ -2556,6 +2925,7 @@ private:
   std::atomic<int32_t> clock_change_code_{0};
   uint64_t emitted_clock_event_count_{0};
   uint64_t emitted_clock_anomaly_count_{0};
+  uint64_t accounted_clock_anomaly_count_{0};
   std::atomic<uint64_t> status_publish_failures_{0};
   std::atomic<uint64_t> incident_manifest_errors_{0};
   std::atomic<std::size_t> rolling_segment_count_status_{0};
@@ -2577,6 +2947,7 @@ private:
   uint64_t active_trigger_sequence_{0};
   uint64_t trigger_start_ns_{0};
   uint64_t post_trigger_deadline_ns_{0};
+  uint64_t active_incident_segment_bytes_{0};
 };
 
 RecorderNode::RecorderNode(const rclcpp::NodeOptions & options)
@@ -2601,4 +2972,6 @@ std::string RecorderNode::status_json() const {return impl_->status_json();}
 
 }  // namespace blackbox_capture
 
+#ifdef BLACKBOX_CAPTURE_ENABLE_EXPERIMENTAL_COMPOSITION
 RCLCPP_COMPONENTS_REGISTER_NODE(blackbox_capture::RecorderNode)
+#endif

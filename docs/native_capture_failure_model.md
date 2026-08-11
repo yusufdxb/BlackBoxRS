@@ -25,7 +25,7 @@ stateDiagram-v2
     NORMAL --> DRAINING
     HIGH_WATERMARK --> DRAINING
     SHEDDING --> DRAINING
-    STORAGE_FAULT --> DRAINING
+    STORAGE_FAULT --> STOPPED_INCOMPLETE
     DRAINING --> STOPPED_CLEAN
     DRAINING --> STOPPED_INCOMPLETE
     STARTING --> INVARIANT_FAULT
@@ -36,6 +36,8 @@ stateDiagram-v2
 
 Runtime storage faults are latched. The recorder does not return to `NORMAL`
 after a writer fault; recovery of a partial file is a separate offline action.
+Invariant faults are likewise sticky. Pressure-state updates and shutdown entry
+cannot overwrite either fault before final status is emitted.
 
 Control chronology can use reserved descriptor slots. Fixed per-topic and
 per-reason ledgers remain authoritative if the reserve itself is exhausted.
@@ -44,15 +46,15 @@ per-reason ledgers remain authoritative if the reserve itself is exhausted.
 
 | Failure | Required behavior | Evidence quality |
 |---|---|---|
-| Writer delay or blocked writer | Callback stays non-blocking, queue utilization rises, low-priority shedding starts at policy threshold, then reject-newest is counted | Complete until the first accounted drop, degraded afterward |
-| `ENOSPC`, `EIO`, or short write | Writer enters storage fault, increments storage errors, preserves in-memory ledgers, does not spin a crash loop | Incomplete after the last durable watermark |
+| Writer delay or blocked writer | Callback stays non-blocking, queue utilization rises, shedding walks the priority tiers from least to most important, then reject-newest is counted | Complete until the first accounted drop, degraded afterward |
+| `ENOSPC`, `EIO`, or short write | Writer latches storage fault, closes admission, increments storage errors, attributes the remaining backlog to storage loss, and does not spin a crash loop | Incomplete after the last durable watermark |
 | Payload larger than configured maximum | Reject before arena copy, consume a global sequence, count events and bytes by topic and reason | Explicit single-event gap |
 | Descriptor or payload arena full | Reject newest data, preserve writer-owned oldest event, record count, bytes, sequence range, and time range | Explicit bounded gap |
 | Control reserve full | Increment the sideband control-admission ledger even if a `DROP_EVENT` cannot enter the chronology | Degraded; sideband metadata is authoritative |
 | Topic registry or string arena full | Do not create an untracked subscription; report registry exhaustion | Topic coverage incomplete |
 | Malformed opaque CDR | Persist opaque bytes when storage accepts them; parser errors must not corrupt neighboring records | Semantic validity unknown for that record |
 | Publisher death | Graph diff and configured dead-topic trigger use steady time; rotate and pin the incident window | Complete subject to normal loss counters |
-| Publisher type or QoS churn | Reconcile observed graph state, assign a new ID for a type change, destroy stale subscriptions | Graph history is eventually consistent |
+| Publisher type, identity, or QoS churn | Reconcile observed graph state, assign a new ID for a type change, destroy stale subscriptions | Graph history is eventually consistent |
 | ROS clock rollback or jump | Preserve steady ordering and emit a clock event with signed ROS evidence | Ordered chronology, anomalous ROS time |
 | Wall-clock adjustment | No effect on ordering or deadlines | No evidence degradation |
 | SIGTERM or SIGINT | Stop admission, drain queued work until the configured cutoff, close and sync, publish clean or incomplete state | Clean only if reconciliation and close succeed |
@@ -63,6 +65,13 @@ per-reason ledgers remain authoritative if the reserve itself is exhausted.
 No writer failure may be translated to a successful close. No missing footer,
 unresolved sequence gap, status timeout, or partial segment is interpreted as
 zero loss.
+
+Heartbeat and rate state observe callback arrival before payload admission.
+Shedding, oversize rejection, arena exhaustion, and a full descriptor ring must
+not make an active publisher look dead. Trigger intent has its own bounded writer
+command queue when the chronology reserve cannot accept the trigger record. If
+both paths reject it, `trigger_intent_lost` increments and an invariant fault is
+latched.
 
 ## Deterministic injection
 
@@ -106,11 +115,15 @@ ordinary benchmark.
 Crash recovery tests must truncate at record and chunk boundaries. They must prove
 that recovery starts at the initial MCAP magic, stops at the first invalid or
 incomplete record, and does not search later payload bytes for a plausible magic
-marker. The current helper rejects CRC mismatches in complete uncompressed
-chunks, then publishes through a partial name, durable rename, and recovery
-sidecar. It has not yet established the strict-prefix property for every
-possible corruption outside complete chunks. Until the broader corruption suite
-does, recovered input is incomplete and the promotion gate stays open.
+marker. For the native uncompressed format, the helper stops at the first
+CRC-invalid chunk, republishes only complete earlier chunks, and discards the
+corrupt chunk and every later byte. Invalid chunk sizes remain hard failures
+before CRC access. Publication uses a partial name, durable rename, and recovery
+sidecar; exact footer-to-magic adjacency is required for a clean-input label,
+and recovery inputs cannot alias owned output paths or inodes. The precise
+CRC-prefix guarantee does not yet cover compressed inputs or every possible
+record corruption, so recovered input remains incomplete and the promotion gate
+stays open.
 
 ## Shutdown and durability
 
@@ -130,6 +143,11 @@ bound on wall-clock process exit. A kernel-blocked regular-file write or `fsync`
 cannot be safely detached from a composed node without risking use-after-free.
 Supervision may force-kill the owned standalone process after its separate
 shutdown timeout, which leaves partial evidence and is always incomplete.
+
+The standalone executable returns a nonzero status when drain is incomplete.
+The Python supervisor remains active after `READY`, parses `HEALTH_STATUS` and
+`FINAL_STATUS`, and emits native health events for unexpected child exit, sticky
+storage or invariant faults, and incomplete termination.
 
 Power failure can still lose data acknowledged by the drive or filesystem after
 the last barrier. The software cannot prove stronger hardware persistence.

@@ -192,7 +192,12 @@ class BlackBoxDaemon:
         if self._config.capture.backend == "cpp":
             from blackboxrs.recording import NativeCaptureProcess  # noqa: E402
 
-            native_capture = NativeCaptureProcess(self._config.capture, self._config.runtime)
+            native_capture = NativeCaptureProcess(
+                self._config.capture,
+                self._config.runtime,
+                self._event_bus,
+                self._session,
+            )
             self._register(native_capture)
 
         # --- Logging pipeline (always enabled) ----------------------------

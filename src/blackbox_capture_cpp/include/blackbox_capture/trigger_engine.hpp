@@ -80,11 +80,13 @@ private:
     uint64_t dead_first_seen_ns{0};
     uint64_t low_first_seen_ns{0};
     uint64_t high_first_seen_ns{0};
+    TriggerEvent pending_rate_trigger{};
     bool configured{false};
     bool seen_message{false};
     bool dead_active{false};
     bool low_active{false};
     bool high_active{false};
+    bool pending_rate_trigger_valid{false};
   };
 
   struct ThresholdState

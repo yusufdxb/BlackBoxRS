@@ -123,6 +123,15 @@ def _capture_quality_section(quality: CaptureQuality | None) -> str:
     out.append(f"- **Recovered segment present**: {quality.recovered}")
     if quality.recovery_discarded_tail_bytes is not None:
         out.append(f"- **Recovery discarded tail bytes**: {quality.recovery_discarded_tail_bytes}")
+    out.append(
+        "- **Recovery unwritten tail loss unknown**: "
+        f"{quality.recovery_unwritten_tail_loss_unknown}"
+    )
+    if quality.recovery_last_sequence_low32 is not None:
+        out.append(
+            "- **Last recovered MCAP sequence (low 32 bits)**: "
+            f"{quality.recovery_last_sequence_low32}"
+        )
     if quality.recovery_corruption_reason:
         out.append(f"- **Recovery reason**: {quality.recovery_corruption_reason}")
     out.append(f"- **Evidence records retained**: {_fmt_optional(quality.retained_events)}")

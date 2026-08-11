@@ -30,7 +30,8 @@ The package and executable contracts are:
 - package: `blackbox_capture_cpp`
 - executable: `blackbox_capture`
 - node: `/blackbox/blackbox_capture`
-- component: `blackbox_capture::RecorderNode`
+- experimental component class: `blackbox_capture::RecorderNode`, registered only
+  when `BLACKBOX_CAPTURE_ENABLE_EXPERIMENTAL_COMPOSITION=ON`
 - status topic: `/blackbox/capture_status`, `std_msgs/msg/String`, JSON schema
   `blackboxrs.capture_status.v1`
 - benchmark package and executable: `blackbox_capture_bench publisher`
@@ -78,10 +79,13 @@ tokens and bounded chain traversal detect stale or corrupt handles.
 For these configuration terms:
 
 - `N`: event ring capacity
+- `R`: reclaim ring capacity, currently `N + 1`
 - `K`: payload block count
 - `B`: payload block bytes
 - `T`: topic capacity
 - `D`: topic string arena bytes
+- `Qt`: topic-command capacity, currently `T + 1`
+- `Qg`: trigger-command capacity, currently `T + 12`
 - `Pmax`: maximum accepted payload and writer scratch allowance
 - `C`: MCAP chunk allowance
 - `W`: fixed writer buffers and bounded segment/topic indexes
@@ -90,6 +94,9 @@ the dominant capture-owned allocation is approximately:
 
 ```text
 N * 56
++ R * sizeof(PayloadHandle)
++ Qt * sizeof(TopicCommand)
++ Qg * sizeof(TriggerCommand)
 + K * (B + sizeof(BlockMetadata))
 + T * sizeof(TopicEntry)
 + D
@@ -99,7 +106,10 @@ N * 56
 + W
 ```
 
-The exact startup estimate must use `sizeof` values from the compiled binary.
+The exact startup estimate uses `sizeof` values from the compiled binary. With
+the checked-in `native_capture.yaml`, the Humble GCC build reports 85,094,916
+capture-owned bytes (about 81.15 MiB) against a 134,217,728-byte ceiling and
+refuses startup if the estimate exceeds that ceiling.
 ROS middleware history, RMW allocations, generic-subscription serialized-message
 objects, shared libraries, executor state, and allocator bookkeeping are outside
 this capture-owned budget. RSS therefore exceeds the formula. Stable deployment
@@ -112,15 +122,28 @@ Configured topics are discovered at runtime and subscribed through
 copies serialized CDR without semantic deserialization. Runtime type support for
 the discovered type must be installed.
 
+Configured-topic mode does not enumerate the full DDS topic graph. It queries
+only the configured endpoint set and derives the active type from publisher
+endpoint information, which keeps the default reconciliation work proportional
+to configured scope. Explicit `discover_all` mode still performs graph-wide
+enumeration on the serialized callback lane and remains subject to the churn
+promotion gate.
+
 Topic identity is `(resolved topic, ROS type, serialization format)`. IDs start at
 one and do not recycle during a session. A type change creates a new ID. Topic
 entries and string bytes both have fixed capacities.
 
 Graph snapshots normalize observed changes in nodes, topics, endpoint counts,
-types, and available QoS metadata into the same ordered chronology. DDS graph
+types, publisher identity sets, and available QoS metadata into the same ordered chronology. DDS graph
 notifications can coalesce and discovery is eventually consistent, so these are
 observed diffs, not a claim of perfect instantaneous graph history. Unsupported
 RMW loss or QoS event callbacks are recorded as a capability limitation.
+
+Topic registration is a two-stage bounded operation. The capture registry owns
+the stable ID, then a separate bounded command registers that ID with the writer.
+Subscriptions are created only after the writer command enters its queue. A full
+command queue is retried on the next graph reconciliation instead of creating a
+subscription whose payloads the writer cannot identify.
 
 ROS clock callbacks may also coalesce before the capture timer emits a control
 record. The record carries the last observed delta plus `coalesced_count` and
@@ -162,7 +185,9 @@ The output root is also bounded across restarts. At startup,
 `storage.total_max_bytes` reserves the configured worst-case rolling, incident,
 and active-segment footprint for the new session, while `storage.max_sessions`
 and the remaining byte allowance prune oldest `capture_*` directories. The
-accounting is conservative because hard links are counted by pathname.
+accounting is conservative because hard links are counted by pathname. Each
+incident is independently capped at one `storage.retention_max_bytes` allowance,
+including the combined activation and finalization link sets.
 
 `buffer.memory_budget_bytes` is an enforced preflight ceiling for capture-owned
 bounded structures and writer scratch space. The reported estimate uses compiled
@@ -179,10 +204,21 @@ mode, capture timestamps describe arrival at the observer and publisher-to-callb
 latency is not meaningful across hosts without a separately verified clock
 synchronization contract.
 
-The component can be loaded into an `rclcpp_components` container. Its mutually
-exclusive ingestion group preserves the single-producer invariant even when the
-container uses a multithreaded executor. Composition does not change the memory,
-drop, or durability contracts.
+The package can register an `rclcpp_components` entry point for evaluation, but safe
+component unload is not yet a supported deployment contract. Executor work can
+already hold a callback that captures recorder state when teardown begins, and
+the component cannot quiesce an externally owned executor. Standalone execution
+is therefore required for deployment. Component registration is off by default
+until an adversarial load/unload test proves
+the lifetime barrier. No composition performance or durability advantage is
+claimed.
+
+When Python launches the standalone backend, it supervises the child after
+`READY`, consumes machine-readable `HEALTH_STATUS` and `FINAL_STATUS` lines, and
+turns unexpected exit, sticky storage or invariant faults, and incomplete
+shutdown into BlackBoxRS events. The ROS status topic remains available for
+other operators, but incident integrity does not depend on an optional status
+subscriber.
 
 ## Why not only rosbag2?
 
@@ -212,4 +248,6 @@ The recorder can account for every generic-subscription callback that begins and
 every later admission, rejection, queue, payload, writer, shutdown, and recovery
 outcome. It cannot prove publisher intent, messages DDS never delivered,
 semantic validity of opaque CDR, perfectly instantaneous graph state, or
-power-loss durability beyond the last successful storage barrier.
+power-loss durability beyond the last successful storage barrier. Recovery can
+prove bytes and records present in a valid input prefix. It cannot reconstruct a
+message that never reached the partial file, so that tail is reported as unknown.

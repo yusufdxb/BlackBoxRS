@@ -36,7 +36,12 @@ int main(int argc, char ** argv)
     executor.add_node(node);
     executor.spin();
     node->request_stop();
-    node->drain_and_stop();
+    if (!node->drain_and_stop()) {
+      RCLCPP_ERROR(
+        node->get_logger(),
+        "native recorder shutdown did not durably drain all admitted evidence");
+      exit_code = 2;
+    }
     executor.remove_node(node);
     node.reset();
   } catch (const std::exception & error) {

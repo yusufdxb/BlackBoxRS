@@ -27,12 +27,13 @@ flowchart LR
     MCAP --> PY[BlackBoxRS Python<br/>reason, report, prevent]
 ```
 
-The `rclcpp` component captures configured topics through generic serialized
+The `rclcpp` recorder captures configured topics through generic serialized
 subscriptions, records steady and ROS clocks, orders graph and trigger events in
 the same chronology, and writes through a fixed-capacity descriptor ring and
 fixed-block payload arena. The capture-owned allocation estimate must fit the
-configured memory ceiling before startup. Low-priority traffic is shed at the
-configured watermark, every post-callback recorder drop is counted by topic and
+configured memory ceiling before startup. Traffic is shed by priority tier as
+queue utilization climbs, so robot control and state topics are the last
+evidence given up, every post-callback recorder drop is counted by topic and
 reason, and upstream delivery limitations explicitly make evidence incomplete.
 
 Continuous history is bounded by bytes and segment count. A native trigger closes
@@ -65,10 +66,13 @@ capture:
   native_output_dir: ~/.blackboxrs/native
 ```
 
-The recorder publishes a READY session pointer, the daemon supervises clean
-shutdown, and incident bundles copy selected MCAP evidence into attachments. The
-output root is capped across restarts by native storage parameters. Python remains
-active for semantic detectors and incident intelligence.
+The recorder publishes a READY session pointer and machine-readable health and
+final status. The daemon supervises the child after startup, turns storage faults,
+unexpected exit, and incomplete shutdown into BlackBoxRS events, and copies
+selected MCAP evidence into incident attachments. The output root is capped
+across restarts by native storage parameters. Python remains active for semantic
+detectors and incident intelligence. Standalone mode is the supported deployment;
+safe component unload remains an open promotion gate.
 
 ---
 

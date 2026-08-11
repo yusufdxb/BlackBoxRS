@@ -14,7 +14,19 @@
       - /rosout
       - /parameter_events
       - /blackbox/capture_status
-    capture.high_priority_topics:
+    # Graduated shedding, most important tier first. Under backpressure the
+    # recorder gives up tier 3 at the configured high watermark, then tier 2,
+    # then tier 1 as utilization keeps climbing. Tier 0 is never shed by
+    # policy: robot control and state evidence survives to the ring-full
+    # boundary, where it is counted as a ring-full drop instead. Any topic that
+    # is not listed here is tier 3 and is shed first.
+    capture.priority_tier_0:
+      - /cmd_vel
+      - /joint_states
+      - /imu/data
+    capture.priority_tier_1:
+      - /tf
+    capture.priority_tier_2:
       - /tf_static
     capture.discovery_period_ms: 100
     capture.max_topics: 1024

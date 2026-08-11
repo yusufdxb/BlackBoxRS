@@ -10,6 +10,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BLACKBOX_CAPTURE_ENABLE_ASAN "Build with AddressSanitizer" OFF)
 option(BLACKBOX_CAPTURE_ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
 option(BLACKBOX_CAPTURE_BUILD_FUZZERS "Build libFuzzer targets" OFF)
+option(
+  BLACKBOX_CAPTURE_ENABLE_EXPERIMENTAL_COMPOSITION
+  "Register the unsupported experimental rclcpp component entry point"
+  OFF
+)
 
 find_package(ament_cmake REQUIRED)
 find_package(mcap_vendor REQUIRED)
@@ -54,7 +59,13 @@ target_include_directories(blackbox_capture_component
 target_link_libraries(blackbox_capture_component blackbox_capture_core)
 ament_target_dependencies(blackbox_capture_component rclcpp rclcpp_components std_msgs)
 blackbox_capture_harden(blackbox_capture_component)
-rclcpp_components_register_nodes(blackbox_capture_component "blackbox_capture::RecorderNode")
+if(BLACKBOX_CAPTURE_ENABLE_EXPERIMENTAL_COMPOSITION)
+  target_compile_definitions(
+    blackbox_capture_component
+    PRIVATE BLACKBOX_CAPTURE_ENABLE_EXPERIMENTAL_COMPOSITION=1
+  )
+  rclcpp_components_register_nodes(blackbox_capture_component "blackbox_capture::RecorderNode")
+endif()
 
 add_executable(blackbox_capture src/recorder_node.cpp)
 target_link_libraries(blackbox_capture blackbox_capture_component)
@@ -91,12 +102,17 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
 
+  add_executable(test_type_churn_publisher test/type_churn_publisher.cpp)
+  ament_target_dependencies(test_type_churn_publisher rclcpp std_msgs)
+  blackbox_capture_harden(test_type_churn_publisher)
+
   foreach(test_name
       ring_buffer
       payload_arena
       topic_registry
       trigger_engine
       segment_writer
+      shedding_policy
       recorder)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_${test_name}.cpp")
       ament_add_gtest(test_${test_name} test/test_${test_name}.cpp)
@@ -105,6 +121,7 @@ if(BUILD_TESTING)
         if(test_name STREQUAL "recorder")
           target_link_libraries(test_${test_name} blackbox_capture_component)
           ament_target_dependencies(test_${test_name} rclcpp)
+          add_dependencies(test_${test_name} test_type_churn_publisher)
         endif()
         blackbox_capture_harden(test_${test_name})
       endif()

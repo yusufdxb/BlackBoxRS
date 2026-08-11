@@ -34,6 +34,11 @@ contract. Consumers do not treat it as complete. A clean rotation closes MCAP,
 performs the configured sync, renames to `.mcap`, syncs the parent directory, and
 publishes the sidecar atomically.
 
+Native segments use checksummed MCAP chunks but disable the online message index,
+chunk index, and optional summary. Those structures grow with the message or
+chunk population and would otherwise sit outside the startup memory estimate.
+Segments are intentionally short and Python scans them sequentially.
+
 Incident segment and sidecar entries are hard links to finalized files from the
 rolling segment set. `storage.max_incidents` bounds retained incident
 directories. Rolling paths are independently bounded by
@@ -95,6 +100,8 @@ schema `blackboxrs.capture_status.v1`. The stable fields are:
 - dropped bytes;
 - current, capacity, and peak queue depth;
 - storage error count and last accepted global sequence;
+- admission state, writer liveness, sticky writer-fault state, and lost trigger
+  intent count;
 - clean, incomplete, or recovery state where applicable.
 
 Status is operational telemetry. The final on-disk session and sidecars are the
@@ -121,6 +128,13 @@ bytes, storage and clock errors, peak queue depth and capacity, capture memory
 budget, retained interval, rolling retention caps, and intentionally evicted
 segment/event/byte totals. This final record lets Python distinguish deliberate
 rolling-history eviction from unexplained event loss.
+
+For a session directory, this final record is the authority for clean shutdown.
+Per-segment sidecars prove their own finalized files, not the cleanliness of the
+whole process lifetime. A partial segment forces `clean: false`; an absent final
+quality record leaves cleanliness unknown. An incident-window directory likewise
+cannot inherit session cleanliness unless its own manifest supplies the required
+quality contract.
 
 Each `<index>.json` sidecar records:
 
@@ -157,10 +171,11 @@ retention removes the source session.
 
 ## Checksums and recovery
 
-MCAP chunk, data-section, and summary CRCs are enabled where supported. SHA-256 in
-the sidecar covers the finalized segment. These checks detect accidental damage;
-they are not signatures and do not protect against a malicious writer that can
-replace both data and metadata.
+MCAP chunk and data-section CRCs are enabled where supported. The optional summary
+is disabled, so there is no summary CRC. SHA-256 in the sidecar covers the
+finalized segment. These checks detect accidental damage; they are not signatures
+and do not protect against a malicious writer that can replace both data and
+metadata.
 
 The required recovery contract is to accept only a complete valid prefix, stop at
 the first corrupt or truncated record, and emit a new recovered MCAP. Recovery
@@ -173,11 +188,29 @@ metadata needs:
 - unknown tail loss when exact loss cannot be reconstructed.
 
 The recovery helper preflights CRCs for every complete, uncompressed chunk,
-rewrites messages from the readable portion, publishes through a `.partial`
-file plus rename and parent-directory sync, and atomically writes a
+rejects invalid or oversized chunk sizing, and requires exact footer-to-trailing
+magic adjacency before calling an input clean. It rewrites messages from the
+readable portion, publishes through a `.partial` file plus rename and
+parent-directory sync, and atomically writes a
 `blackboxrs.capture_recovery.v1` sidecar. The sidecar records recovered message
-count, discarded tail bytes, reason, output size, and SHA-256. A chunk CRC
-mismatch is rejected instead of being reissued under a new checksum.
+count, discarded tail bytes, reason, output size, SHA-256, the low 32 bits of the
+last recovered sequence when available, and whether unwritten tail loss remains
+unknown. At the first uncompressed chunk CRC mismatch, recovery bounds the input
+view at that chunk's record offset. Complete earlier chunks are republished;
+the corrupt chunk and all later bytes are discarded and never searched for a
+new synchronization point. A mismatch in the first chunk therefore yields a
+valid empty recovery artifact rather than reissuing corrupt payload.
+
+Recovery serializes writers for the same output with an advisory lock, removes
+stale owned `.partial` and sidecar paths for that exact output, and publishes the
+recovery sidecar before the final MCAP rename. Metadata writes use unique
+same-directory temporary files followed by file sync, rename, and directory sync,
+so an old fixed `.tmp` name cannot brick future finalization.
+
+Recovery rejects inputs that resolve to an owned output, partial, or sidecar
+path, including an inode alias. Schema and channel tables are capped at 4096
+entries, their aggregate metadata at 16 MiB, and individual chunks and messages
+at 64 MiB. Python caps each native JSON metadata document at 4 MiB.
 
 The installed recovery interface is:
 
@@ -189,11 +222,14 @@ ros2 run blackbox_capture_cpp blackbox_capture_recover \
 Python recognizes the resulting `.recovery.json`, exposes discarded-tail and
 corruption metadata, and keeps recovered evidence incomplete.
 
-The helper does not yet prove a strict stop-at-first-invalid scanner for every
-possible corruption outside a complete chunk, or persist the last known durable
-sequence from a crashed process. Those remain open promotion gates. No incident
-report should claim stronger crash recovery before a broader corruption corpus
-demonstrates it.
+The strict CRC-prefix guarantee currently applies to the uncompressed chunks
+written by the native recorder. Compressed chunks are size-gated, but do not yet
+have the same precisely located CRC cutoff. The helper also does not prove a
+strict scanner for every possible record corruption. The recovered MCAP sequence
+can bound what was present in the readable prefix, but it is not the last known
+durable sequence from the crashed process. Those remain open promotion gates.
+No incident report should claim stronger crash recovery before a broader
+corruption corpus demonstrates it.
 
 ## Python reader contract
 

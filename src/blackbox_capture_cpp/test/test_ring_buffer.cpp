@@ -149,5 +149,33 @@ TEST(CaptureMetricsTest, CumulativeDropLedgerPreservesFirstAndLastEvidence) {
   EXPECT_EQ(drop.last_sequence, 9U);
 }
 
+TEST(CaptureMetricsTest, ConcurrentDropWritersPublishCoherentFinalBounds)
+{
+  constexpr uint64_t kDropsPerWriter = 50000U;
+  CaptureMetrics metrics(1U);
+  std::thread older([&]() {
+      for (uint64_t sequence = 1U; sequence <= kDropsPerWriter; ++sequence) {
+        metrics.record_drop(1U, DropReason::kStorageFault, 2U, sequence, sequence);
+      }
+    });
+  std::thread newer([&]() {
+      for (uint64_t sequence = kDropsPerWriter + 1U;
+      sequence <= 2U * kDropsPerWriter; ++sequence)
+      {
+        metrics.record_drop(1U, DropReason::kStorageFault, 2U, sequence, sequence);
+      }
+    });
+  older.join();
+  newer.join();
+
+  const DropSnapshot snapshot = metrics.drop_snapshot(1U, DropReason::kStorageFault);
+  EXPECT_EQ(snapshot.count, 2U * kDropsPerWriter);
+  EXPECT_EQ(snapshot.bytes, 4U * kDropsPerWriter);
+  EXPECT_EQ(snapshot.first_monotonic_ns, 1U);
+  EXPECT_EQ(snapshot.last_monotonic_ns, 2U * kDropsPerWriter);
+  EXPECT_EQ(snapshot.first_sequence, 1U);
+  EXPECT_EQ(snapshot.last_sequence, 2U * kDropsPerWriter);
+}
+
 }  // namespace
 }  // namespace blackbox_capture

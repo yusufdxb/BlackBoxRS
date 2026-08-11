@@ -78,20 +78,23 @@ public:
 
   void record_received(uint32_t topic_id, uint64_t bytes) noexcept
   {
-    update_pair(topic(topic_id).received, topic(topic_id).received_bytes, 1U, bytes);
-    update_pair(total_.received, total_.received_bytes, 1U, bytes);
+    update_pair(
+      topic(topic_id).producer.received, topic(topic_id).producer.received_bytes, 1U, bytes);
+    update_pair(total_.producer.received, total_.producer.received_bytes, 1U, bytes);
   }
 
   void record_admitted(uint32_t topic_id, uint64_t bytes) noexcept
   {
-    update_pair(topic(topic_id).admitted, topic(topic_id).admitted_bytes, 1U, bytes);
-    update_pair(total_.admitted, total_.admitted_bytes, 1U, bytes);
+    update_pair(
+      topic(topic_id).producer.admitted, topic(topic_id).producer.admitted_bytes, 1U, bytes);
+    update_pair(total_.producer.admitted, total_.producer.admitted_bytes, 1U, bytes);
   }
 
   void record_committed(uint32_t topic_id, uint64_t bytes) noexcept
   {
-    update_pair(topic(topic_id).committed, topic(topic_id).committed_bytes, 1U, bytes);
-    update_pair(total_.committed, total_.committed_bytes, 1U, bytes);
+    update_pair(
+      topic(topic_id).writer.committed, topic(topic_id).writer.committed_bytes, 1U, bytes);
+    update_pair(total_.writer.committed, total_.writer.committed_bytes, 1U, bytes);
   }
 
   void record_durable(uint64_t count = 1U) noexcept
@@ -104,20 +107,23 @@ public:
     uint64_t monotonic_ns, uint64_t sequence) noexcept
   {
     TopicCounters & topic_counters = topic(topic_id);
-    topic_counters.dropped.fetch_add(1U, std::memory_order_relaxed);
-    topic_counters.dropped_bytes.fetch_add(bytes, std::memory_order_relaxed);
-    total_.dropped.fetch_add(1U, std::memory_order_relaxed);
-    total_.dropped_bytes.fetch_add(bytes, std::memory_order_relaxed);
+    topic_counters.drops.dropped_bytes.fetch_add(bytes, std::memory_order_relaxed);
+    topic_counters.drops.dropped.fetch_add(1U, std::memory_order_release);
+    total_.drops.dropped_bytes.fetch_add(bytes, std::memory_order_relaxed);
+    total_.drops.dropped.fetch_add(1U, std::memory_order_release);
 
     DropCounters & ledger = drop(topic_id, reason);
-    const uint64_t previous = ledger.count.fetch_add(1U, std::memory_order_relaxed);
     ledger.bytes.fetch_add(bytes, std::memory_order_relaxed);
-    if (previous == 0U) {
-      ledger.first_monotonic_ns.store(monotonic_ns, std::memory_order_relaxed);
-      ledger.first_sequence.store(sequence, std::memory_order_relaxed);
-    }
-    ledger.last_monotonic_ns.store(monotonic_ns, std::memory_order_release);
-    ledger.last_sequence.store(sequence, std::memory_order_release);
+    update_min(ledger.first_monotonic_ns, monotonic_ns);
+    update_min(ledger.first_sequence, sequence);
+    update_max(ledger.last_monotonic_ns, monotonic_ns);
+    update_max(ledger.last_sequence, sequence);
+    // Count is the publication word for the ledger. Readers that observe this
+    // increment also observe every field written for this drop. A concurrent
+    // later writer can make a snapshot conservative, but its own count change
+    // forces another chronology emission instead of permanently suppressing a
+    // correction.
+    ledger.count.fetch_add(1U, std::memory_order_release);
   }
 
   void observe_queue_depth(uint64_t depth, uint64_t capacity) noexcept
@@ -159,12 +165,15 @@ public:
     DropReason reason) const noexcept
   {
     const DropCounters & ledger = drop(topic_id, reason);
-    return DropSnapshot{ledger.count.load(std::memory_order_acquire),
-      ledger.bytes.load(std::memory_order_acquire),
-      ledger.first_monotonic_ns.load(std::memory_order_acquire),
-      ledger.last_monotonic_ns.load(std::memory_order_acquire),
-      ledger.first_sequence.load(std::memory_order_acquire),
-      ledger.last_sequence.load(std::memory_order_acquire)};
+    const uint64_t count = ledger.count.load(std::memory_order_acquire);
+    if (count == 0U) {
+      return {};
+    }
+    return DropSnapshot{count, ledger.bytes.load(std::memory_order_relaxed),
+      ledger.first_monotonic_ns.load(std::memory_order_relaxed),
+      ledger.last_monotonic_ns.load(std::memory_order_relaxed),
+      ledger.first_sequence.load(std::memory_order_relaxed),
+      ledger.last_sequence.load(std::memory_order_relaxed)};
   }
 
   [[nodiscard]] uint32_t max_topic_id() const noexcept {return max_topic_id_;}
@@ -176,25 +185,52 @@ public:
   }
 
 private:
-  struct TopicCounters
+  // Keep the producer hot path, writer hot path, and cross-lane drop totals on
+  // separate cache lines. Drops can be written by either lane and therefore
+  // have unavoidable true sharing, but must not invalidate received/admitted
+  // or committed counters on every update. The padded sizes are included in
+  // memory_bytes(), so this performance isolation cannot escape the enforced
+  // capture-owned memory budget.
+  static constexpr std::size_t kCacheLineBytes = 64U;
+
+  struct alignas (kCacheLineBytes) ProducerCounters
   {
     std::atomic<uint64_t> received{0};
     std::atomic<uint64_t> received_bytes{0};
     std::atomic<uint64_t> admitted{0};
     std::atomic<uint64_t> admitted_bytes{0};
+  };
+
+  struct alignas (kCacheLineBytes) WriterCounters
+  {
     std::atomic<uint64_t> committed{0};
     std::atomic<uint64_t> committed_bytes{0};
+  };
+
+  struct alignas (kCacheLineBytes) DropTotals
+  {
     std::atomic<uint64_t> dropped{0};
     std::atomic<uint64_t> dropped_bytes{0};
   };
+
+  struct TopicCounters
+  {
+    ProducerCounters producer{};
+    WriterCounters writer{};
+    DropTotals drops{};
+  };
+
+  static_assert(sizeof(ProducerCounters) % kCacheLineBytes == 0U);
+  static_assert(sizeof(WriterCounters) % kCacheLineBytes == 0U);
+  static_assert(sizeof(DropTotals) % kCacheLineBytes == 0U);
 
   struct DropCounters
   {
     std::atomic<uint64_t> count{0};
     std::atomic<uint64_t> bytes{0};
-    std::atomic<uint64_t> first_monotonic_ns{0};
+    std::atomic<uint64_t> first_monotonic_ns{UINT64_MAX};
     std::atomic<uint64_t> last_monotonic_ns{0};
-    std::atomic<uint64_t> first_sequence{0};
+    std::atomic<uint64_t> first_sequence{UINT64_MAX};
     std::atomic<uint64_t> last_sequence{0};
   };
 
@@ -259,16 +295,26 @@ private:
     }
   }
 
+  static void update_min(std::atomic<uint64_t> & target, uint64_t value) noexcept
+  {
+    uint64_t current = target.load(std::memory_order_relaxed);
+    while (current > value && !target.compare_exchange_weak(
+        current, value, std::memory_order_relaxed,
+        std::memory_order_relaxed))
+    {
+    }
+  }
+
   static TopicMetricsSnapshot snapshot(const TopicCounters & counters) noexcept
   {
-    return TopicMetricsSnapshot{counters.received.load(std::memory_order_acquire),
-      counters.received_bytes.load(std::memory_order_acquire),
-      counters.admitted.load(std::memory_order_acquire),
-      counters.admitted_bytes.load(std::memory_order_acquire),
-      counters.committed.load(std::memory_order_acquire),
-      counters.committed_bytes.load(std::memory_order_acquire),
-      counters.dropped.load(std::memory_order_acquire),
-      counters.dropped_bytes.load(std::memory_order_acquire)};
+    return TopicMetricsSnapshot{counters.producer.received.load(std::memory_order_acquire),
+      counters.producer.received_bytes.load(std::memory_order_acquire),
+      counters.producer.admitted.load(std::memory_order_acquire),
+      counters.producer.admitted_bytes.load(std::memory_order_acquire),
+      counters.writer.committed.load(std::memory_order_acquire),
+      counters.writer.committed_bytes.load(std::memory_order_acquire),
+      counters.drops.dropped.load(std::memory_order_acquire),
+      counters.drops.dropped_bytes.load(std::memory_order_acquire)};
   }
 
   const uint32_t max_topic_id_;

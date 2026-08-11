@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -104,8 +105,10 @@ struct RecoveryResult
 {
   bool recovered{false};
   bool input_was_clean{false};
+  bool unwritten_tail_loss_unknown{false};
   uint64_t recovered_messages{0};
   uint64_t discarded_tail_bytes{0};
+  std::optional<uint32_t> last_recovered_sequence_low32{};
   std::string corruption_reason{};
   std::filesystem::path output_path{};
 };

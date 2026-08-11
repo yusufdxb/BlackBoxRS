@@ -21,6 +21,7 @@
 #include "blackbox_capture/segment_writer.hpp"
 
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -30,6 +31,7 @@
 #include <cctype>
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -454,10 +456,22 @@ CaptureStatus sha256_file(const std::filesystem::path & path, std::string & outp
 
 CaptureStatus write_atomic_text(const std::filesystem::path & destination, std::string_view data)
 {
-  const std::filesystem::path temporary = destination.string() + ".tmp";
-  const int descriptor = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0640);
+  const std::filesystem::path parent = destination.parent_path().empty() ?
+    std::filesystem::path{"."} : destination.parent_path();
+  std::string pattern =
+    (parent / ("." + destination.filename().string() + ".tmp.XXXXXX")).string();
+  std::vector<char> temporary_storage(pattern.begin(), pattern.end());
+  temporary_storage.push_back('\0');
+  const int descriptor = ::mkostemp(temporary_storage.data(), O_CLOEXEC);
   if (descriptor < 0) {
     return CaptureStatus::from_errno("failed to create temporary metadata file");
+  }
+  const std::filesystem::path temporary(temporary_storage.data());
+  if (::fchmod(descriptor, 0640) != 0) {
+    const int saved_errno = errno;
+    ::close(descriptor);
+    ::unlink(temporary.c_str());
+    return CaptureStatus::from_errno("failed to set metadata file permissions", saved_errno);
   }
   std::size_t offset = 0U;
   while (offset < data.size()) {
@@ -489,8 +503,58 @@ CaptureStatus write_atomic_text(const std::filesystem::path & destination, std::
     ::unlink(temporary.c_str());
     return CaptureStatus::from_errno("metadata rename failed", saved_errno);
   }
-  return sync_directory(destination.parent_path());
+  return sync_directory(parent);
 }
+
+class ScopedFileLock
+{
+public:
+  CaptureStatus acquire(const std::filesystem::path & path)
+  {
+    descriptor_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0640);
+    if (descriptor_ < 0) {
+      return CaptureStatus::from_errno("failed to open recovery lock");
+    }
+    if (::flock(descriptor_, LOCK_EX | LOCK_NB) != 0) {
+      const int saved_errno = errno;
+      ::close(descriptor_);
+      descriptor_ = -1;
+      return CaptureStatus::from_errno("failed to acquire recovery lock", saved_errno);
+    }
+    return CaptureStatus::success();
+  }
+
+  ~ScopedFileLock()
+  {
+    if (descriptor_ >= 0) {
+      (void)::flock(descriptor_, LOCK_UN);
+      (void)::close(descriptor_);
+    }
+  }
+
+private:
+  int descriptor_{-1};
+};
+
+class ScopedPathCleanup
+{
+public:
+  explicit ScopedPathCleanup(std::filesystem::path path)
+  : path_(std::move(path)) {}
+
+  ~ScopedPathCleanup()
+  {
+    if (active_) {
+      (void)::unlink(path_.c_str());
+    }
+  }
+
+  void release() noexcept {active_ = false;}
+
+private:
+  std::filesystem::path path_;
+  bool active_{true};
+};
 
 std::string indexed_name(uint64_t index, std::string_view suffix)
 {
@@ -693,8 +757,13 @@ public:
     writer_options.enableDataCRC = true;
     writer_options.noSummaryCRC = false;
     writer_options.noChunking = false;
-    writer_options.noMessageIndex = false;
-    writer_options.noSummary = false;
+    // Online indexes grow with the number of messages and chunks in a segment,
+    // outside the recorder's configured capture-memory budget. Native capture
+    // reads short segments sequentially, so retain independently checksummed
+    // chunks while omitting indexes and the optional summary from the hot path.
+    writer_options.noMessageIndex = true;
+    writer_options.noChunkIndex = true;
+    writer_options.noSummary = true;
     writer.open(*sink, writer_options);
     if (sink->faulted()) {
       writer.terminate();
@@ -1326,6 +1395,56 @@ CaptureStatus SegmentWriter::recover_partial(
 {
   result = {};
   try {
+    const std::filesystem::path output_parent = output.parent_path().empty() ?
+      std::filesystem::path{"."} : output.parent_path();
+    const std::filesystem::path partial_output = output.string() + ".partial";
+    const std::filesystem::path recovery_sidecar = output.string() + ".recovery.json";
+    std::error_code path_error;
+    const std::filesystem::path canonical_input =
+      std::filesystem::weakly_canonical(input, path_error);
+    if (path_error) {
+      return CaptureStatus::failure(
+        CaptureStatusCode::kIoError,
+        "failed to resolve recovery input: " + path_error.message(),
+        path_error.value());
+    }
+    const std::filesystem::path canonical_output =
+      std::filesystem::weakly_canonical(output, path_error);
+    if (path_error) {
+      return CaptureStatus::failure(
+        CaptureStatusCode::kIoError,
+        "failed to resolve recovery output: " + path_error.message(),
+        path_error.value());
+    }
+    const std::filesystem::path canonical_partial =
+      std::filesystem::weakly_canonical(partial_output, path_error);
+    if (path_error) {
+      return CaptureStatus::failure(
+        CaptureStatusCode::kIoError,
+        "failed to resolve partial recovery output: " + path_error.message(),
+        path_error.value());
+    }
+    const std::filesystem::path canonical_sidecar =
+      std::filesystem::weakly_canonical(recovery_sidecar, path_error);
+    if (path_error) {
+      return CaptureStatus::failure(
+        CaptureStatusCode::kIoError,
+        "failed to resolve recovery sidecar: " + path_error.message(),
+        path_error.value());
+    }
+    if (canonical_input == canonical_output || canonical_input == canonical_partial ||
+      canonical_input == canonical_sidecar)
+    {
+      return CaptureStatus::failure(
+        CaptureStatusCode::kInvalidArgument,
+        "recovery input aliases an output path");
+    }
+    ScopedFileLock recovery_lock;
+    CaptureStatus status = recovery_lock.acquire(output.string() + ".recovery.lock");
+    if (!status) {
+      return status;
+    }
+
     std::error_code file_error;
     const uint64_t input_size = std::filesystem::file_size(input, file_error);
     if (file_error) {
@@ -1335,7 +1454,6 @@ CaptureStatus SegmentWriter::recover_partial(
         file_error.value());
     }
 
-    const std::filesystem::path partial_output = output.string() + ".partial";
     const bool output_exists = std::filesystem::exists(output, file_error);
     if (file_error) {
       return CaptureStatus::failure(
@@ -1350,10 +1468,44 @@ CaptureStatus SegmentWriter::recover_partial(
         "failed to inspect partial recovery output: " + file_error.message(),
         file_error.value());
     }
-    if (output_exists || partial_exists) {
+    if (output_exists) {
       return CaptureStatus::failure(
         CaptureStatusCode::kIoError,
         "refusing to overwrite an existing recovery output");
+    }
+    const bool stale_sidecar_exists = std::filesystem::exists(recovery_sidecar, file_error);
+    if (file_error) {
+      return CaptureStatus::failure(
+        CaptureStatusCode::kIoError,
+        "failed to inspect recovery sidecar: " + file_error.message(),
+        file_error.value());
+    }
+    auto aliases_input = [&](const std::filesystem::path & candidate, bool exists) {
+        if (!exists) {
+          return false;
+        }
+        std::error_code equivalent_error;
+        const bool equivalent = std::filesystem::equivalent(input, candidate, equivalent_error);
+        return !equivalent_error && equivalent;
+      };
+    if (aliases_input(partial_output, partial_exists) ||
+      aliases_input(recovery_sidecar, stale_sidecar_exists))
+    {
+      return CaptureStatus::failure(
+        CaptureStatusCode::kInvalidArgument,
+        "recovery input aliases an output inode");
+    }
+    if (partial_exists && ::unlink(partial_output.c_str()) != 0) {
+      return CaptureStatus::from_errno("failed to remove stale partial recovery output");
+    }
+    if (stale_sidecar_exists && ::unlink(recovery_sidecar.c_str()) != 0) {
+      return CaptureStatus::from_errno("failed to remove stale recovery sidecar");
+    }
+    if (partial_exists || stale_sidecar_exists) {
+      status = sync_directory(output_parent);
+      if (!status) {
+        return status;
+      }
     }
 
     mcap::McapReader reader;
@@ -1364,11 +1516,39 @@ CaptureStatus SegmentWriter::recover_partial(
         "failed to open partial MCAP: " + reader_status.message);
     }
 
-    bool chunk_crc_mismatch = false;
+    constexpr uint64_t kMaximumRecoveryChunkBytes = 64U * 1024U * 1024U;
+    bool unsafe_chunk_size = false;
+    std::optional<mcap::ByteOffset> corrupt_chunk_offset;
+    std::optional<mcap::ByteOffset> clean_footer_offset;
+    bool trailing_magic_present = false;
+    std::string chunk_validation_message;
     if (mcap::IReadable * source = reader.dataSource()) {
+      if (input_size >= sizeof(mcap::Magic)) {
+        std::byte * tail = nullptr;
+        const uint64_t bytes_read = source->read(
+          &tail, input_size - sizeof(mcap::Magic), sizeof(mcap::Magic));
+        trailing_magic_present = bytes_read == sizeof(mcap::Magic) && tail != nullptr &&
+          std::memcmp(tail, mcap::Magic, sizeof(mcap::Magic)) == 0;
+      }
       mcap::TypedRecordReader validator(*source, sizeof(mcap::Magic), input_size);
-      validator.onChunk = [&](const mcap::Chunk & chunk, mcap::ByteOffset) {
-          if (chunk.uncompressedCrc == 0U || chunk.compression != "") {
+      validator.onChunk = [&](const mcap::Chunk & chunk, mcap::ByteOffset offset) {
+          if (chunk.compressedSize > input_size ||
+            chunk.uncompressedSize > kMaximumRecoveryChunkBytes ||
+            chunk.uncompressedSize > std::numeric_limits<std::size_t>::max())
+          {
+            unsafe_chunk_size = true;
+            chunk_validation_message = "partial MCAP contains invalid chunk sizing";
+            return;
+          }
+          if (chunk.compression != "") {
+            return;
+          }
+          if (chunk.uncompressedSize != chunk.compressedSize) {
+            unsafe_chunk_size = true;
+            chunk_validation_message = "partial MCAP contains invalid uncompressed chunk sizing";
+            return;
+          }
+          if (chunk.uncompressedCrc == 0U) {
             return;
           }
           const uint32_t computed = mcap::internal::crc32Final(
@@ -1376,25 +1556,30 @@ CaptureStatus SegmentWriter::recover_partial(
               mcap::internal::CRC32_INIT, chunk.records,
               static_cast<std::size_t>(chunk.uncompressedSize)));
           if (computed != chunk.uncompressedCrc) {
-            chunk_crc_mismatch = true;
+            corrupt_chunk_offset = offset;
+            chunk_validation_message = "partial MCAP contains a chunk CRC mismatch";
           }
         };
-      while (!chunk_crc_mismatch && validator.next()) {
+      validator.onFooter = [&](const mcap::Footer &, mcap::ByteOffset offset) {
+          clean_footer_offset = offset;
+        };
+      while (!unsafe_chunk_size && !corrupt_chunk_offset.has_value() && validator.next()) {
       }
     }
-    if (chunk_crc_mismatch) {
+    if (unsafe_chunk_size) {
       reader.close();
       return CaptureStatus::failure(
         CaptureStatusCode::kCorruptData,
-        "partial MCAP contains a chunk CRC mismatch");
+        chunk_validation_message);
     }
 
     CheckedPosixWritable sink({});
-    CaptureStatus status = sink.open(partial_output);
+    status = sink.open(partial_output);
     if (!status) {
       reader.close();
       return status;
     }
+    ScopedPathCleanup partial_cleanup(partial_output);
     mcap::McapWriter writer;
     mcap::McapWriterOptions options("ros2");
     options.library = "blackbox_capture_cpp/recovery-1";
@@ -1402,6 +1587,9 @@ CaptureStatus SegmentWriter::recover_partial(
     options.enableDataCRC = true;
     options.noChunkCRC = false;
     options.noSummaryCRC = false;
+    options.noMessageIndex = true;
+    options.noChunkIndex = true;
+    options.noSummary = true;
     writer.open(sink, options);
 
     std::unordered_map<mcap::SchemaId, mcap::SchemaId> schemas;
@@ -1418,16 +1606,43 @@ CaptureStatus SegmentWriter::recover_partial(
       };
 
     constexpr std::size_t kRecoveryMetadataLimit = 4096U;
-    for (const mcap::MessageView & view : reader.readMessages(on_problem)) {
-      if (schemas.size() > kRecoveryMetadataLimit || channels.size() > kRecoveryMetadataLimit) {
+    constexpr uint64_t kRecoveryMetadataBytesLimit = 16U * 1024U * 1024U;
+    constexpr uint64_t kRecoveryMessageBytesLimit = 64U * 1024U * 1024U;
+    uint64_t recovery_metadata_bytes = 0U;
+    auto reserve_metadata_bytes = [&](std::size_t bytes) {
+        const uint64_t amount = static_cast<uint64_t>(bytes);
+        if (amount > kRecoveryMetadataBytesLimit - recovery_metadata_bytes) {
+          return false;
+        }
+        recovery_metadata_bytes += amount;
+        return true;
+      };
+    const mcap::ByteOffset recovery_end = corrupt_chunk_offset.value_or(input_size);
+    mcap::LinearMessageView recoverable_messages(
+      reader, sizeof(mcap::Magic), recovery_end, 0U, mcap::MaxTime, on_problem);
+    for (const mcap::MessageView & view : recoverable_messages) {
+      if (view.channel == nullptr || view.message.dataSize > kRecoveryMessageBytesLimit) {
         problem_seen = true;
-        problem_message = "recovery metadata capacity exceeded";
+        problem_message = "recovery message size or channel is invalid";
         break;
       }
       mcap::SchemaId schema_id = 0U;
       if (view.schema) {
         const auto found_schema = schemas.find(view.schema->id);
         if (found_schema == schemas.end()) {
+          if (schemas.size() >= kRecoveryMetadataLimit) {
+            problem_seen = true;
+            problem_message = "recovery schema capacity exceeded";
+            break;
+          }
+          if (!reserve_metadata_bytes(view.schema->name.size()) ||
+            !reserve_metadata_bytes(view.schema->encoding.size()) ||
+            !reserve_metadata_bytes(view.schema->data.size()))
+          {
+            problem_seen = true;
+            problem_message = "recovery schema metadata byte capacity exceeded";
+            break;
+          }
           mcap::Schema schema = *view.schema;
           const mcap::SchemaId old_id = schema.id;
           writer.addSchema(schema);
@@ -1441,6 +1656,22 @@ CaptureStatus SegmentWriter::recover_partial(
       mcap::ChannelId channel_id = 0U;
       const auto found_channel = channels.find(view.channel->id);
       if (found_channel == channels.end()) {
+        if (channels.size() >= kRecoveryMetadataLimit) {
+          problem_seen = true;
+          problem_message = "recovery channel capacity exceeded";
+          break;
+        }
+        bool metadata_fits = reserve_metadata_bytes(view.channel->topic.size()) &&
+          reserve_metadata_bytes(view.channel->messageEncoding.size());
+        for (const auto & [key, value] : view.channel->metadata) {
+          metadata_fits = metadata_fits && reserve_metadata_bytes(key.size()) &&
+            reserve_metadata_bytes(value.size());
+        }
+        if (!metadata_fits) {
+          problem_seen = true;
+          problem_message = "recovery channel metadata byte capacity exceeded";
+          break;
+        }
         mcap::Channel channel = *view.channel;
         const mcap::ChannelId old_id = channel.id;
         channel.schemaId = schema_id;
@@ -1466,8 +1697,23 @@ CaptureStatus SegmentWriter::recover_partial(
           write_status.message);
       }
       ++result.recovered_messages;
+      result.last_recovered_sequence_low32 = view.message.sequence;
     }
-    result.input_was_clean = reader.footer().has_value() && !problem_seen;
+    constexpr uint64_t kRecordHeaderBytes = 1U + sizeof(uint64_t);
+    constexpr uint64_t kFooterPayloadBytes =
+      sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint32_t);
+    const uint64_t discarded_tail_bytes = corrupt_chunk_offset.has_value() ?
+      input_size - *corrupt_chunk_offset : structurally_truncated_tail(input, input_size);
+    const bool footer_is_adjacent_to_magic = clean_footer_offset.has_value() &&
+      *clean_footer_offset <= input_size &&
+      kRecordHeaderBytes + kFooterPayloadBytes + sizeof(mcap::Magic) <=
+      input_size - *clean_footer_offset &&
+      *clean_footer_offset + kRecordHeaderBytes + kFooterPayloadBytes ==
+      input_size - sizeof(mcap::Magic);
+    result.input_was_clean = !corrupt_chunk_offset.has_value() &&
+      footer_is_adjacent_to_magic && trailing_magic_present &&
+      discarded_tail_bytes == 0U && !problem_seen;
+    result.unwritten_tail_loss_unknown = !result.input_was_clean;
     reader.close();
     writer.close();
     if (sink.faulted()) {
@@ -1484,26 +1730,19 @@ CaptureStatus SegmentWriter::recover_partial(
       return status;
     }
 
-    result.corruption_reason = problem_seen ? problem_message :
-      (result.input_was_clean ? "" : "missing clean footer");
-    result.discarded_tail_bytes = structurally_truncated_tail(input, input_size);
-    status = checked_rename(partial_output, output, false);
-    if (!status) {
-      return status;
-    }
-    const std::filesystem::path output_parent = output.parent_path().empty() ?
-      std::filesystem::path{"."} : output.parent_path();
-    status = sync_directory(output_parent);
-    if (!status) {
-      return status;
-    }
+    result.corruption_reason = corrupt_chunk_offset.has_value() ? chunk_validation_message :
+      (problem_seen ? problem_message :
+      (result.input_was_clean ? "" :
+      (discarded_tail_bytes > 0U ? "trailing or structurally invalid bytes" :
+      "missing clean footer")));
+    result.discarded_tail_bytes = discarded_tail_bytes;
 
     std::string digest;
-    status = sha256_file(output, digest);
+    status = sha256_file(partial_output, digest);
     if (!status) {
       return status;
     }
-    const uint64_t output_size = std::filesystem::file_size(output, file_error);
+    const uint64_t output_size = std::filesystem::file_size(partial_output, file_error);
     if (file_error) {
       return CaptureStatus::failure(
         CaptureStatusCode::kIoError,
@@ -1517,8 +1756,16 @@ CaptureStatus SegmentWriter::recover_partial(
     append_json_escaped(recovery_json, output.filename().string());
     recovery_json += ",\"input_was_clean\":";
     recovery_json += result.input_was_clean ? "true" : "false";
+    recovery_json += ",\"unwritten_tail_loss_unknown\":";
+    recovery_json += result.unwritten_tail_loss_unknown ? "true" : "false";
     recovery_json += ",\"recovered_messages\":" +
       std::to_string(result.recovered_messages);
+    recovery_json += ",\"last_recovered_sequence_low32\":";
+    if (result.last_recovered_sequence_low32) {
+      recovery_json += std::to_string(*result.last_recovered_sequence_low32);
+    } else {
+      recovery_json += "null";
+    }
     recovery_json += ",\"discarded_tail_bytes\":" +
       std::to_string(result.discarded_tail_bytes);
     recovery_json += ",\"corruption_reason\":";
@@ -1527,8 +1774,18 @@ CaptureStatus SegmentWriter::recover_partial(
     recovery_json += ",\"sha256\":";
     append_json_escaped(recovery_json, digest);
     recovery_json += "}\n";
-    const std::filesystem::path recovery_sidecar = output.string() + ".recovery.json";
     status = write_atomic_text(recovery_sidecar, recovery_json);
+    if (!status) {
+      return status;
+    }
+    ScopedPathCleanup sidecar_cleanup(recovery_sidecar);
+    status = checked_rename(partial_output, output, false);
+    if (!status) {
+      return status;
+    }
+    partial_cleanup.release();
+    sidecar_cleanup.release();
+    status = sync_directory(output_parent);
     if (!status) {
       return status;
     }

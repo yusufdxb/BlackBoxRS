@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://blackboxrs.dev/schema/native_capture_benchmark.v1.json",
-  "title": "BlackBoxRS native capture benchmark",
+  "title": "BlackBoxRS capture backend benchmark",
   "type": "object",
   "required": [
     "schema_version",
@@ -41,7 +41,58 @@
         "qos": {"enum": ["best_effort", "reliable"]}
       }
     },
-    "capture_backend": {"const": "cpp"},
+    "capture_backend": {"enum": ["cpp", "rosbag2"]},
+    "comparison": {
+      "type": "object",
+      "required": [
+        "backend",
+        "reference_backend",
+        "comparable_scope",
+        "content_equivalent_to_native",
+        "content_equivalence_note",
+        "counter_reconciled",
+        "reconciliation_note",
+        "matched_count",
+        "approximated_count",
+        "unmatched_count",
+        "not_applicable_count",
+        "dimensions"
+      ],
+      "properties": {
+        "backend": {"enum": ["native", "rosbag2"]},
+        "reference_backend": {"const": "native"},
+        "comparable_scope": {"type": "string"},
+        "content_equivalent_to_native": {"type": "boolean"},
+        "content_equivalence_note": {"type": "string"},
+        "counter_reconciled": {"type": ["boolean", "null"]},
+        "reconciliation_note": {"type": ["string", "null"]},
+        "matched_count": {"type": "integer", "minimum": 0},
+        "approximated_count": {"type": "integer", "minimum": 0},
+        "unmatched_count": {"type": "integer", "minimum": 0},
+        "not_applicable_count": {"type": "integer", "minimum": 0},
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["status", "native", "backend", "note"],
+            "properties": {
+              "status": {
+                "enum": ["reference", "matched", "approximated", "unmatched", "not_applicable"]
+              },
+              "native": {},
+              "backend": {},
+              "note": {"type": ["string", "null"]}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "measurement_limitations": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
     "capture_quality": {"type": ["object", "null"]},
     "validity": {
       "type": "object",

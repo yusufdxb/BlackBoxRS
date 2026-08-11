@@ -501,9 +501,130 @@ def test_session_requires_final_quality_and_flags_partial_segment(tmp_path: Path
     list(reader)
 
     assert reader.quality.completeness == "incomplete"
+    assert reader.quality.clean is False
     reasons = set(reader.quality.incomplete_reasons)
     assert "final_capture_quality_missing" in reasons
     assert "partial_segment_present" in reasons
+
+
+def test_segment_sidecars_cannot_claim_a_session_closed_cleanly(tmp_path: Path):
+    session, _ = _write_session(tmp_path)
+    (session / "capture_quality.json").unlink()
+
+    reader = NativeCaptureReader(session)
+    list(reader)
+
+    assert reader.quality.clean is None
+    assert "clean_state_unknown" in reader.quality.incomplete_reasons
+
+
+def test_clean_final_quality_requires_all_committed_events_to_be_durable(tmp_path: Path):
+    session, _ = _write_session(tmp_path)
+    quality_path = session / "capture_quality.json"
+    quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    quality["durable"] = 0
+    quality_path.write_text(json.dumps(quality), encoding="utf-8")
+
+    reader = NativeCaptureReader(session)
+    list(reader)
+
+    assert reader.quality.clean is False
+    assert reader.quality.completeness == "incomplete"
+    assert "clean_capture_not_fully_durable" in reader.quality.incomplete_reasons
+
+
+def test_unclean_segment_cannot_be_overridden_by_clean_final_quality(tmp_path: Path):
+    session, _ = _write_session(tmp_path)
+    sidecar_path = next((session / "segments").glob("*.json"))
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["clean"] = False
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+    reader = NativeCaptureReader(session)
+    list(reader)
+
+    assert reader.quality.clean is False
+    assert reader.quality.completeness == "incomplete"
+    assert "clean_state_contradiction" in reader.quality.incomplete_reasons
+
+
+def test_oversized_json_metadata_fails_closed(tmp_path: Path):
+    session, _ = _write_session(tmp_path)
+    (session / "capture_quality.json").write_bytes(b"{" + b" " * (4 * 1024 * 1024))
+
+    reader = NativeCaptureReader(session)
+    list(reader)
+
+    assert reader.quality.clean is None
+    assert reader.quality.completeness == "incomplete"
+    assert "invalid_capture_quality" in reader.quality.incomplete_reasons
+
+
+def test_sparse_cumulative_drop_range_does_not_launder_sequence_gap(tmp_path: Path):
+    session, _ = _write_session(tmp_path)
+    reader = NativeCaptureReader(session)
+
+    reader._remember_drop_range(
+        {
+            "reason": 1,
+            "count": 2,
+            "first_sequence": 100,
+            "last_sequence": 900,
+        }
+    )
+
+    assert reader._gap_accounted((400, 400)) is False
+    assert "sparse_drop_range_unverifiable" in {issue.code for issue in reader.issues}
+
+
+def test_contiguous_drop_range_accounts_only_its_exact_span(tmp_path: Path):
+    session, _ = _write_session(tmp_path)
+    reader = NativeCaptureReader(session)
+
+    reader._remember_drop_range(
+        {
+            "reason": 1,
+            "count": 3,
+            "first_sequence": 400,
+            "last_sequence": 402,
+        }
+    )
+
+    assert reader._gap_accounted((400, 402)) is True
+    assert reader._gap_accounted((399, 402)) is False
+
+
+def test_recovery_exposes_unknown_unwritten_tail_loss(tmp_path: Path):
+    session, _ = _write_session(tmp_path)
+    segment = next((session / "segments").glob("*.mcap"))
+    segment.with_suffix(".json").unlink()
+    recovery = {
+        "schema_version": "blackboxrs.capture_recovery.v1",
+        "input": "source.partial.mcap",
+        "output": segment.name,
+        "input_was_clean": False,
+        "unwritten_tail_loss_unknown": True,
+        "recovered_messages": 2,
+        "last_recovered_sequence_low32": 101,
+        "discarded_tail_bytes": 0,
+        "corruption_reason": "missing clean footer",
+        "file_bytes": segment.stat().st_size,
+        "sha256": hashlib.sha256(segment.read_bytes()).hexdigest(),
+    }
+    Path(str(segment) + ".recovery.json").write_text(
+        json.dumps(recovery), encoding="utf-8"
+    )
+
+    reader = NativeCaptureReader(session)
+    list(reader)
+    quality = reader.quality
+
+    assert quality.clean is False
+    assert quality.recovered is True
+    assert quality.recovery_discarded_tail_bytes == 0
+    assert quality.recovery_unwritten_tail_loss_unknown is True
+    assert quality.recovery_last_sequence_low32 == 101
+    assert "recovery_unwritten_tail_loss_unknown" in quality.incomplete_reasons
 
 
 def test_partial_segment_recovers_complete_record_prefix(tmp_path: Path):
@@ -609,3 +730,163 @@ def test_capture_config_defaults_to_python_and_loads_cpp(tmp_path: Path):
 
     with pytest.raises(ConfigError):
         CaptureConfig(backend="rust")
+
+
+def _write_chunked_segment(
+    segments: Path,
+    *,
+    index: int,
+    sequence: int,
+    log_time: int,
+    payload: bytes,
+) -> Path:
+    """Write a single-message chunked segment with chunk CRCs enabled."""
+    segment = segments / f"{index:016d}.mcap"
+    ros_base = int(datetime(2026, 8, 8, tzinfo=timezone.utc).timestamp() * 1e9)
+    with segment.open("wb") as stream:
+        writer = mcap_writer.Writer(
+            stream,
+            compression=mcap_writer.CompressionType.NONE,
+            use_chunking=True,
+            enable_crcs=True,
+            enable_data_crcs=False,
+        )
+        writer.start(profile="ros2", library="blackbox_capture_cpp/test")
+        schema = writer.register_schema("sensor_msgs/msg/Imu", "ros2msg", b"")
+        channel = writer.register_channel(
+            "/imu/data",
+            "cdr",
+            schema,
+            metadata={
+                "blackboxrs.topic_id": "7",
+                "blackboxrs.ros_type": "sensor_msgs/msg/Imu",
+                "blackboxrs.serialization_format": "cdr",
+            },
+        )
+        writer.add_message(
+            channel,
+            log_time=log_time,
+            publish_time=ros_base + log_time,
+            sequence=sequence,
+            data=payload,
+        )
+        writer.finish()
+    return segment
+
+
+def _write_segment_sidecar(
+    segment: Path,
+    *,
+    index: int,
+    sequence: int,
+    log_time: int,
+    payload_size: int,
+) -> None:
+    sidecar = {
+        "schema": "blackboxrs.capture_segment.v1",
+        "session_id": "sess_native",
+        "segment_index": index,
+        "path": f"segments/{segment.name}",
+        "clean": True,
+        "recovered": False,
+        "first_sequence": sequence,
+        "last_sequence": sequence,
+        "event_count": 1,
+        "file_bytes": segment.stat().st_size,
+        "received": 1,
+        "admitted": 1,
+        "committed": 1,
+        "dropped": 0,
+        "bytes_captured": payload_size,
+        "bytes_dropped": 0,
+        "peak_queue_utilization": 0.5,
+        "storage_errors": [],
+        "clock_anomalies": 0,
+        "monotonic_start_ns": log_time,
+        "monotonic_end_ns": log_time,
+        "sha256": hashlib.sha256(segment.read_bytes()).hexdigest(),
+    }
+    segment.with_suffix(".json").write_text(json.dumps(sidecar), encoding="utf-8")
+
+
+def _write_crc_session(tmp_path: Path) -> tuple[Path, bytes]:
+    """Build a two-segment session whose first chunk fails CRC validation."""
+    session = tmp_path / "capture_crc"
+    segments = session / "segments"
+    segments.mkdir(parents=True)
+    ros_base = int(datetime(2026, 8, 8, tzinfo=timezone.utc).timestamp() * 1e9)
+
+    damaged_marker = b"first-segment-payload"
+    first = _write_chunked_segment(
+        segments, index=0, sequence=100, log_time=10_000, payload=damaged_marker
+    )
+    second_payload = b"second-segment-payload"
+    second = _write_chunked_segment(
+        segments, index=1, sequence=200, log_time=20_000, payload=second_payload
+    )
+
+    # Flip one payload byte inside the first segment's chunk. Record framing and
+    # every offset stay valid, so only the chunk CRC can detect the damage.
+    raw = bytearray(first.read_bytes())
+    offset = raw.index(damaged_marker)
+    raw[offset] ^= 0xFF
+    first.write_bytes(bytes(raw))
+
+    _write_segment_sidecar(
+        first, index=0, sequence=100, log_time=10_000, payload_size=len(damaged_marker)
+    )
+    _write_segment_sidecar(
+        second, index=1, sequence=200, log_time=20_000, payload_size=len(second_payload)
+    )
+    (session / "session.json").write_text(
+        json.dumps(
+            {
+                "schema": "blackboxrs.capture_session.v1",
+                "session_id": "sess_native",
+                "monotonic_anchor_ns": 10_000,
+                "system_time_anchor_ns": ros_base,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session / "capture_quality.json").write_text(
+        json.dumps(
+            _quality_document(
+                {"bytes_captured": len(damaged_marker) + len(second_payload), "file_bytes": 0},
+                received=2,
+                admitted=2,
+                committed=2,
+                durable=2,
+                retained_segments=2,
+                retained_events=2,
+                monotonic_start_ns=10_000,
+                monotonic_end_ns=20_000,
+            )
+        ),
+        encoding="utf-8",
+    )
+    return session, second_payload
+
+
+def test_chunk_crc_failure_is_isolated_to_its_segment(tmp_path: Path):
+    session, _ = _write_crc_session(tmp_path)
+    reader = NativeCaptureReader(session)
+
+    events = list(reader)
+
+    # Iteration survives the damaged chunk and continues into the next segment.
+    assert [event.sequence for event in events] == [200]
+    quality = reader.quality
+    assert "chunk_crc_mismatch" in quality.incomplete_reasons
+    assert "truncated_or_invalid_segment" not in quality.incomplete_reasons
+    assert quality.completeness == "incomplete"
+
+
+def test_chunk_crc_failure_does_not_break_blackbox_event_projection(tmp_path: Path):
+    session, _ = _write_crc_session(tmp_path)
+    reader = NativeCaptureReader(session)
+
+    events = list(reader.iter_blackbox_events())
+
+    assert [event.metadata["sequence"] for event in events] == [200]
+    assert "chunk_crc_mismatch" in reader.quality.incomplete_reasons

@@ -121,9 +121,17 @@ Reproduce with:
 
 ```bash
 python scripts/native_capture_benchmark.py \
+  --backend native \
   --scenario C --duration-sec 30 \
   --output artifacts/native_capture/bench_scenario_C.json
 ```
+
+The same supervisor can run `--backend rosbag2` with the identical publisher
+command, exact workload topics, generated QoS overrides, and matched MCAP chunk
+and rotation settings. Unsupported rosbag2 counters remain `null` and the
+artifact describes durability, cache, resource-boundary, and loss-accounting
+differences. This capability has smoke coverage only; it does not create the
+missing retained comparison matrix.
 
 ## Load generator
 
@@ -202,8 +210,12 @@ review before publication.
 `--slow-writer-ms` and `--fail-after-bytes` are deterministic failure-injection
 parameters recorded in both scenario and provenance. A fail-after experiment
 must also use `--expect-storage-fault`; the supervisor then requires a non-clean
-terminal state and a nonzero storage-error count. Ordinary runs require
-`STOPPED_CLEAN`. Injection options do not override an external parameter file.
+terminal state and a nonzero storage-error count. Recorder callback-received
+accounting must still reconcile. Publisher-to-callback DDS delivery equality is
+not a validity condition after an intentional fail-stop because the writer may
+fault before discovery or workload start; the artifact records that limitation
+as a warning. Ordinary runs require `STOPPED_CLEAN`. Injection options do not
+override an external parameter file.
 
 Results conform to `scripts/native_capture_benchmark.schema.json` and use schema
 version `blackboxrs.capture_benchmark.v1`. They include:
@@ -287,6 +299,11 @@ Comparisons use matched semantics:
 - Python telemetry versus native telemetry only when both retain the same data;
 - standalone versus composition with identical executor, topics, settings, and
   process accounting boundaries.
+
+The harness refuses payloads smaller than its 32-byte marker contract. It
+validates CDR layout, magic, topic ID, global publisher-sequence uniqueness, and
+timestamp before using a sample for latency. Any negative corrected latency
+invalidates the latency population and the run instead of being clamped away.
 
 Use at least five fresh launches, alternate backend order, record warmup, and
 retain every run plus aggregation logic. Publisher-to-callback latency is valid

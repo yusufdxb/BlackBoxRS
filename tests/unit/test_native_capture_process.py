@@ -3,12 +3,15 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 import yaml
 
 from blackboxrs.core.config import CaptureConfig, RuntimeConfig
+from blackboxrs.core.event_bus import EventBus
+from blackboxrs.core.session import Session
 from blackboxrs.recording.native import resolve_current_native_session
 from blackboxrs.recording.native_process import NativeCaptureProcess
 
@@ -174,3 +177,167 @@ def test_native_process_includes_bounded_tail_in_startup_error(tmp_path: Path, m
 
     assert process.output_tail == "fatal native configuration\n"
     assert not list((tmp_path / "runtime").glob("native_capture_*.yaml"))
+
+
+def test_native_process_reports_post_ready_child_exit(tmp_path: Path, monkeypatch):
+    fake = _FakeProcess()
+
+    def fake_popen(command, **kwargs):
+        session = tmp_path / "capture_ready"
+        session.mkdir()
+        (tmp_path / "current_session.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "blackboxrs.current_capture.v1",
+                    "session_id": "ready",
+                    "path": session.name,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return fake
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("os.killpg", lambda pid, sig: None)
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+    )
+
+    process.start()
+    fake.returncode = 7
+    deadline = time.monotonic() + 1.0
+    while process.unexpected_exit_code is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert process.unexpected_exit_code == 7
+    event = events.get(timeout=1.0)
+    assert event.source == "native_capture"
+    assert event.event_type == "capture.native_process_exit"
+    assert event.severity == "error"
+    assert event.data["evidence_complete"] is False
+    process.stop()
+
+
+def test_native_process_surfaces_machine_readable_storage_fault(tmp_path: Path, monkeypatch):
+    status = {
+        "schema_version": "blackboxrs.capture_status.v1",
+        "state": "STORAGE_FAULT",
+        "storage_errors": 1,
+        "dropped": 7,
+        "dropped_bytes": 4096,
+    }
+    fake = _FakeProcess(f"HEALTH_STATUS {json.dumps(status)}\n".encode())
+
+    def fake_popen(command, **kwargs):
+        session = tmp_path / "capture_ready"
+        session.mkdir()
+        (tmp_path / "current_session.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "blackboxrs.current_capture.v1",
+                    "session_id": "ready",
+                    "path": session.name,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return fake
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("os.killpg", lambda pid, sig: None)
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+    )
+
+    process.start()
+    event = events.get(timeout=1.0)
+
+    assert event.event_type == "capture.native_health_fault"
+    assert event.data["state"] == "STORAGE_FAULT"
+    assert event.data["dropped"] == 7
+    assert process.latest_status == status
+    process.stop()
+
+
+def test_native_process_requires_authoritative_clean_final_status(
+    tmp_path: Path, monkeypatch
+):
+    fake = _FakeProcess()
+
+    def fake_popen(command, **kwargs):
+        session = tmp_path / "capture_ready"
+        session.mkdir()
+        (tmp_path / "current_session.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "blackboxrs.current_capture.v1",
+                    "session_id": "ready",
+                    "path": session.name,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return fake
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("os.killpg", lambda pid, sig: None)
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+    )
+
+    process.start()
+    process.stop()
+
+    event = events.get(timeout=1.0)
+    assert event.event_type == "capture.native_shutdown_incomplete"
+    assert event.data["state"] == "FINAL_STATUS_UNAVAILABLE"
+    assert event.data["evidence_complete"] is False
+
+
+def test_native_process_discards_oversized_unterminated_status_line(
+    tmp_path: Path, monkeypatch
+):
+    fake = _FakeProcess(b"HEALTH_STATUS " + b"x" * (70 * 1024))
+
+    def fake_popen(command, **kwargs):
+        session = tmp_path / "capture_ready"
+        session.mkdir()
+        (tmp_path / "current_session.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "blackboxrs.current_capture.v1",
+                    "session_id": "ready",
+                    "path": session.name,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return fake
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("os.killpg", lambda pid, sig: None)
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+    )
+
+    process.start()
+    process.stop()
+
+    assert process.latest_status is None
+    assert len(process.output_tail.encode()) <= 64 * 1024
