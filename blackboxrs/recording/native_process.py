@@ -39,6 +39,7 @@ _RATE_BATCH_LIMIT = 64
 _RATE_TOPIC_BYTES = 4096
 _RATE_WINDOW_TOPIC_BYTES = 256 * 1024
 _RATE_SESSION_ID_BYTES = 256
+_RATE_UINT64_MAX = (1 << 64) - 1
 _ROS_MONITOR_INTERNAL_PREFIXES = ("/rosout", "/parameter_events", "/blackbox/")
 
 
@@ -360,11 +361,18 @@ class NativeCaptureProcess:
         position = line.find(marker)
         try:
             status = json.loads(line[position + len(marker) :].decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except (UnicodeDecodeError, ValueError):
             logger.warning("Native capture emitted malformed machine-readable status")
+            if marker == _RATE_MARKER and self._publish_rate_events:
+                with self._output_lock:
+                    self._rate_status_lines += 1
+                self._reject_rate_status("malformed rate-status JSON")
             return
         if marker == _RATE_MARKER:
-            self._publish_rate_status(status)
+            try:
+                self._publish_rate_status(status)
+            except (OverflowError, ValueError):
+                self._reject_rate_status("out-of-range rate-status numeric field")
             return
         if not isinstance(status, dict) or status.get("schema_version") != _STATUS_SCHEMA:
             logger.warning("Native capture emitted an unsupported machine-readable status")
@@ -410,9 +418,11 @@ class NativeCaptureProcess:
             not isinstance(window_start, int)
             or isinstance(window_start, bool)
             or window_start < 0
+            or window_start > _RATE_UINT64_MAX
             or not isinstance(window_end, int)
             or isinstance(window_end, bool)
             or window_end <= window_start
+            or window_end > _RATE_UINT64_MAX
             or not isinstance(native_session_id, str)
             or not native_session_id
             or len(native_session_id.encode("utf-8", errors="replace"))
@@ -456,6 +466,7 @@ class NativeCaptureProcess:
                 or not isinstance(message_count, int)
                 or isinstance(message_count, bool)
                 or message_count <= 0
+                or message_count > _RATE_UINT64_MAX
                 or not isinstance(frequency_hz, (int, float))
                 or isinstance(frequency_hz, bool)
                 or not math.isfinite(float(frequency_hz))

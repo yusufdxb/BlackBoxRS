@@ -457,6 +457,89 @@ def test_native_process_consumes_available_rate_line_without_full_buffer(tmp_pat
     assert stream.closed is True
 
 
+def _assert_bad_numeric_rate_line_is_bounded(
+    tmp_path: Path,
+    *,
+    digit_count: int,
+    expected_reason: str,
+) -> None:
+    event_bus = EventBus()
+    events = event_bus.subscribe()
+    process = NativeCaptureProcess(
+        CaptureConfig(backend="cpp", native_output_dir=str(tmp_path)),
+        RuntimeConfig(),
+        event_bus,
+        Session(),
+        publish_rate_events=True,
+    )
+    bad_line = (
+        "RATE_STATUS {"
+        '"schema_version":"blackboxrs.capture_rate_status.v1",'
+        '"session_id":"native",'
+        '"window_start_monotonic_ns":1,'
+        '"window_end_monotonic_ns":1000000001,'
+        '"batch_index":0,"batch_count":1,"topics_truncated":false,'
+        '"topics":[{"topic":"/bad","message_count":'
+        + ("9" * digit_count)
+        + ',"frequency_hz":1.0,"interval_ms":1.0}]}\n'
+    ).encode()
+    valid_status = {
+        "schema_version": "blackboxrs.capture_rate_status.v1",
+        "session_id": "native",
+        "window_start_monotonic_ns": 2_000_000_000,
+        "window_end_monotonic_ns": 3_000_000_000,
+        "batch_index": 0,
+        "batch_count": 1,
+        "topics_truncated": False,
+        "topics": [
+            {
+                "topic": "/good",
+                "message_count": 10,
+                "frequency_hz": 10.0,
+                "interval_ms": 100.0,
+            }
+        ],
+    }
+    good_line = f"RATE_STATUS {json.dumps(valid_status)}\n".encode()
+    stream = _AvailableChunkStream([bad_line, good_line])
+
+    process._drain_output(stream)  # type: ignore[arg-type]
+
+    fault = events.get_nowait()
+    frequency = events.get_nowait()
+    assert events.empty()
+    assert fault.event_type == "capture.native_rate_bridge_fault"
+    assert fault.data["state"] == "RATE_STATUS_REJECTED"
+    assert fault.data["reason"] == expected_reason
+    assert frequency.event_type == "ros.frequency"
+    assert frequency.data["topic"] == "/good"
+    assert frequency.data["frequency_hz"] == 10.0
+    assert process.rate_bridge_counters == {
+        "status_lines": 2,
+        "events_published": 1,
+        "status_rejected": 1,
+    }
+    assert stream.closed is True
+
+
+def test_native_process_rejects_overflowing_rate_count_and_keeps_draining(
+    tmp_path: Path,
+):
+    _assert_bad_numeric_rate_line_is_bounded(
+        tmp_path,
+        digit_count=4000,
+        expected_reason="invalid topic entry",
+    )
+
+
+def test_native_process_rejects_json_digit_limit_and_keeps_draining(tmp_path: Path):
+    _assert_bad_numeric_rate_line_is_bounded(
+        tmp_path,
+        digit_count=5000,
+        expected_reason="malformed rate-status JSON",
+    )
+
+
 def test_native_process_assembles_batches_and_aggregates_type_churn(tmp_path: Path):
     event_bus = EventBus()
     events = event_bus.subscribe()

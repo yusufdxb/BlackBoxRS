@@ -173,6 +173,16 @@ uint64_t json_uint(const std::string & json, const std::string & field)
   return std::stoull(json.substr(position + prefix.size()));
 }
 
+uint64_t json_last_uint(const std::string & json, const std::string & field)
+{
+  const std::string prefix = "\"" + field + "\":";
+  const std::size_t position = json.rfind(prefix);
+  if (position == std::string::npos) {
+    throw std::runtime_error("missing JSON field: " + field);
+  }
+  return std::stoull(json.substr(position + prefix.size()));
+}
+
 uint64_t rate_message_count(const std::string & status, const std::string & topic)
 {
   const std::string prefix =
@@ -382,7 +392,7 @@ TEST_F(RecorderNodeTest, CallbackBeginningAfterStopIsSequencedAndAccounted)
   const std::string before = recorder->status_json();
   const uint64_t received_before = json_uint(before, "received");
   const uint64_t dropped_before = json_uint(before, "dropped");
-  const uint64_t sequence_before = json_uint(before, "last_sequence");
+  const uint64_t sequence_before = json_last_uint(before, "last_sequence");
   recorder->request_stop();
   std_msgs::msg::String message;
   message.data = "callback after admission closed";
@@ -406,15 +416,15 @@ TEST_F(RecorderNodeTest, CallbackBeginningAfterStopIsSequencedAndAccounted)
   ASSERT_NE(after.find(cutoff_drop), std::string::npos);
   EXPECT_GE(json_uint(after, "received"), received_before + 1U);
   EXPECT_GE(json_uint(after, "dropped"), dropped_before + 1U);
-  EXPECT_GE(json_uint(after, "last_sequence"), sequence_before + 1U);
-  EXPECT_EQ(json_uint(after, "last_sequence"), json_uint(after, "received"));
+  EXPECT_GE(json_last_uint(after, "last_sequence"), sequence_before + 1U);
+  EXPECT_EQ(json_last_uint(after, "last_sequence"), json_uint(after, "received"));
 
   executor.remove_node(recorder);
   executor.remove_node(publisher_node);
   ASSERT_TRUE(recorder->drain_and_stop(2s));
   const std::string final_status = recorder->status_json();
   EXPECT_NE(final_status.find(cutoff_drop), std::string::npos);
-  EXPECT_EQ(json_uint(final_status, "last_sequence"), json_uint(final_status, "received"));
+  EXPECT_EQ(json_last_uint(final_status, "last_sequence"), json_uint(final_status, "received"));
   EXPECT_EQ(
     json_uint(final_status, "received"),
     json_uint(final_status, "admitted") + json_uint(final_status, "dropped"));
