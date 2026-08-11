@@ -142,8 +142,71 @@ The same supervisor can run `--backend rosbag2` with the identical publisher
 command, exact workload topics, generated QoS overrides, and matched MCAP chunk
 and rotation settings. Unsupported rosbag2 counters remain `null` and the
 artifact describes durability, cache, resource-boundary, and loss-accounting
-differences. This capability has smoke coverage only; it does not create the
-missing retained comparison matrix.
+differences. This single-run capability has smoke coverage only. Use the repeat
+matrix below for a publishable backend comparison.
+
+### Matched repeat matrix
+
+`native_capture_benchmark_matrix.py` launches the existing single-run
+supervisor in paired, counterbalanced order. Five repetitions means ten fresh
+recorder launches: native then rosbag2 for the first pair, rosbag2 then native
+for the second, and so on. Every child receives the same workload arguments.
+
+A public run requires a clean Git tree, a sourced install containing both C++
+benchmark packages, an explicit RMW implementation, an isolated ROS domain, and
+a CMake cache that records the compiler and build type. The cache is hashed into
+the summary, together with the source-tree and installed-executable hashes. The
+installed executables must not be older than their source trees. Run this from
+the repository after committing the code under test:
+
+```bash
+source /opt/ros/humble/setup.bash
+CXX=/usr/bin/c++ colcon build \
+  --build-base build/impressive_rate \
+  --install-base install/impressive_rate \
+  --packages-select blackbox_capture_cpp blackbox_capture_bench \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+source install/impressive_rate/setup.bash
+python3 scripts/native_capture_benchmark_matrix.py \
+  --output-dir artifacts/native_capture_matrix_5x \
+  --publish-dir docs/benchmarks/native_capture/matrix_5x \
+  --matrix-id native-rosbag2-5x \
+  --repetitions 5 \
+  --install-prefix install/impressive_rate \
+  --cmake-cache build/impressive_rate/blackbox_capture_cpp/CMakeCache.txt \
+  --ros-distro humble \
+  --rmw-implementation rmw_fastrtps_cpp \
+  --ros-domain-id 87 \
+  --scenario custom \
+  --topics 10 \
+  --rate 5000 \
+  --payload-bytes 256 \
+  --duration-sec 30 \
+  --discovery-warmup-sec 2
+```
+
+The ignored output directory contains one JSON document per launch,
+`summary.json`, and a `SHA256SUMS` manifest that covers every JSON artifact. The
+optional publish directory must be a new, non-ignored path inside the repository.
+It is populated atomically only after every child and final clean-tree check
+passes. Its checksum manifest covers the child artifacts, summary, and copies of
+both JSON schemas, making the directory ready for review and commit without
+weakening the clean-start measurement guard. The matrix fails on a
+nonzero child exit, schema error, child validity failure, workload drift, Git
+provenance drift, or build provenance drift. One invalid child stops the matrix
+and leaves an invalid summary instead of aggregating a partial result.
+
+The summary reports median and p95 across runs only for matched recorder-process
+CPU, recorder-process RSS, publisher calls, and retained serialized workload
+counts and bytes. If one child reports a null or unsupported value, that metric
+stays null for the backend aggregate. It does not compare storage totals, queue
+behavior, reasoned drops, ingest latency, or startup and shutdown timings. In
+particular, it never claims durability equivalence: native fsync semantics and
+rosbag2 close/finalization are different contracts.
+
+`--exploratory` bypasses the clean-tree and sourced-build publication gates for
+local smoke work. Its summary always records `publication.eligible: false`, and
+it cannot use `--publish-dir`.
 
 ## Load generator
 
