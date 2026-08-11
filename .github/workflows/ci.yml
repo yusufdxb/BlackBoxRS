@@ -102,19 +102,39 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v5
 
-      - name: Build Humble image
+      - name: Build Humble production and CI images
         run: |
-          docker build -f docker/Dockerfile.humble -t blackboxrs:humble-ci .
+          docker build --target ci -f docker/Dockerfile.humble -t blackboxrs:humble-ci .
+          docker build -f docker/Dockerfile.humble -t blackboxrs:humble-production-ci .
 
-      - name: Verify installed native recorder
+      - name: Verify production image and installed native recorder
         run: |
-          docker run --rm blackboxrs:humble-ci \
+          docker run --rm blackboxrs:humble-production-ci \
             /bin/bash -c '
               set -euo pipefail
               prefix="$(ros2 pkg prefix blackbox_capture_cpp)"
               test "$prefix" = /opt/blackboxrs/native_install
-              ros2 pkg executables blackbox_capture_cpp | grep -F "blackbox_capture_cpp blackbox_capture"
-              ! ldd "$prefix/lib/blackbox_capture_cpp/blackbox_capture" | grep -F "not found"
+              executables="$(ros2 pkg executables blackbox_capture_cpp)"
+              for executable in blackbox_capture blackbox_capture_recover blackbox_capture_export_rosbag2; do
+                grep -Fx "blackbox_capture_cpp $executable" <<<"$executables"
+                binary="$prefix/lib/blackbox_capture_cpp/$executable"
+                if ! dependencies="$(ldd "$binary" 2>&1)"; then
+                  printf "%s\n" "$dependencies" >&2
+                  exit 1
+                fi
+                if grep -F "not found" <<<"$dependencies"; then
+                  exit 1
+                fi
+              done
+              test ! -e /opt/blackboxrs/tests
+              test ! -e /opt/blackboxrs/scripts/native_capture_bag_gate.py
+              test ! -e /opt/blackboxrs/scripts/container_native_daemon_smoke.py
+              test ! -e /opt/blackboxrs/examples/bags/go2_sim_odom_imu.mcap
+              if command -v ruff >/dev/null 2>&1; then
+                echo "ruff leaked into the production image" >&2
+                exit 1
+              fi
+              python3 -c "import blackboxrs, mcap"
             '
 
       - name: Run live ROS integration test
@@ -125,6 +145,20 @@ jobs:
             python3 -m pytest -q \
               tests/integration/test_ros_live.py \
               tests/integration/test_observer_live.py
+
+      - name: Prove daemon-owned native lifecycle from production image
+        run: |
+          mkdir -p artifacts/native_container_daemon
+          docker run --rm --init \
+            -e ROS_LOCALHOST_ONLY=1 \
+            -e ROS_DOMAIN_ID=82 \
+            -e RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+            -v "$PWD/artifacts/native_container_daemon:/root/.blackboxrs" \
+            -v "$PWD/scripts/container_native_daemon_smoke.py:/proof/container_native_daemon_smoke.py:ro" \
+            blackboxrs:humble-production-ci \
+            python3 /proof/container_native_daemon_smoke.py \
+              --output-root /root/.blackboxrs \
+              --report /root/.blackboxrs/container_native_daemon_smoke.json
 
       - name: Prove native fidelity from shipping image
         run: |
@@ -137,17 +171,22 @@ jobs:
               -e ROS_DOMAIN_ID="$gate_domain" \
               -e RMW_IMPLEMENTATION="$gate_rmw" \
               -v "$PWD/artifacts:/artifacts" \
-              blackboxrs:humble-ci \
-              python3 scripts/native_capture_bag_gate.py \
+              -v "$PWD/scripts/native_capture_bag_gate.py:/proof/native_capture_bag_gate.py:ro" \
+              -v "$PWD/examples/bags/go2_sim_odom_imu.mcap:/proof/go2_sim_odom_imu.mcap:ro" \
+              blackboxrs:humble-production-ci \
+              python3 /proof/native_capture_bag_gate.py \
+                --bag /proof/go2_sim_odom_imu.mcap \
                 --report "/artifacts/native_container_bag_gate_${gate_rmw}.json"
           done
 
-      - name: Upload shipping-image fidelity proof
+      - name: Upload shipping-image native proofs
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: native-container-bag-fidelity
-          path: artifacts/native_container_bag_gate_*.json
+          name: native-container-proof
+          path: |
+            artifacts/native_container_bag_gate_*.json
+            artifacts/native_container_daemon/container_native_daemon_smoke.json
 
   native-build:
     name: Native build + GoogleTest (${{ matrix.compiler }})

@@ -25,7 +25,17 @@ image when capturing other interface families.
 ```bash
 # from the repository root
 docker build -f docker/Dockerfile.humble -t blackboxrs:humble .
+
+# explicit test image used by CI
+docker build --target ci -f docker/Dockerfile.humble -t blackboxrs:humble-ci .
 ```
+
+The default `production` target contains the daemon, native recorder, and
+runtime dependencies. It does not install the BlackBoxRS `dev` extra and
+excludes the repository test suite, proof scripts, and committed sample bag.
+The explicit `ci` target layers those assets and project test dependencies onto
+the exact same runtime stage. General tools inherited from the upstream ROS
+base image are outside this target split.
 
 ## Run
 
@@ -58,16 +68,20 @@ docker run --rm blackboxrs:humble \
 ## Reproduce the live-ROS tests inside the container
 
 ```bash
+docker build --target ci -f docker/Dockerfile.humble -t blackboxrs:humble-ci .
 docker run --rm --network host \
     -e ROS_DOMAIN_ID=42 \
     --entrypoint bash \
-    blackboxrs:humble \
+    blackboxrs:humble-ci \
     -lc 'source /opt/ros/humble/setup.bash && source /opt/blackboxrs/native_install/setup.bash && cd /opt/blackboxrs && python3 -m pytest tests/integration/test_ros_live.py -q'
 ```
 
 CI also replays the committed 909-message MCAP through the recorder installed
 in this image and checks schema names, exact per-topic CDR payload order,
-checksums, clean finalization, and loss-counter reconciliation.
+checksums, clean finalization, and loss-counter reconciliation. A separate
+bounded smoke test starts `BlackBoxDaemon` with `capture.backend: cpp`, verifies
+that its native child and watchdog are live, stops through the daemon lifecycle,
+and validates the persisted clean session from the production image.
 
 ## What this image does NOT do
 
@@ -77,5 +91,5 @@ checksums, clean finalization, and loss-counter reconciliation.
   (`tegrastats`, sysfs GPU load) are implemented in Python and will
   run wherever `tegrastats` is available, but this Dockerfile does
   not target `l4t-base`.
-- No auto-start of a user ROS 2 stack.  The container runs only the
-  BlackBoxRS recorder; you bring your own nodes.
+- No auto-start of a user ROS 2 stack. The container runs BlackBoxRS services;
+  you bring your own application nodes.

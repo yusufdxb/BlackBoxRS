@@ -47,7 +47,7 @@ RUN . /opt/ros/humble/setup.sh \
         --event-handlers console_direct+ \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 
-FROM ros:humble-ros-base
+FROM ros:humble-ros-base AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -76,23 +76,16 @@ WORKDIR /opt/blackboxrs
 
 COPY --from=native-builder /opt/blackboxrs/native_install/ ./native_install/
 
-# Copy only the metadata first so the dep-install layer is cached
-# across source edits.
-COPY pyproject.toml README.md pytest.ini ./
+# Keep packaging metadata separate from application source. The install layer
+# below is intentionally invalidated whenever either the package metadata or
+# Python implementation changes.
+COPY pyproject.toml README.md ./
 COPY blackboxrs/ ./blackboxrs/
 
-# Install blackboxrs + test extras so pytest can run against the
-# image to reproduce the live-ROS tests. A regular install is more
-# robust here than editable mode because the ROS base image does not
-# ship a new-enough build backend for PEP 660 by default.
+# Install only production dependencies in the shipping stage. The replay extra
+# is required to read native MCAP evidence while constructing incidents.
 RUN pip3 install --no-cache-dir --upgrade "pip>=24" "setuptools<80" wheel \
- && pip3 install --no-cache-dir ".[dev,replay]"
-
-# Keep the live-ROS integration test in the image so CI can verify the
-# real rclpy path without bind-mounting the repository.
-COPY tests/ ./tests/
-COPY scripts/native_capture_bag_gate.py ./scripts/native_capture_bag_gate.py
-COPY examples/bags/go2_sim_odom_imu.mcap ./examples/bags/go2_sim_odom_imu.mcap
+ && pip3 install --no-cache-dir ".[replay]"
 
 # Make the CLI discoverable in a ROS-sourced shell.
 ENV PATH="/usr/local/bin:${PATH}"
@@ -106,3 +99,19 @@ VOLUME ["/root/.blackboxrs"]
 # -c rather than exec-form.
 ENTRYPOINT ["/bin/bash", "-lc", "source /opt/ros/humble/setup.bash && source /opt/blackboxrs/native_install/setup.bash && exec \"$@\"", "--"]
 CMD ["robot-blackbox", "start", "--foreground"]
+
+# Explicit CI target. Test dependencies and proof fixtures never enter the
+# default production image, but remain available for a self-contained CI run.
+FROM runtime AS ci
+
+RUN pip3 install --no-cache-dir ".[dev]"
+
+COPY pytest.ini ./
+COPY tests/ ./tests/
+COPY scripts/native_capture_bag_gate.py ./scripts/native_capture_bag_gate.py
+COPY scripts/container_native_daemon_smoke.py ./scripts/container_native_daemon_smoke.py
+COPY examples/bags/go2_sim_odom_imu.mcap ./examples/bags/go2_sim_odom_imu.mcap
+
+# Keep production last so a target-free `docker build` always produces the
+# shipping image rather than the test image.
+FROM runtime AS production
