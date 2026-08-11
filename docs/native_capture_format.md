@@ -222,6 +222,56 @@ ros2 run blackbox_capture_cpp blackbox_capture_recover \
 Python recognizes the resulting `.recovery.json`, exposes discarded-tail and
 corruption metadata, and keeps recovered evidence incomplete.
 
+## Data-only rosbag2 export
+
+The installed exporter converts finalized native evidence into one standard,
+indexed rosbag2 MCAP file:
+
+```bash
+ros2 run blackbox_capture_cpp blackbox_capture_export_rosbag2 \
+  capture_<session_id> exported.mcap
+
+# A single finalized segment is also accepted.
+ros2 run blackbox_capture_cpp blackbox_capture_export_rosbag2 \
+  capture_<session_id>/segments/0000000000000000.mcap exported.mcap
+```
+
+A session export requires versioned `session.json`, a clean final
+`capture_quality.json`, no partial segment, and at least one finalized segment.
+The exporter scans segments in filename order, copies only `cdr` ROS channels,
+and omits every `/blackboxrs/events` control record. Topic names, ROS schema type
+names, schema definitions when present, message sequence low bits, and serialized
+payload bytes are retained without deserialization. The output channel includes
+the standard `offered_qos_profiles` metadata key. It is empty when the native
+capture did not retain the original rosbag2 YAML QoS representation, so rosbag2
+uses its default playback QoS unless the caller supplies an override.
+
+For normal rosbag2 time semantics, a nonzero native ROS publish timestamp becomes
+both output log and publish time. Records without a valid ROS time retain the
+native log timestamp. This exported file is an interoperability artifact, not a
+replacement for the native evidence chronology: the source MCAP remains the
+authority for steady-clock ordering across ROS-clock jumps.
+
+The exporter rejects non-ROS profiles, non-CDR data channels, missing or
+unsupported ROS schemas, type churn, conflicting schema or standard QoS
+definitions for one topic, malformed input, and configured capacity overruns.
+Default limits are 4096 segments, 4096 topics, 16 MiB of retained schema metadata,
+64 MiB per message, and 4 MiB per session metadata document. Output uses a
+same-directory temporary, checked writes and file sync, then an atomic
+no-overwrite publication. An existing destination is never replaced.
+After the no-replace rename succeeds, the result is observably published. If the
+following directory sync fails, the command returns an explicit
+"published, durability unconfirmed" error and leaves that output in place for
+inspection. A retry never overwrites it.
+
+The resulting file can be consumed directly when its message packages are
+installed:
+
+```bash
+ros2 bag info exported.mcap --storage mcap
+ros2 bag play exported.mcap --storage mcap
+```
+
 The strict CRC-prefix guarantee currently applies to the uncompressed chunks
 written by the native recorder. Compressed chunks are size-gated, but do not yet
 have the same precisely located CRC cutoff. The helper also does not prove a

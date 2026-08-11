@@ -67,6 +67,15 @@ if(BLACKBOX_CAPTURE_ENABLE_EXPERIMENTAL_COMPOSITION)
   rclcpp_components_register_nodes(blackbox_capture_component "blackbox_capture::RecorderNode")
 endif()
 
+add_library(blackbox_capture_rosbag2_export SHARED src/rosbag2_exporter.cpp)
+target_include_directories(blackbox_capture_rosbag2_export
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(blackbox_capture_rosbag2_export mcap_vendor::mcap)
+blackbox_capture_harden(blackbox_capture_rosbag2_export)
+
 add_executable(blackbox_capture src/recorder_node.cpp)
 target_link_libraries(blackbox_capture blackbox_capture_component)
 ament_target_dependencies(blackbox_capture rclcpp)
@@ -75,6 +84,10 @@ blackbox_capture_harden(blackbox_capture)
 add_executable(blackbox_capture_recover src/recovery_cli.cpp)
 target_link_libraries(blackbox_capture_recover blackbox_capture_core)
 blackbox_capture_harden(blackbox_capture_recover)
+
+add_executable(blackbox_capture_export_rosbag2 src/export_rosbag2_cli.cpp)
+target_link_libraries(blackbox_capture_export_rosbag2 blackbox_capture_rosbag2_export)
+blackbox_capture_harden(blackbox_capture_export_rosbag2)
 
 install(
   DIRECTORY include/
@@ -85,8 +98,9 @@ install(
   DESTINATION share/${PROJECT_NAME}/config
 )
 install(
-  TARGETS blackbox_capture_core blackbox_capture_component blackbox_capture
-    blackbox_capture_recover
+  TARGETS blackbox_capture_core blackbox_capture_component
+    blackbox_capture_rosbag2_export blackbox_capture blackbox_capture_recover
+    blackbox_capture_export_rosbag2
   EXPORT export_blackbox_capture_cpp
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -113,7 +127,8 @@ if(BUILD_TESTING)
       trigger_engine
       segment_writer
       shedding_policy
-      recorder)
+      recorder
+      rosbag2_exporter)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_${test_name}.cpp")
       ament_add_gtest(test_${test_name} test/test_${test_name}.cpp)
       if(TARGET test_${test_name})
@@ -122,6 +137,13 @@ if(BUILD_TESTING)
           target_link_libraries(test_${test_name} blackbox_capture_component)
           ament_target_dependencies(test_${test_name} rclcpp)
           add_dependencies(test_${test_name} test_type_churn_publisher)
+        elseif(test_name STREQUAL "rosbag2_exporter")
+          target_link_libraries(
+            test_${test_name}
+            blackbox_capture_rosbag2_export
+            blackbox_capture_core
+          )
+          ament_target_dependencies(test_${test_name} rclcpp std_msgs)
         endif()
         blackbox_capture_harden(test_${test_name})
       endif()
