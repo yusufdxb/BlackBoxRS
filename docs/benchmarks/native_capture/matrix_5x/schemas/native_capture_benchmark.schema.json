@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blackboxrs.dev/schema/native_capture_benchmark.v1.json",
+  "title": "BlackBoxRS capture backend benchmark",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "git_sha",
+    "machine",
+    "build",
+    "scenario",
+    "capture_backend",
+    "capture_quality",
+    "validity",
+    "counters",
+    "latency_us",
+    "resources",
+    "queue",
+    "storage",
+    "lifecycle",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": "blackboxrs.capture_benchmark.v1"},
+    "generated_at": {"type": "string"},
+    "git_sha": {"type": ["string", "null"]},
+    "git_dirty": {"type": ["boolean", "null"]},
+    "machine": {"type": "object"},
+    "build": {"type": "object"},
+    "scenario": {
+      "type": "object",
+      "required": ["name", "run_id", "topics", "aggregate_rate_hz", "payload_bytes", "duration_sec", "qos"],
+      "properties": {
+        "name": {"type": "string"},
+        "run_id": {"type": "string"},
+        "topics": {"type": "integer", "minimum": 1},
+        "aggregate_rate_hz": {"type": "number", "exclusiveMinimum": 0},
+        "payload_bytes": {"type": "integer", "minimum": 1},
+        "duration_sec": {"type": "number", "exclusiveMinimum": 0},
+        "qos": {"enum": ["best_effort", "reliable"]}
+      }
+    },
+    "capture_backend": {"enum": ["cpp", "rosbag2"]},
+    "comparison": {
+      "type": "object",
+      "required": [
+        "backend",
+        "reference_backend",
+        "comparable_scope",
+        "content_equivalent_to_native",
+        "content_equivalence_note",
+        "counter_reconciled",
+        "reconciliation_note",
+        "matched_count",
+        "approximated_count",
+        "unmatched_count",
+        "not_applicable_count",
+        "dimensions"
+      ],
+      "properties": {
+        "backend": {"enum": ["native", "rosbag2"]},
+        "reference_backend": {"const": "native"},
+        "comparable_scope": {"type": "string"},
+        "content_equivalent_to_native": {"type": "boolean"},
+        "content_equivalence_note": {"type": "string"},
+        "counter_reconciled": {"type": ["boolean", "null"]},
+        "reconciliation_note": {"type": ["string", "null"]},
+        "matched_count": {"type": "integer", "minimum": 0},
+        "approximated_count": {"type": "integer", "minimum": 0},
+        "unmatched_count": {"type": "integer", "minimum": 0},
+        "not_applicable_count": {"type": "integer", "minimum": 0},
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["status", "native", "backend", "note"],
+            "properties": {
+              "status": {
+                "enum": ["reference", "matched", "approximated", "unmatched", "not_applicable"]
+              },
+              "native": {},
+              "backend": {},
+              "note": {"type": ["string", "null"]}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "measurement_limitations": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "capture_quality": {"type": ["object", "null"]},
+    "validity": {
+      "type": "object",
+      "required": ["valid", "errors", "warnings"],
+      "properties": {
+        "valid": {"type": "boolean"},
+        "errors": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "counters": {
+      "type": "object",
+      "required": ["sent", "received", "admitted", "committed", "durable", "dropped", "dropped_bytes"],
+      "additionalProperties": {"type": ["integer", "number", "null"], "minimum": 0}
+    },
+    "drop_breakdown": {"type": ["object", "array", "null"]},
+    "latency_us": {"type": "object"},
+    "resources": {"type": "object"},
+    "queue": {"type": "object"},
+    "storage": {"type": "object"},
+    "lifecycle": {"type": "object"},
+    "recovery": {"type": ["object", "array", "string", "boolean", "null"]},
+    "provenance": {"type": "object"},
+    "resource_samples": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false
+}

@@ -11,8 +11,8 @@ describes tooling, not results.
 Single run per scenario, 30 s each, recorded 2026-08-09. These are a first
 retained measurement, **not** a published percentile: the fair-comparison rule
 below requires five or more fresh launches before a percentile becomes a project
-claim, and no rosbag2 or Python comparison has been run at all. Treat the
-latency figures as indicative of order of magnitude only.
+claim. This 2026-08-09 artifact set contains no rosbag2 or Python comparison.
+Treat its latency figures as indicative of order of magnitude only.
 
 Host: Linux 6.8.0-136-generic, x86_64, 24 logical CPUs. ROS 2 Humble.
 Workspace built with `colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release`
@@ -203,6 +203,27 @@ stays null for the backend aggregate. It does not compare storage totals, queue
 behavior, reasoned drops, ingest latency, or startup and shutdown timings. In
 particular, it never claims durability equivalence: native fsync semantics and
 rosbag2 close/finalization are different contracts.
+
+#### Retained 5x comparison
+
+The retained `native-rosbag2-5x` run used Fast DDS, 10 best-effort topics at an
+aggregate 5,000 messages per second, 256-byte payloads, and 30 seconds per
+launch. All ten child runs were valid. Both backends retained the same 149,999
+workload messages and 40,799,728 serialized payload bytes in every run.
+
+| Recorder-process metric | Native median / p95 | rosbag2 median / p95 |
+|---|---:|---:|
+| CPU, percent of one logical core | 9.93 / 10.06 | 8.06 / 9.32 |
+| Peak RSS, MiB | 47.75 / 47.83 | 60.69 / 60.73 |
+| Retained workload messages | 149,999 / 149,999 | 149,999 / 149,999 |
+| Retained serialized bytes | 40,799,728 / 40,799,728 | 40,799,728 / 40,799,728 |
+
+For this workload, native capture used 21.3 percent less median peak RSS while
+using 23.1 percent more median recorder-process CPU. The result supports a lower
+memory claim, not a universal speed claim. Review the
+[matrix summary](benchmarks/native_capture/matrix_5x/summary.json), all ten child
+artifacts, copied schemas, and the checksum manifest for the full evidence and
+comparison boundaries.
 
 `--exploratory` bypasses the clean-tree and sourced-build publication gates for
 local smoke work. Its summary always records `publication.eligible: false`, and
