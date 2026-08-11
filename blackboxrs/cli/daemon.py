@@ -200,7 +200,14 @@ class BlackBoxDaemon:
         self._running = True
         self._stop_event.clear()
         native_rate_bridge = _native_rate_bridge_has_full_coverage(self._config)
+        try:
+            self._start_components(native_rate_bridge)
+        except BaseException:
+            self._rollback_startup()
+            raise
 
+    def _start_components(self, native_rate_bridge: bool) -> None:
+        """Start configured components after the daemon enters running state."""
         # --- Logging pipeline (always enabled) ----------------------------
         from blackboxrs.logging import LoggingPipeline  # noqa: E402
 
@@ -284,6 +291,23 @@ class BlackBoxDaemon:
             os.getpid(),
             len(self._components),
         )
+
+    def _rollback_startup(self) -> None:
+        """Best-effort rollback that never replaces the startup exception."""
+        self._running = False
+        self._stop_event.set()
+        for component in reversed(self._components):
+            try:
+                component.stop()
+            except BaseException:
+                logger.exception(
+                    "Error rolling back component %s", type(component).__name__
+                )
+        self._components.clear()
+        try:
+            self._remove_pid_file()
+        except BaseException:
+            logger.exception("Error removing PID file during startup rollback")
 
     def stop(self) -> None:
         """Gracefully shut down all components and clean up.
@@ -474,10 +498,11 @@ class BlackBoxDaemon:
         daemon never spawns a second thread on top.  Earlier versions of
         this code did so, which caused every event to be delivered twice
         for thread-driven components and split the queue between two
-        consumers for queue-driven ones.
+        consumers for queue-driven ones.  Register before starting so a
+        partially started component is included in transactional rollback.
         """
-        component.start()
         self._components.append(component)
+        component.start()
 
     def _handle_signal(self, signum: int, frame: Any) -> None:
         """Handle SIGINT/SIGTERM by initiating a graceful shutdown."""
