@@ -17,7 +17,7 @@ def load_custom_detectors(entries: list[dict]) -> list[BaseDetector]:
     optional ``params`` dict of keyword arguments for ``__init__``.
 
     Errors are logged as warnings and the offending entry is skipped.
-    This function never raises — a broken custom detector must not
+    This function never raises: a broken custom detector must not
     prevent the engine from starting.
     """
     detectors: list[BaseDetector] = []

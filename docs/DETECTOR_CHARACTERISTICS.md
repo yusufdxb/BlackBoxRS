@@ -75,7 +75,7 @@ substitute for measuring against:
 
 ## Future work
 
-1. **Real-robot bundle.** A captured CaresLab GO2 session is owed (see
+1. **Real-robot bundle.** A captured live onboard GO2 session is owed (see
    README "What is planned"). Once it exists, this harness should be
    re-pointed at the captured event stream and the numbers re-computed.
 2. **Real-time `dead_topic` measurement.** Either run the harness with a

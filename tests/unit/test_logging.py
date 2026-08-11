@@ -88,7 +88,7 @@ class TestRotatingJsonlWriter:
             f"expected 5 distinct log files after 5 rotations, got {len(logs)}: "
             f"{[p.name for p in logs]}"
         )
-        # Each file contains exactly one event line — if two rotations
+        # Each file contains exactly one event line: if two rotations
         # had collided and appended to the same file we would see
         # multiples stacked up in one of them.
         for path in logs:

@@ -12,7 +12,7 @@ spaces), not just the process name.  This means ``*ros2*`` catches both
 In observer mode (``runtime.role="observer"``) this producer auto-disables
 at startup with one INFO log line.  ``psutil`` reports the observer
 workstation's processes, not the robot's.  A DDS bridge for remote process
-signals is deferred to v2 — see ``docs/design/orphan_detector_producers.md``
+signals is deferred to v2; see ``docs/design/orphan_detector_producers.md``
 §3.5 for the full discussion.
 
 The collector is implemented as a standalone class with a synchronous
@@ -37,7 +37,7 @@ try:
     _HAS_PSUTIL = True
 except ImportError:  # pragma: no cover
     _HAS_PSUTIL = False
-    logger.warning("psutil not installed — ProcessSignalsCollector will be a no-op")
+    logger.warning("psutil not installed: ProcessSignalsCollector will be a no-op")
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ def proc_to_dict(proc: object) -> dict | None:
         cpu: float = proc.cpu_percent(interval=None)  # type: ignore[union-attr]
         rss_bytes: int = proc.memory_info().rss  # type: ignore[union-attr]
     except Exception:
-        # AccessDenied, NoSuchProcess, ZombieProcess — swallow silently
+        # AccessDenied, NoSuchProcess, ZombieProcess: swallow silently
         return None
 
     if cpu == 0.0:
@@ -163,7 +163,7 @@ class ProcessSignalsCollector:
 
         if not _HAS_PSUTIL:  # pragma: no cover
             logger.warning(
-                "ProcessSignalsCollector: psutil not available — disabled."
+                "ProcessSignalsCollector: psutil not available: disabled."
             )
             self._disabled = True
             return
@@ -218,7 +218,7 @@ class ProcessSignalsCollector:
             try:
                 cmdline_parts = proc.cmdline()
             except Exception:
-                # AccessDenied on Linux for other-user processes — skip
+                # AccessDenied on Linux for other-user processes: skip
                 continue
             if cmdline_matches_patterns(cmdline_parts, patterns):
                 matched.append(proc)
@@ -263,7 +263,7 @@ class ProcessSignalsCollector:
 
         if not snapshot:
             logger.debug(
-                "ProcessSignalsCollector: matched set empty after filtering — "
+                "ProcessSignalsCollector: matched set empty after filtering: "
                 "skipping emission"
             )
             return None

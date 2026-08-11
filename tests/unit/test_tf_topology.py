@@ -3,7 +3,7 @@
 Mirrors the style of ``test_detectors.py``: events constructed here use
 the *real* ``ros.tf`` event_type and data shape that
 :class:`TfTopologyDetector` consumes. No ``rclpy`` / ``tf2`` imports
-are needed — the detector is a pure event-stream consumer.
+are needed: the detector is a pure event-stream consumer.
 """
 
 from __future__ import annotations

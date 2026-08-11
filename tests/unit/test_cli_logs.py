@@ -59,7 +59,7 @@ class TestLatestLogFileIn:
 
 
 # ---------------------------------------------------------------------------
-# _iter_tail_events — rotation-aware follower
+# _iter_tail_events: rotation-aware follower
 # ---------------------------------------------------------------------------
 
 
@@ -126,7 +126,7 @@ class TestIterTailEvents:
         writer._rotate()
         files_after = set(tmp_path.glob("blackboxrs_*.jsonl"))
         assert files_after - files_before, (
-            "rotation did not create a new file — test setup invalid"
+            "rotation did not create a new file: test setup invalid"
         )
         writer.write(_ev("system.memory"))
 
@@ -144,7 +144,7 @@ class TestIterTailEvents:
 
 
 # ---------------------------------------------------------------------------
-# _read_recent_events — streaming tail of the last N events
+# _read_recent_events: streaming tail of the last N events
 # ---------------------------------------------------------------------------
 
 

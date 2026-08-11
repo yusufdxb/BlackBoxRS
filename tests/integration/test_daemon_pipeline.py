@@ -228,7 +228,7 @@ class TestRealMonitorToLog:
         daemon = BlackBoxDaemon(_make_config(log_dir, cpu_threshold=0.0))
         try:
             daemon.start()
-            # Poll rather than sleep a fixed window — the full path
+            # Poll rather than sleep a fixed window: the full path
             # through the 250ms anomaly-engine drain is slow enough on
             # contended runners to race a blind sleep.
             _wait_for(
@@ -244,7 +244,7 @@ class TestRealMonitorToLog:
         events = _read_all(log_dir)
         anomalies = [e for e in events if e.source == "anomaly_engine"]
         assert anomalies, (
-            "no anomalies in log — the threshold detector did not see "
+            "no anomalies in log: the threshold detector did not see "
             "any system.cpu event with the expected payload shape"
         )
         assert any(a.event_type == "anomaly.threshold" for a in anomalies)
@@ -278,7 +278,7 @@ class TestRealMonitorToLog:
 
 class TestAnomalyEngineSeesEveryEvent:
     """Engine must subscribe before any producer emits, so it sees t=0
-    events.  Earlier code started the logger first, then the engine —
+    events.  Earlier code started the logger first, then the engine;
     the engine's queue would miss the first batch."""
 
     def test_engine_sees_first_event(self, tmp_path: Path):
@@ -292,7 +292,7 @@ class TestAnomalyEngineSeesEveryEvent:
             # sleeping a single drain-cycle window.  The regression this
             # test catches (engine subscribed after first publish) would
             # still show up as "cpu events present, anomalies empty"
-            # below, even with an unbounded wait — timing slack does
+            # below, even with an unbounded wait: timing slack does
             # not hide it.
             _wait_for(
                 lambda: (
@@ -312,7 +312,7 @@ class TestAnomalyEngineSeesEveryEvent:
         anomalies = [e for e in events if e.event_type == "anomaly.threshold"]
         # If the engine missed the first event we'd see cpu_events but
         # zero anomalies.  Both must be present.
-        assert cpu_events, "no cpu events — system monitor did not run"
+        assert cpu_events, "no cpu events: system monitor did not run"
         assert anomalies, (
             "anomaly engine missed all events; subscribe-before-publish "
             "ordering may have regressed"

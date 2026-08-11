@@ -163,7 +163,7 @@ class EventBus:
                 # flooding when a consumer falls far behind.
                 if total == 1 or total % 100 == 0:
                     logger.warning(
-                        "EventBus: subscriber queue full (capacity=%d) — "
+                        "EventBus: subscriber queue full (capacity=%d): "
                         "dropped %s event (total drops on this queue: %d)",
                         q.maxsize,
                         event.event_type,

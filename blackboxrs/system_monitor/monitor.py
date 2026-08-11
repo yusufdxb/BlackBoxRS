@@ -92,7 +92,7 @@ class SystemMonitor:
         if gpu.available:
             collectors.append(("gpu", gpu))
         else:
-            logger.info("No GPU backend available — GPU metrics disabled")
+            logger.info("No GPU backend available: GPU metrics disabled")
 
         return collectors
 
@@ -155,7 +155,7 @@ class SystemMonitor:
         existing host-bound collector behavior.
         """
         # If the whole system monitor is disabled (observer mode sets this),
-        # skip the producer — same pattern as the host CPU/mem collectors.
+        # skip the producer: same pattern as the host CPU/mem collectors.
         if not getattr(self._config, "enabled", True):
             return None
 

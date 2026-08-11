@@ -154,7 +154,7 @@ class TestProcToDict:
 
 
 # ---------------------------------------------------------------------------
-# ProcessSignalsCollector — observer mode
+# ProcessSignalsCollector: observer mode
 # ---------------------------------------------------------------------------
 
 
@@ -190,7 +190,7 @@ class TestObserverMode:
 
 
 # ---------------------------------------------------------------------------
-# ProcessSignalsCollector — normal operation
+# ProcessSignalsCollector: normal operation
 # ---------------------------------------------------------------------------
 
 

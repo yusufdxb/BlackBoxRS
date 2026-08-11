@@ -16,7 +16,7 @@ try:
     _HAS_PSUTIL = True
 except ImportError:  # pragma: no cover
     _HAS_PSUTIL = False
-    logger.warning("psutil not installed — DiskCollector will return empty results")
+    logger.warning("psutil not installed: DiskCollector will return empty results")
 
 _GB = 1024 ** 3
 _MB = 1024 ** 2
@@ -41,11 +41,11 @@ class DiskCollector:
         Returns:
             A dictionary with the following keys:
 
-            - ``disk_percent`` — root partition utilization (0–100).
-            - ``disk_used_gb`` — space used on root partition (GiB).
-            - ``disk_total_gb`` — total size of root partition (GiB).
-            - ``disk_read_mb_s`` — read throughput in MiB/s since last call.
-            - ``disk_write_mb_s`` — write throughput in MiB/s since last call.
+            - ``disk_percent``: root partition utilization (0–100).
+            - ``disk_used_gb``: space used on root partition (GiB).
+            - ``disk_total_gb``: total size of root partition (GiB).
+            - ``disk_read_mb_s``: read throughput in MiB/s since last call.
+            - ``disk_write_mb_s``: write throughput in MiB/s since last call.
 
             Returns an empty dict if *psutil* is not available.
         """

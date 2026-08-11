@@ -2,7 +2,7 @@
 
 `_DEFAULT_CONFIG_YAML` in `cli/app.py` is what fresh installs land with.
 Whenever the in-code dataclass default (`BlackBoxConfig.default()`)
-adds or removes a knob, the template must follow — otherwise users
+adds or removes a knob, the template must follow; otherwise users
 silently miss new behaviour. This test catches that drift before it
 ships.
 

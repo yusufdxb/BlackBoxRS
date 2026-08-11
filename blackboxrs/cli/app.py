@@ -535,8 +535,8 @@ log_max_files: 20
 event_bus_queue_maxsize: 1024
 
 # Where this daemon runs relative to the robot.
-#   role: onboard   (default) — colocated with the ROS 2 node graph.
-#   role: observer  — running on a workstation, capturing the robot's
+#   role: onboard   (default): colocated with the ROS 2 node graph.
+#   role: observer, running on a workstation, capturing the robot's
 #                    DDS traffic remotely. Set observed_host to a
 #                    free-form label for the robot you're watching;
 #                    see docs/QUICKSTART_REMOTE.md.
@@ -723,7 +723,7 @@ def _iter_tail_events(
     yields every new :class:`BlackBoxEvent` that is appended.  When the
     writer rotates (i.e. a lexicographically newer file appears in the
     directory), the generator transparently switches to the new file
-    starting from its beginning — events written to the new file before
+    starting from its beginning: events written to the new file before
     we caught up would otherwise be lost.
 
     Args:
@@ -766,7 +766,7 @@ def _iter_tail_events(
                     pass
                 current = newest
                 fh = open(current, "r", encoding="utf-8")
-                # Read from the start of the new file — we don't want
+                # Read from the start of the new file: we don't want
                 # to miss events that were written between rotation and
                 # the moment we noticed.
                 continue

@@ -252,7 +252,7 @@ class TestUnknownKeys:
     def test_known_keys_do_not_emit_warnings(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ):
-        """A well-formed config must not log any unknown-key warnings —
+        """A well-formed config must not log any unknown-key warnings;
         otherwise the signal gets drowned out by false positives."""
         cfg = BlackBoxConfig(
             log_dir="/tmp/ok",

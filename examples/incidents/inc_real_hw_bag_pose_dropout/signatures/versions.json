@@ -1,5 +1,5 @@
 {
-  "hash": "daec1ad3e331f79e6002dcb60a6390d06027456af322635109e3db2d38f4ffb9",
+  "hash": "c223ecfefffb5489aefde564fc26ad3b4eba055ef706b6eb3f8e0f8c5d8f868e",
   "payload": {
     "blackboxrs_version": "0.4.1",
     "nvidia_driver": "570.211.01",
@@ -10,7 +10,7 @@
     },
     "pip_freeze_sha256": "ebe38fc0b06e278a008f2e4d86272332158883d7916542ab87c178ec155a48c9",
     "python": {
-      "executable": "/home/yusuf/Projects/BlackBoxRS/.venv/bin/python",
+      "executable": "/usr/bin/python3",
       "version": "3.10.12"
     },
     "ros_distro": "humble",
