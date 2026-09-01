@@ -461,3 +461,68 @@ def test_severity_breaks_confidence_ties():
     causes = cause_mod.rank([a, b], [])
     # b carries the critical-severity bonus so it must come first.
     assert "/b" in causes[0].cause
+
+
+def test_unrelated_graph_churn_cannot_saturate_precursor_bonus():
+    """Coincidental churn on other topics must not be load-bearing evidence.
+
+    Regression for a finding from real quadruped hardware:
+    a killed node's dead_topic ranked #567 of 567, behind frequency dips
+    on healthy topics that had each absorbed the full precursor cap from
+    unrelated graph deltas. Many unrelated precursors must stay worth
+    less than a single matching one.
+    """
+    churn = [
+        _derived(
+            f"publisher count changed on /unrelated_{i}: 1 -> 2",
+            t_offset=8.0 + i * 0.1,
+            subsystem="ros",
+            data={"topic": f"/unrelated_{i}"},
+        )
+        for i in range(30)
+    ]
+    h_churn = _only(cause_mod.rank([_trigger("FrequencyDetector")], churn))
+
+    matching = [
+        _derived(
+            "silence interval on /scan: 4.0s gap",
+            t_offset=8.0, subsystem="ros", data={"topic": "/scan"},
+        )
+    ]
+    h_match = _only(cause_mod.rank([_trigger("FrequencyDetector")], matching))
+
+    # 30 unrelated precursors must not out-evidence one real one.
+    assert h_churn.confidence < h_match.confidence
+
+    # And they must not reach the global precursor cap on their own.
+    baseline = _only(cause_mod.rank([_trigger("FrequencyDetector")], []))
+    assert h_churn.confidence - baseline.confidence <= (
+        cause_mod._UNRELATED_PRECURSOR_CAP + 1e-9
+    )
+
+
+def test_dead_topic_outranks_frequency_noise_on_healthy_topics():
+    """The topic that actually died must outrank dips on other topics.
+
+    This is the shape of a real robot capture: one node is killed while
+    unrelated telemetry keeps publishing at a wobbling rate.
+    """
+    churn = [
+        _derived(
+            f"publisher count changed on /telemetry_{i}: 2 -> 3",
+            t_offset=7.0 + i * 0.1,
+            subsystem="ros",
+            data={"topic": f"/telemetry_{i}"},
+        )
+        for i in range(20)
+    ]
+    dead = _trigger("DeadTopicDetector", subject="/scan")
+    # Subject deliberately absent from the churn list: both triggers
+    # ride ONLY unrelated churn, so the comparison is fair.
+    noise = _trigger("FrequencyDetector", subject="/other_healthy")
+
+    ranked = cause_mod.rank([dead, noise], churn)
+    assert "/scan" in ranked[0].cause, (
+        "dead topic on /scan must outrank frequency noise riding on "
+        f"unrelated churn; got {ranked[0].cause!r}"
+    )
