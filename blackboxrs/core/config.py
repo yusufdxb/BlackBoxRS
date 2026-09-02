@@ -150,10 +150,28 @@ class AnomalyThresholds:
 
 @dataclass
 class FrequencyConfig:
-    """Configuration for the topic frequency anomaly detector."""
+    """Configuration for the topic frequency anomaly detector.
+
+    ``tolerance_percent`` controls entry into the anomalous state. The
+    detector enters when the rate remains below that percentage from the
+    learned baseline. ``recovery_tolerance_percent`` controls exit and must
+    represent a point closer to the baseline for effective hysteresis.
+    """
 
     tolerance_percent: float = 20.0
+    recovery_tolerance_percent: float = 10.0
     min_consecutive_samples: int = 2
+
+    def __post_init__(self) -> None:
+        if not 0.0 < self.tolerance_percent < 100.0:
+            raise ConfigError("frequency tolerance_percent must be between 0 and 100")
+        if not 0.0 <= self.recovery_tolerance_percent < self.tolerance_percent:
+            raise ConfigError(
+                "frequency recovery_tolerance_percent must be non-negative "
+                "and smaller than tolerance_percent"
+            )
+        if self.min_consecutive_samples < 1:
+            raise ConfigError("frequency min_consecutive_samples must be at least 1")
 
 
 @dataclass
@@ -406,8 +424,8 @@ class BlackBoxConfig:
             A populated :class:`BlackBoxConfig`.
 
         Raises:
-            ConfigError: Only when ``strict=True`` and unknown keys are
-                present in the YAML file.
+            ConfigError: If a configured value is invalid, or when
+                ``strict=True`` and unknown keys are present in the YAML file.
         """
         path = Path(os.path.expanduser(path or _DEFAULT_CONFIG_PATH))
         if not path.is_file():

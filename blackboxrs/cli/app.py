@@ -580,6 +580,7 @@ anomaly_engine:
     min_consecutive_samples: 2
   frequency:
     tolerance_percent: 20.0
+    recovery_tolerance_percent: 10.0
     min_consecutive_samples: 2
   dead_topic:
     timeout_sec: 5.0

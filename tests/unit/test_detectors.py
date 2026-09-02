@@ -228,7 +228,7 @@ class TestFrequencyDetector:
         assert FrequencyDetector(FrequencyConfig()).name == "frequency"
 
 
-    # -- Hysteresis (min_consecutive_samples) ---------------------------
+    # -- Hysteresis -----------------------------------------------------
 
     def test_frequency_single_drop_does_not_fire_with_default_min2(self):
         """First violation is silent with min_consecutive_samples=2 (default)."""
@@ -258,16 +258,48 @@ class TestFrequencyDetector:
         # Violation again: counter = 1, should not fire.
         assert detector.check(self._make_freq_event("/cmd_vel", 5.0)) is None
 
-    def test_frequency_sustained_drops_keep_firing(self):
-        """After the initial fire, sustained drops continue to fire."""
+    def test_frequency_sustained_rate_collapse_fires_once(self):
+        """A real collapse still fires promptly without flooding triggers."""
         detector = FrequencyDetector(FrequencyConfig(tolerance_percent=20.0))
         for _ in range(10):
             detector.check(self._make_freq_event("/cmd_vel", 10.0))
-        detector.check(self._make_freq_event("/cmd_vel", 5.0))  # count=1
-        result2 = detector.check(self._make_freq_event("/cmd_vel", 5.0))
-        assert result2 is not None
-        result3 = detector.check(self._make_freq_event("/cmd_vel", 5.0))
-        assert result3 is not None
+
+        results = [
+            detector.check(self._make_freq_event("/cmd_vel", 1.0))
+            for _ in range(100)
+        ]
+
+        anomalies = [result for result in results if result is not None]
+        assert results[0] is None
+        assert results[1] is not None
+        assert len(anomalies) == 1
+
+    def test_frequency_bursty_boundary_chatter_is_suppressed_until_recovery(self):
+        """Bursty rate chatter produces one trigger instead of one per burst."""
+        detector = FrequencyDetector(
+            FrequencyConfig(
+                tolerance_percent=20.0,
+                recovery_tolerance_percent=10.0,
+                min_consecutive_samples=2,
+            )
+        )
+        for _ in range(10):
+            detector.check(self._make_freq_event("/imu", 100.0))
+
+        results = []
+        for _ in range(100):
+            for hz in (60.0, 60.0, 85.0):
+                results.append(detector.check(self._make_freq_event("/imu", hz)))
+
+        assert sum(result is not None for result in results) == 1
+
+        assert detector.check(self._make_freq_event("/imu", 89.9)) is None
+        assert detector.check(self._make_freq_event("/imu", 60.0)) is None
+        assert detector.check(self._make_freq_event("/imu", 60.0)) is None
+
+        assert detector.check(self._make_freq_event("/imu", 90.0)) is None
+        assert detector.check(self._make_freq_event("/imu", 60.0)) is None
+        assert detector.check(self._make_freq_event("/imu", 60.0)) is not None
 
     def test_frequency_min_consecutive_1_reproduces_v040_behavior(self):
         """min_consecutive_samples=1 fires on the first drop."""
@@ -308,6 +340,31 @@ class TestDeadTopicDetector:
         assert result.source == "anomaly_engine"
         assert result.event_type == "anomaly.dead_topic"
         assert "cmd_vel" in result.data["message"]
+
+    def test_dead_topic_still_fires_with_frequency_hysteresis_enabled(self):
+        frequency = FrequencyDetector(FrequencyConfig())
+        dead_topic = DeadTopicDetector(DeadTopicConfig(timeout_sec=1.0))
+
+        for _ in range(10):
+            event = self._make_topic_event("/cmd_vel")
+            frequency.check(event)
+            dead_topic.check(event)
+
+        collapse = self._make_topic_event("/cmd_vel")
+        collapse.data["frequency_hz"] = 1.0
+        assert frequency.check(collapse) is None
+        assert dead_topic.check(collapse) is None
+        assert frequency.check(collapse) is not None
+        assert dead_topic.check(collapse) is None
+
+        dead_topic._last_seen["/cmd_vel"] = (
+            datetime.now(timezone.utc) - timedelta(seconds=5)
+        )
+        result = dead_topic.check(self._make_topic_event("/scan"))
+
+        assert result is not None
+        assert result.event_type == "anomaly.dead_topic"
+        assert result.data["topic"] == "/cmd_vel"
 
     def test_does_not_re_alert_same_topic(self):
         detector = DeadTopicDetector(DeadTopicConfig(timeout_sec=1.0))

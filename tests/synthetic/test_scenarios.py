@@ -102,8 +102,9 @@ class TestFrequencyDropDetected:
             if result is not None:
                 anomalies.append(result)
 
-        # Floor = 30 * 0.8 = 24 Hz.  With min_consecutive_samples=2, 18, 12, 5 fire (22 is count=1).
-        assert len(anomalies) == 3
+        # Entry floor = 24 Hz. The sustained collapse triggers once, then
+        # remains latched because the topic never reaches the 27 Hz exit floor.
+        assert len(anomalies) == 1
         for a in anomalies:
             assert a.event_type == "anomaly.frequency"
             assert a.data["value"] < 24.0

@@ -59,6 +59,7 @@ class TestDefaultConfig:
     def test_default_frequency_tolerance(self):
         cfg = BlackBoxConfig.default()
         assert cfg.anomaly_engine.frequency.tolerance_percent == 20.0
+        assert cfg.anomaly_engine.frequency.recovery_tolerance_percent == 10.0
 
     def test_default_rosbag2_settings(self):
         cfg = BlackBoxConfig.default()
@@ -152,8 +153,28 @@ class TestConfigFieldAccess:
         assert t.gpu_temp_c == 70.0
 
     def test_frequency_config_fields(self):
-        f = FrequencyConfig(tolerance_percent=30.0)
+        f = FrequencyConfig(
+            tolerance_percent=30.0,
+            recovery_tolerance_percent=12.0,
+            min_consecutive_samples=4,
+        )
         assert f.tolerance_percent == 30.0
+        assert f.recovery_tolerance_percent == 12.0
+        assert f.min_consecutive_samples == 4
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"tolerance_percent": 0.0},
+            {"tolerance_percent": 100.0},
+            {"tolerance_percent": 20.0, "recovery_tolerance_percent": 20.0},
+            {"tolerance_percent": 20.0, "recovery_tolerance_percent": -1.0},
+            {"min_consecutive_samples": 0},
+        ],
+    )
+    def test_frequency_config_rejects_invalid_hysteresis(self, kwargs):
+        with pytest.raises(ConfigError):
+            FrequencyConfig(**kwargs)
 
     def test_rosbag2_config_fields(self):
         cfg = Rosbag2RecorderConfig(

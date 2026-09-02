@@ -331,6 +331,7 @@ anomaly_engine:
     gpu_temp_c: 80.0
   frequency:
     tolerance_percent: 20.0
+    recovery_tolerance_percent: 10.0
   dead_topic:
     timeout_sec: 5.0
 
