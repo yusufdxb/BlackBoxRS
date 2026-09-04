@@ -2,8 +2,8 @@
 
 Supports two backends:
 
-* **nvidia-smi** — desktop/server NVIDIA GPUs.
-* **tegrastats** — NVIDIA Jetson (integrated GPU with sysfs nodes).
+* **nvidia-smi**: desktop/server NVIDIA GPUs.
+* **tegrastats**: NVIDIA Jetson (integrated GPU with sysfs nodes).
 
 The ``"auto"`` mode probes for a Jetson sysfs path first, then falls back
 to ``nvidia-smi``, and finally to ``None`` (no GPU).
@@ -62,7 +62,7 @@ class GpuCollector:
         if requested == "nvidia-smi":
             return "nvidia-smi" if self._nvidia_smi_available() else None
 
-        # auto — prefer tegrastats (Jetson) then nvidia-smi
+        # auto: prefer tegrastats (Jetson) then nvidia-smi
         if self._tegrastats_available():
             return "tegrastats"
         if self._nvidia_smi_available():

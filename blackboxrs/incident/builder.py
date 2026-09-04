@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import shutil
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from blackboxrs.core.signatures import (
 )
 from blackboxrs.core.snapshots import SystemSnapshotter
 from blackboxrs.logging.reader import LogReader
+from blackboxrs.recording.native import NativeCaptureReader, resolve_current_native_session
 
 from . import cause as cause_mod
 from . import diff as diff_mod
@@ -31,8 +33,10 @@ from . import report as report_mod
 from . import timeline as timeline_mod
 from .bundle import BundleReader, BundleWriter
 from .models import (
+    CaptureQuality,
     DetectorTrigger,
     Incident,
+    LikelyCauseHypothesis,
     SystemSnapshot,
 )
 
@@ -41,6 +45,11 @@ logger = logging.getLogger(__name__)
 
 
 _DEFAULT_INCIDENTS_DIR = Path("~/.blackboxrs/incidents").expanduser()
+
+#: Marker reason recorded when the Python capture backend supplies the evidence.
+#: It has no drop, queue, or delivery accounting, so it can never substantiate a
+#: completeness claim; the report discloses this instead of staying silent.
+PYTHON_BACKEND_NO_ACCOUNTING = "python_backend_has_no_delivery_accounting"
 
 
 def _make_incident_id(window_start: datetime, session_id: str, host: str) -> str:
@@ -68,9 +77,7 @@ def _severity_from(triggers: list[DetectorTrigger], events: list[BlackBoxEvent])
     return inverse[best] if best > 0 else "warning"
 
 
-_VALID_SUBSYSTEMS = {
-    "ros", "system", "gpu", "anomaly", "recorder", "config", "external"
-}
+_VALID_SUBSYSTEMS = {"ros", "system", "gpu", "anomaly", "recorder", "config", "external"}
 
 
 def _promote_trigger(ev: BlackBoxEvent, line_index: int) -> DetectorTrigger:
@@ -84,10 +91,7 @@ def _promote_trigger(ev: BlackBoxEvent, line_index: int) -> DetectorTrigger:
     detector_name = ev.data.get("detector", "unknown")
     detector_class = ev.metadata.get("detector_class", detector_name) or detector_name
     subject = (
-        ev.data.get("topic")
-        or ev.data.get("metric")
-        or ev.data.get("subject")
-        or ev.event_type
+        ev.data.get("topic") or ev.data.get("metric") or ev.data.get("subject") or ev.event_type
     )
     sig_fields = ev.metadata.get("signature_fields") or []
     target_sub = ev.metadata.get("target_subsystem") or "anomaly"
@@ -101,7 +105,9 @@ def _promote_trigger(ev: BlackBoxEvent, line_index: int) -> DetectorTrigger:
         t=ev.timestamp,
         subsystem=target_sub,  # type: ignore[arg-type]
         subject=str(subject),
-        severity=ev.severity if ev.severity in ("info", "warning", "error", "critical") else "warning",
+        severity=ev.severity
+        if ev.severity in ("info", "warning", "error", "critical")
+        else "warning",
         message=str(ev.data.get("message", "")),
         data={k: v for k, v in ev.data.items()},
         signature_fields=list(sig_fields),
@@ -126,6 +132,44 @@ def _summary_line(top_cause, triggers: list[DetectorTrigger]) -> str:
     )
 
 
+def _apply_capture_quality_limit(
+    causes: list[LikelyCauseHypothesis],
+    quality: CaptureQuality | None,
+) -> list[LikelyCauseHypothesis]:
+    """Keep incomplete native evidence from supporting confident claims."""
+    if quality is None or quality.completeness == "complete":
+        return causes
+    # The Python backend never measures delivery, so its "unknown" completeness is
+    # a standing property of the backend rather than evidence that this particular
+    # window lost data. The report discloses it either way, so the claim is not
+    # silent; capping every Python-backend incident here would suppress the
+    # detector-grounded confidence the rest of the product is built on. Only
+    # measured degradation caps confidence.
+    if quality.incomplete_reasons == [PYTHON_BACKEND_NO_ACCOUNTING]:
+        return causes
+
+    reason_text = ", ".join(quality.incomplete_reasons[:4]) or quality.completeness
+    caveat = (
+        "Native capture evidence is incomplete "
+        f"({reason_text}); missing evidence may change this ranking."
+    )
+    limited: list[LikelyCauseHypothesis] = []
+    for cause in causes:
+        existing = f" {cause.caveat}" if cause.caveat else ""
+        reasoning = list(cause.reasoning)
+        reasoning.append("capture-quality limit applied because native evidence is not complete.")
+        limited.append(
+            cause.model_copy(
+                update={
+                    "confidence": min(cause.confidence, 0.69),
+                    "caveat": caveat + existing,
+                    "reasoning": reasoning,
+                }
+            )
+        )
+    return limited
+
+
 class IncidentBuilder:
     """Orchestrator that produces a bundle from a log slice.
 
@@ -143,9 +187,7 @@ class IncidentBuilder:
         log_reader: LogReader | None = None,
     ) -> None:
         self._config = config or BlackBoxConfig.default()
-        self._incidents_dir = Path(
-            incidents_dir or os.path.expanduser(str(_DEFAULT_INCIDENTS_DIR))
-        )
+        self._incidents_dir = Path(incidents_dir or os.path.expanduser(str(_DEFAULT_INCIDENTS_DIR)))
         self._incidents_dir.mkdir(parents=True, exist_ok=True)
 
         log_dir = Path(os.path.expanduser(self._config.log_dir))
@@ -179,6 +221,50 @@ class IncidentBuilder:
             Path to the bundle directory.
         """
         events = list(self._log_reader.read_all(start=window_start, end=window_end))
+        # The Python backend has no drop, queue, or delivery accounting, so it can
+        # never substantiate a completeness claim. Say so explicitly instead of
+        # leaving the quality object None, which would omit the capture-quality
+        # report section and bypass the confidence cap entirely.
+        capture_quality: CaptureQuality | None = CaptureQuality(
+            backend="python",
+            completeness="unknown",
+            incomplete_reasons=[PYTHON_BACKEND_NO_ACCOUNTING],
+        )
+        native_files: tuple[tuple[Path, Path], ...] = ()
+        if self._config.capture.backend == "cpp":
+            native_path = self._config.capture.native_session_path
+            if not native_path:
+                current = resolve_current_native_session(self._config.capture.native_output_dir)
+                native_path = str(current) if current is not None else None
+            if native_path:
+                native_reader = NativeCaptureReader(Path(native_path).expanduser())
+                native_events = list(
+                    native_reader.iter_blackbox_events(start=window_start, end=window_end)
+                )
+                for event in native_events:
+                    native_ref = event.metadata.get("native_evidence_ref")
+                    if isinstance(native_ref, str) and native_ref.startswith("native_capture/"):
+                        event.metadata["native_evidence_ref"] = "attachments/" + native_ref
+                    evidence_ref = event.data.get("evidence_ref")
+                    if isinstance(evidence_ref, str) and evidence_ref.startswith("native_capture/"):
+                        event.data["evidence_ref"] = "attachments/" + evidence_ref
+                events.extend(native_events)
+                native_files = native_reader.portable_files()
+                capture_quality = native_reader.quality
+            else:
+                capture_quality = CaptureQuality(
+                    backend="cpp",
+                    completeness="unknown",
+                    clean=None,
+                    incomplete_reasons=["native_current_session_unavailable"],
+                )
+            events.sort(
+                key=lambda event: (
+                    event.timestamp,
+                    int(event.metadata.get("monotonic_ns", -1)),
+                    int(event.metadata.get("sequence", -1)),
+                )
+            )
 
         host = socket.gethostname()
         sid = session_id or _session_from_events(events) or "unknown"
@@ -223,17 +309,18 @@ class IncidentBuilder:
         severity = _severity_from(triggers, events)
         incident_id = _make_incident_id(window_start, sid, host)
         bundle_dir = self._incidents_dir / incident_id
-        writer = BundleWriter(bundle_dir)
+        staging_dir = self._staging_dir_for(incident_id)
+        writer = BundleWriter(staging_dir)
 
         # Diff against the most recent prior bundle on this host (if any).
         # We compute this BEFORE ranking causes so the precursor-aware
         # ranker can use config/version drift as a (coincident) signal.
         prior_cfg, prior_ver = self._load_prior_signatures(
-            host=host, before=window_start, exclude_id=incident_id,
+            host=host,
+            before=window_start,
+            exclude_id=incident_id,
         )
-        incident_diff = diff_mod.compute(
-            prior_cfg, prior_ver, config_sig, version_sig
-        )
+        incident_diff = diff_mod.compute(prior_cfg, prior_ver, config_sig, version_sig)
 
         # Recurrence lookup: a callable the ranker can use to ask "have
         # we seen this fingerprint before on this host?" The lookup
@@ -254,6 +341,7 @@ class IncidentBuilder:
             recurrence_lookup=recurrence_lookup,
             fingerprint_id=fp.fingerprint_id,
         )
+        causes = _apply_capture_quality_limit(causes, capture_quality)
         top = causes[0] if causes else None
 
         # Observer mode plumbing: when the daemon was observing a remote
@@ -285,6 +373,7 @@ class IncidentBuilder:
             triggers=[t.trigger_id for t in triggers],
             fingerprint=fp,
             likely_causes=causes,
+            capture_quality=capture_quality,
             notes=notes,
         )
 
@@ -297,15 +386,69 @@ class IncidentBuilder:
         writer.write_timeline(timeline)
         writer.write_fingerprint(fp)
         writer.write_incident(incident)
+        for source, relative in native_files:
+            destination = staging_dir / "attachments" / "native_capture" / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
 
         # Render report from the disk view to keep it consistent with what
         # `incident show` will load later. Strict=False because report.md
         # itself does not exist yet at this point in the build pipeline.
-        report_text = report_mod.render(BundleReader(bundle_dir, strict=False))
+        report_text = report_mod.render(BundleReader(staging_dir, strict=False))
         writer.write_report(report_text)
 
+        manifest = writer.build_manifest(
+            incident_id=incident.incident_id,
+            created_at=incident.created_at,
+        )
+        writer.write_manifest(manifest)
+        result = writer.validate(require_finalized=True)
+        if result.errors:
+            details = "; ".join(
+                f"{issue.code}:{issue.path or '-'}:{issue.message}" for issue in result.errors
+            )
+            raise RuntimeError(
+                f"Incident bundle finalization failed; staging preserved at "
+                f"{staging_dir}: {details}"
+            )
+
+        self._publish_staging(staging_dir, bundle_dir)
         logger.info("Built incident %s at %s", incident_id, bundle_dir)
         return bundle_dir
+
+    def _staging_dir_for(self, incident_id: str) -> Path:
+        suffix = hashlib.sha256(
+            f"{incident_id}|{datetime.now(timezone.utc).isoformat()}|{os.getpid()}".encode("utf-8")
+        ).hexdigest()[:8]
+        return self._incidents_dir / f".{incident_id}.staging.{suffix}"
+
+    def _publish_staging(self, staging_dir: Path, bundle_dir: Path) -> None:
+        """Publish a validated staging directory.
+
+        First publication uses ``os.replace`` on the same parent directory.
+        Rebuilding an existing deterministic incident id falls back to
+        moving the old directory aside before publishing the new one. This is
+        not an atomic non-empty directory swap on POSIX, but the old completed
+        bundle is restored if the final publish step fails.
+        """
+        if not bundle_dir.exists():
+            os.replace(staging_dir, bundle_dir)
+            return
+
+        backup_dir = bundle_dir.with_name(f".{bundle_dir.name}.replacing.{os.getpid()}")
+        while backup_dir.exists():
+            backup_dir = backup_dir.with_name(f"{backup_dir.name}.retry")
+        os.replace(bundle_dir, backup_dir)
+        try:
+            os.replace(staging_dir, bundle_dir)
+        except Exception:
+            if not bundle_dir.exists() and backup_dir.exists():
+                os.replace(backup_dir, bundle_dir)
+            raise
+        try:
+            shutil.rmtree(backup_dir)
+        except OSError:
+            logger.warning("Could not remove replaced incident backup %s", backup_dir)
 
     # -- diff baseline lookup --------------------------------------------
 
@@ -326,8 +469,7 @@ class IncidentBuilder:
         """
         try:
             entries = sorted(
-                p for p in self._incidents_dir.iterdir()
-                if p.is_dir() and p.name != exclude_id
+                p for p in self._incidents_dir.iterdir() if p.is_dir() and p.name != exclude_id
             )
         except (OSError, FileNotFoundError):
             return None, None

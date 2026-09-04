@@ -1,4 +1,4 @@
-"""BlackBoxRS daemon — orchestrates all monitoring components.
+"""BlackBoxRS daemon: orchestrates all monitoring components.
 
 The :class:`BlackBoxDaemon` wires together the event bus, monitors, anomaly
 engine, and logging pipeline.  Components are responsible for managing
@@ -14,6 +14,7 @@ import logging
 import os
 import signal
 import tempfile
+from glob import has_magic
 from pathlib import Path
 from threading import Event
 from typing import Any, Protocol
@@ -40,7 +41,7 @@ def _read_proc_starttime(pid: int) -> int | None:
 
     The command name is enclosed in parentheses and may contain spaces
     or other whitespace, so we must find the last ``)`` and split the
-    remainder — not ``shlex.split`` — to correctly locate subsequent
+    remainder, not ``shlex.split``, to correctly locate subsequent
     fields.
 
     Returns ``None`` if the process does not exist or /proc is not
@@ -112,6 +113,18 @@ class _Component(Protocol):
     def stop(self) -> None: ...
 
 
+def _native_rate_bridge_has_full_coverage(config: BlackBoxConfig) -> bool:
+    """Return whether native capture covers every Python rate subscription."""
+    if config.capture.backend != "cpp" or not config.ros_monitor.enabled:
+        return False
+    if not config.capture.topics:
+        return True
+    filters = config.ros_monitor.topic_filters
+    if not filters or any(has_magic(pattern) for pattern in filters):
+        return False
+    return set(filters).issubset(config.capture.topics)
+
+
 # ---------------------------------------------------------------------------
 # Daemon
 # ---------------------------------------------------------------------------
@@ -147,9 +160,7 @@ class BlackBoxDaemon:
                 self._session.hostname,
                 self._config.runtime.observed_host or "<unspecified>",
             )
-        self._event_bus = EventBus(
-            default_queue_maxsize=self._config.event_bus_queue_maxsize
-        )
+        self._event_bus = EventBus(default_queue_maxsize=self._config.event_bus_queue_maxsize)
         self._components: list[_Component] = []
         self._running = False
         self._stop_event = Event()
@@ -188,7 +199,16 @@ class BlackBoxDaemon:
 
         self._running = True
         self._stop_event.clear()
+        native_rate_bridge = _native_rate_bridge_has_full_coverage(self._config)
+        try:
+            self._start_components(native_rate_bridge)
+        except BaseException:
+            self._rollback_startup()
+            raise
 
+    def _start_components(self, native_rate_bridge: bool) -> None:
+        """Start configured components after the daemon enters running state."""
+        native_capture = None
         # --- Logging pipeline (always enabled) ----------------------------
         from blackboxrs.logging import LoggingPipeline  # noqa: E402
 
@@ -202,6 +222,24 @@ class BlackBoxDaemon:
 
             engine = AnomalyEngine(self._event_bus, self._config.anomaly_engine, self._session)
             self._register(engine)
+
+        # Native capture starts after its low-rate Python consumers and before
+        # ROS producers. Python keeps incident reasoning, while C++ owns rate
+        # observation whenever its capture scope fully covers the ROS monitor.
+        if self._config.capture.backend == "cpp":
+            from blackboxrs.recording import NativeCaptureProcess  # noqa: E402
+
+            native_capture = NativeCaptureProcess(
+                self._config.capture,
+                self._config.runtime,
+                self._event_bus,
+                self._session,
+                publish_rate_events=native_rate_bridge,
+                rate_topic_filters=self._config.ros_monitor.topic_filters,
+            )
+            self._register(native_capture)
+            if native_rate_bridge:
+                native_rate_bridge = native_capture.rate_bridge_active
 
         # --- Rosbag2 recorder --------------------------------------------
         # Start after the anomaly engine so it reacts to emitted anomaly
@@ -217,8 +255,19 @@ class BlackBoxDaemon:
         if self._config.ros_monitor.enabled:
             from blackboxrs.ros_monitor import RosMonitor  # noqa: E402
 
-            ros_mon = RosMonitor(self._event_bus, self._config.ros_monitor, self._session)
+            ros_mon = RosMonitor(
+                self._event_bus,
+                self._config.ros_monitor,
+                self._session,
+                native_frequency_bridge=native_rate_bridge,
+            )
             self._register(ros_mon)
+            if native_capture is not None and _native_rate_bridge_has_full_coverage(
+                self._config
+            ):
+                native_capture.set_rate_bridge_fallback(
+                    ros_mon.enable_python_frequency_fallback
+                )
 
         # --- System monitor -----------------------------------------------
         if self._config.system_monitor.enabled:
@@ -251,6 +300,23 @@ class BlackBoxDaemon:
             os.getpid(),
             len(self._components),
         )
+
+    def _rollback_startup(self) -> None:
+        """Best-effort rollback that never replaces the startup exception."""
+        self._running = False
+        self._stop_event.set()
+        for component in reversed(self._components):
+            try:
+                component.stop()
+            except BaseException:
+                logger.exception(
+                    "Error rolling back component %s", type(component).__name__
+                )
+        self._components.clear()
+        try:
+            self._remove_pid_file()
+        except BaseException:
+            logger.exception("Error removing PID file during startup rollback")
 
     def stop(self) -> None:
         """Gracefully shut down all components and clean up.
@@ -349,7 +415,7 @@ class BlackBoxDaemon:
             )
             return False, None
 
-        # 2. Identity check — starttime is the gold signal against PID
+        # 2. Identity check: starttime is the gold signal against PID
         # recycling.  If the stored starttime is missing (e.g. written
         # on a non-Linux host) we fall back to cmdline-only verification.
         recorded_start = payload.get("starttime")
@@ -369,7 +435,7 @@ class BlackBoxDaemon:
         # 3. cmdline sanity-check.  Accept if EITHER the live cmdline
         # carries the blackboxrs marker (production daemon fingerprint)
         # OR it exactly matches the recorded cmdline (round-trip proof
-        # that the same process is still running — covers in-process
+        # that the same process is still running, which covers in-process
         # tests and hosts with unusual cmdline shapes).
         live_cmdline = _read_proc_cmdline(pid) or ""
         recorded_cmdline = payload.get("cmdline") or ""
@@ -417,7 +483,7 @@ class BlackBoxDaemon:
         Returns the parsed dict, or ``None`` if the content is not a
         JSON object with at least a ``pid`` integer.  Legacy plain-int
         pidfiles are rejected (``None``) so callers treat them as
-        stale — we cannot verify identity without the metadata.
+        stale because we cannot verify identity without the metadata.
         """
         text = raw.strip()
         if not text:
@@ -441,15 +507,16 @@ class BlackBoxDaemon:
         daemon never spawns a second thread on top.  Earlier versions of
         this code did so, which caused every event to be delivered twice
         for thread-driven components and split the queue between two
-        consumers for queue-driven ones.
+        consumers for queue-driven ones.  Register before starting so a
+        partially started component is included in transactional rollback.
         """
-        component.start()
         self._components.append(component)
+        component.start()
 
     def _handle_signal(self, signum: int, frame: Any) -> None:
         """Handle SIGINT/SIGTERM by initiating a graceful shutdown."""
         sig_name = signal.Signals(signum).name
-        logger.info("Received %s — shutting down", sig_name)
+        logger.info("Received %s, shutting down", sig_name)
         self.stop()
 
     def _write_pid_file(self) -> None:

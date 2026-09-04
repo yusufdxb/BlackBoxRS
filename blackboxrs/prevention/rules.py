@@ -62,8 +62,10 @@ class PreventionRule(BaseModel):
     created_at: datetime
     source_incident_id: str | None = None
     source_fingerprint_id: str | None = None
+    source_trigger_ids: list[str] = Field(default_factory=list)
     check: PreflightCheck
     rationale: str = ""
+    derivation: dict[str, Any] = Field(default_factory=dict)
     disabled: bool = False
     last_fired: datetime | None = None
     fire_count: int = 0
@@ -93,10 +95,11 @@ class PreflightReport(BaseModel):
 
     @property
     def exit_code(self) -> int:
-        """0 if all pass, 1 if any blocked, 2 if only warnings."""
+        """0 if all pass, 1 if any blocked/error, 2 if only warnings."""
         any_block = any(r.status == "block" for r in self.results)
+        any_error = any(r.status == "error" for r in self.results)
         any_warn = any(r.status == "warn" for r in self.results)
-        if any_block:
+        if any_block or any_error:
             return 1
         if any_warn:
             return 2
@@ -122,6 +125,8 @@ def make_rule(
     rationale: str = "",
     source_incident_id: str | None = None,
     source_fingerprint_id: str | None = None,
+    source_trigger_ids: list[str] | None = None,
+    derivation: dict[str, Any] | None = None,
 ) -> PreventionRule:
     """Build a :class:`PreventionRule` with a deterministic id."""
     rule_id = _make_rule_id(check, rationale)
@@ -134,8 +139,10 @@ def make_rule(
         created_at=datetime.now(timezone.utc),
         source_incident_id=source_incident_id,
         source_fingerprint_id=source_fingerprint_id,
+        source_trigger_ids=list(source_trigger_ids or []),
         check=check,
         rationale=rationale,
+        derivation=dict(derivation or {}),
     )
 
 

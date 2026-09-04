@@ -1,0 +1,409 @@
+{
+  "build": {
+    "build_type": "RelWithDebInfo",
+    "compiler": "/usr/bin/c++",
+    "rmw_implementation": "rmw_fastrtps_cpp",
+    "ros_distro": "humble"
+  },
+  "capture_backend": "rosbag2",
+  "capture_quality": null,
+  "comparison": {
+    "approximated_count": 2,
+    "backend": "rosbag2",
+    "comparable_scope": "serialized_workload_topics_only",
+    "content_equivalence_note": "The configured benchmark topics carry the same full serialized payloads. Native control chronology is excluded from workload counts and storage equivalence.",
+    "content_equivalent_to_native": true,
+    "counter_reconciled": false,
+    "dimensions": {
+      "aggregate_rate_hz": {
+        "backend": 5000.0,
+        "native": 5000.0,
+        "note": null,
+        "status": "matched"
+      },
+      "compression": {
+        "backend": "none",
+        "native": "none",
+        "note": null,
+        "status": "matched"
+      },
+      "control_chronology": {
+        "backend": "workload topics only",
+        "native": "graph, trigger, clock, status, and drop events share the chronology",
+        "note": null,
+        "status": "unmatched"
+      },
+      "discovery_warmup_sec": {
+        "backend": 2.0,
+        "native": 2.0,
+        "note": null,
+        "status": "matched"
+      },
+      "durability_sync_policy": {
+        "backend": "rosbag2 MCAP close/finalization; no equivalent fsync contract was observed",
+        "native": "periodic flush plus fsync on segment close and directory update",
+        "note": null,
+        "status": "unmatched"
+      },
+      "duration_sec": {
+        "backend": 30.0,
+        "native": 30.0,
+        "note": null,
+        "status": "matched"
+      },
+      "ingest_timestamp_clock": {
+        "backend": "realtime receive timestamp corrected with sampled realtime-minus-monotonic offset",
+        "native": "CLOCK_MONOTONIC callback timestamp",
+        "note": "latency is suppressed if clock-offset drift exceeds the configured limit",
+        "status": "approximated"
+      },
+      "loss_accounting": {
+        "backend": "no authoritative callback-received or drop ledger in the stock recorder",
+        "native": "callback-level received and reasoned drop counters",
+        "note": null,
+        "status": "unmatched"
+      },
+      "message_deserialization": {
+        "backend": "none (generic serialized)",
+        "native": "none (generic serialized)",
+        "note": null,
+        "status": "matched"
+      },
+      "message_type": {
+        "backend": "std_msgs/msg/ByteMultiArray",
+        "native": "std_msgs/msg/ByteMultiArray",
+        "note": null,
+        "status": "matched"
+      },
+      "payload_bytes": {
+        "backend": 256,
+        "native": 256,
+        "note": null,
+        "status": "matched"
+      },
+      "process_accounting_boundary": {
+        "backend": "rosbag2 recorder process selected below the ros2 CLI wrapper when present",
+        "native": "native recorder process",
+        "note": null,
+        "status": "matched"
+      },
+      "publisher": {
+        "backend": "blackbox_capture_bench publisher",
+        "native": "blackbox_capture_bench publisher",
+        "note": "the same publisher binary is launched with the same arguments for every backend",
+        "status": "matched"
+      },
+      "publisher_qos": {
+        "backend": "best_effort/depth 10",
+        "native": "best_effort/depth 10",
+        "note": null,
+        "status": "matched"
+      },
+      "segment_split_bytes": {
+        "backend": 67108864,
+        "native": 67108864,
+        "note": null,
+        "status": "matched"
+      },
+      "segment_split_duration_sec": {
+        "backend": 5.0,
+        "native": 5.0,
+        "note": null,
+        "status": "matched"
+      },
+      "shutdown_signal": {
+        "backend": "SIGINT to the process group",
+        "native": "SIGINT to the process group",
+        "note": null,
+        "status": "matched"
+      },
+      "storage_chunk_size_bytes": {
+        "backend": 1048576,
+        "native": 1048576,
+        "note": null,
+        "status": "matched"
+      },
+      "storage_chunking": {
+        "backend": "enabled, chunk CRC on",
+        "native": "enabled, chunk CRC on",
+        "note": null,
+        "status": "matched"
+      },
+      "storage_plugin": {
+        "backend": "mcap",
+        "native": "mcap",
+        "note": null,
+        "status": "matched"
+      },
+      "subscription_durability": {
+        "backend": "volatile",
+        "native": "volatile",
+        "note": null,
+        "status": "matched"
+      },
+      "subscription_history_depth": {
+        "backend": 1000,
+        "native": 1000,
+        "note": null,
+        "status": "matched"
+      },
+      "subscription_reliability": {
+        "backend": "best_effort",
+        "native": "best_effort",
+        "note": null,
+        "status": "matched"
+      },
+      "topic_discovery_period_ms": {
+        "backend": 100,
+        "native": 100,
+        "note": null,
+        "status": "matched"
+      },
+      "topics": {
+        "backend": 10,
+        "native": 10,
+        "note": null,
+        "status": "matched"
+      },
+      "write_buffering": {
+        "backend": "16777216 cache bytes with rosbag2 double buffering",
+        "native": "4096-event ring plus 16777216 payload-arena bytes",
+        "note": "the byte cache and native event-plus-payload bounds are not equivalent",
+        "status": "approximated"
+      }
+    },
+    "matched_count": 21,
+    "not_applicable_count": 0,
+    "reconciliation_note": "A clean rosbag2 file provides a retained-record count, but stock rosbag2 does not expose callback-received or reasoned-drop counters. Missing records remain unexplained.",
+    "reference_backend": "native",
+    "unmatched_count": 3
+  },
+  "counters": {
+    "admitted": null,
+    "committed": null,
+    "dropped": null,
+    "dropped_bytes": null,
+    "durable": null,
+    "durable_observed_lower_bound": null,
+    "negative_ingest_latencies": 0,
+    "publish_calls": 149999,
+    "received": null,
+    "sent": 149999,
+    "serialized_committed": 149999,
+    "serialized_committed_bytes": 40799728,
+    "serialized_dropped": null,
+    "serialized_retained": 149999,
+    "serialized_retained_bytes": 40799728
+  },
+  "drop_breakdown": null,
+  "generated_at": "2026-08-11T19:00:59.993081Z",
+  "git_dirty": false,
+  "git_sha": "ec3a6e7991d7674948fadc0d3200f74acd87feb0",
+  "latency_us": {
+    "ingest": {
+      "negative_count": 0,
+      "p50": 10.412,
+      "p95": 15.233,
+      "p99": 24.13905999999997,
+      "population": 149999,
+      "reason": "publisher steady timestamp to rosbag2 realtime receive timestamp, corrected using the sampled realtime-minus-monotonic offset",
+      "sample_cap": 100000,
+      "sample_size": 100000,
+      "valid": true
+    },
+    "trigger_to_flush": {
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "reason": "this workload does not issue and durably acknowledge a trigger",
+      "supported": false
+    },
+    "write": {
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "reason": "the selected recorder does not expose write-service samples",
+      "supported": false
+    }
+  },
+  "lifecycle": {
+    "capture_closed_cleanly": true,
+    "capture_exit_code": 0,
+    "final_status_state": null,
+    "forced_shutdown": false,
+    "publisher_exit_code": 0,
+    "shutdown_drain_ms": 163.5457709999173,
+    "startup_latency_ms": 201.32062100128678,
+    "status_source": null
+  },
+  "machine": {
+    "architecture": "x86_64",
+    "gpu_recorded": false,
+    "hostname_recorded": false,
+    "logical_cpu_count": 24,
+    "os": "Linux",
+    "os_release": "6.8.0-136-generic"
+  },
+  "measurement_limitations": [
+    "Stock rosbag2 exposes retained records but no authoritative callback-received or reasoned-drop counters.",
+    "The rosbag2 cache and native bounded event-ring plus payload arena are only an approximate buffering match.",
+    "rosbag2 ingest latency uses a sampled realtime-minus-monotonic clock correction.",
+    "Startup latency ends at the backend log liveness marker; complete subscription matching is checked separately before measurement.",
+    "CPU and RSS cover the recorder process only; publisher resource use is not sampled.",
+    "Write-service latency, durable flush latency, and trigger latency are unsupported."
+  ],
+  "provenance": {
+    "capture_command": [
+      "ros2",
+      "bag",
+      "record",
+      "--storage",
+      "mcap",
+      "--output",
+      "/tmp/blackboxrs-rosbag2-bench-oy_dgjz_/capture",
+      "--polling-interval",
+      "100",
+      "--max-bag-size",
+      "67108864",
+      "--max-bag-duration",
+      "5",
+      "--max-cache-size",
+      "16777216",
+      "--qos-profile-overrides-path",
+      "/tmp/blackboxrs-rosbag2-bench-oy_dgjz_/rosbag2_qos.yaml",
+      "--storage-config-file",
+      "/tmp/blackboxrs-rosbag2-bench-oy_dgjz_/rosbag2_mcap.yaml",
+      "/blackbox_bench/topic0",
+      "/blackbox_bench/topic1",
+      "/blackbox_bench/topic2",
+      "/blackbox_bench/topic3",
+      "/blackbox_bench/topic4",
+      "/blackbox_bench/topic5",
+      "/blackbox_bench/topic6",
+      "/blackbox_bench/topic7",
+      "/blackbox_bench/topic8",
+      "/blackbox_bench/topic9"
+    ],
+    "clock_offset": {
+      "drift_limit_ns": 2000000,
+      "drift_ns": 1250,
+      "max_offset_ns": 1786465892244500993,
+      "min_offset_ns": 1786465892244499743,
+      "sample_count": 123
+    },
+    "failure_injection": {
+      "expect_storage_fault": false,
+      "fail_after_bytes": -1,
+      "writer_delay_ms": 0
+    },
+    "generated_recorder_params": false,
+    "generated_rosbag2_qos": true,
+    "generated_rosbag2_storage_config": true,
+    "latency_clock_domain": "local_realtime_corrected_to_steady",
+    "publisher_command": [
+      "install/matrix_5x_ec3a6e7/blackbox_capture_bench/lib/blackbox_capture_bench/publisher",
+      "--topics",
+      "10",
+      "--aggregate-rate",
+      "5000.0",
+      "--payload-bytes",
+      "256",
+      "--duration-sec",
+      "30.0",
+      "--discovery-warmup-sec",
+      "2.0",
+      "--qos",
+      "best_effort",
+      "--qos-depth",
+      "10",
+      "--topic-prefix",
+      "/blackbox_bench/topic",
+      "--run-id",
+      "native-rosbag2-5x-03-rosbag2",
+      "--result-json",
+      "/tmp/blackboxrs-rosbag2-bench-oy_dgjz_/publisher.json",
+      "--burst-every-sec",
+      "0.0",
+      "--burst-duration-ms",
+      "0.0",
+      "--burst-multiplier",
+      "1.0",
+      "--churn-every-sec",
+      "0.0",
+      "--churn-down-ms",
+      "0.0"
+    ],
+    "publisher_marker_semantics": "BBRSBEN1, global publish-call sequence, steady timestamp, and topic index in the first 32 ByteMultiArray payload bytes; one timestamp is currently reused within each catch-up batch",
+    "resource_process_selection": "rosbag2 recorder process below ros2 CLI wrapper when present",
+    "work_directory_retained": false
+  },
+  "queue": {
+    "capacity": null,
+    "depth": null,
+    "peak_depth": null,
+    "peak_utilization": null
+  },
+  "recovery": null,
+  "resources": {
+    "cpu_percent": {
+      "max": 9.997154120129844,
+      "mean": 8.063867819898134,
+      "min": 6.997181549257699,
+      "p50": 7.99753079035999,
+      "p95": 8.99733587490746,
+      "p99": 9.707256903315198
+    },
+    "rss_mb": {
+      "max": 60.6953125,
+      "mean": 60.47278225806452,
+      "min": 56.9453125,
+      "p50": 60.68359375,
+      "p95": 60.6953125,
+      "p99": 60.6953125
+    }
+  },
+  "scenario": {
+    "actual_duration_sec": 30.000074564,
+    "aggregate_rate_hz": 5000.0,
+    "burst_duration_ms": 0.0,
+    "burst_every_sec": 0.0,
+    "burst_multiplier": 1.0,
+    "churn_down_ms": 0.0,
+    "churn_every_sec": 0.0,
+    "duration_sec": 30.0,
+    "expect_storage_fault": false,
+    "fail_after_bytes": -1,
+    "name": "custom",
+    "payload_bytes": 256,
+    "qos": "best_effort",
+    "qos_depth": 10,
+    "run_id": "native-rosbag2-5x-03-rosbag2",
+    "shared_steady_clock_domain": true,
+    "topics": 10,
+    "writer_delay_injection_ms": 0
+  },
+  "schema_version": "blackboxrs.capture_benchmark.v1",
+  "storage": {
+    "bytes": 47941559,
+    "bytes_per_second": 1598047.994771644,
+    "errors": null,
+    "partial_bytes": 0,
+    "partial_segments": 0,
+    "retained_bytes": 47941559,
+    "retention_evicted_bytes": 0,
+    "retention_evicted_segments": 0,
+    "segments": 6,
+    "sidecars": 0
+  },
+  "validity": {
+    "errors": [],
+    "latency_reason": "publisher steady timestamp to rosbag2 realtime receive timestamp, corrected using the sampled realtime-minus-monotonic offset",
+    "publisher_and_capture_workload_matched": true,
+    "publisher_to_callback_latency_valid": true,
+    "valid": true,
+    "warnings": [
+      "stock rosbag2 does not expose callback-received or reasoned-drop counters; missing published records cannot be attributed",
+      "rosbag2 close/finalization was observed, but an fsync-equivalent durability contract was not measured"
+    ]
+  }
+}

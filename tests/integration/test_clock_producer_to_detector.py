@@ -173,7 +173,7 @@ class TestClockProducerToDetector:
         """Observer-mode: no peer: source is present. Pipeline must still
         work (system + ntp:* is enough to emit and detect)."""
         anomaly = self._run_pipeline(max_skew_sec=0.1)
-        # Anomaly is still expected — we just confirm no crash and event fires.
+        # Anomaly is still expected: we just confirm no crash and event fires.
         assert anomaly is not None
 
     def test_single_source_snapshot_not_emitted(self):

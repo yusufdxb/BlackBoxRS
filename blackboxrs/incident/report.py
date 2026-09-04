@@ -11,11 +11,16 @@ from datetime import datetime
 
 from .bundle import BundleReader
 from .models import (
+    CaptureQuality,
     DetectorTrigger,
     FailureFingerprint,
     Incident,
     LikelyCauseHypothesis,
     TimelineEvent,
+)
+from blackboxrs.prevention.derivation import (
+    PreventionDerivationError,
+    derive_rule_from_incident,
 )
 
 
@@ -36,10 +41,7 @@ def _header(incident: Incident) -> str:
         "",
         f"- **Severity**: {incident.severity}",
         f"- **Created**: {_fmt_t(incident.created_at)}",
-        (
-            f"- **Window**: {_fmt_t(incident.window_start)} → "
-            f"{_fmt_t(incident.window_end)}"
-        ),
+        (f"- **Window**: {_fmt_t(incident.window_start)} → {_fmt_t(incident.window_end)}"),
         f"- **Session**: `{incident.session_id}`",
     ]
     if incident.observed_host or incident.observer_host:
@@ -63,6 +65,112 @@ def _summary(incident: Incident) -> str:
     if incident.summary:
         return _section("Summary") + incident.summary.rstrip() + "\n"
     return _section("Summary") + "_No generated summary._\n"
+
+
+def _capture_quality_section(quality: CaptureQuality | None) -> str:
+    if quality is None:
+        # A bundle carrying no capture-quality object cannot claim its evidence
+        # was complete. Say that in the report rather than omitting the section,
+        # which would read as an absence of problems.
+        return (
+            _section("Capture quality").rstrip()
+            + "\n\n- **Evidence completeness**: unknown\n"
+            + "- No capture backend supplied evidence-integrity accounting for "
+            + "this bundle. Completeness of the underlying evidence was not "
+            + "measured and must not be assumed.\n"
+        )
+
+    backend = "C++" if quality.backend == "cpp" else "Python"
+    out = [_section("Capture quality").rstrip(), ""]
+    out.append(f"- **Backend**: {backend}")
+    out.append(f"- **Evidence completeness**: {quality.completeness}")
+    out.append(f"- **Events received**: {_fmt_optional(quality.received)}")
+    out.append(f"- **Events captured**: {_fmt_optional(quality.captured)}")
+    out.append(f"- **Events committed**: {_fmt_optional(quality.committed)}")
+    out.append(f"- **Events durable**: {_fmt_optional(quality.durable)}")
+    out.append(f"- **Events dropped**: {_fmt_optional(quality.dropped)}")
+    out.append(f"- **Bytes captured**: {_fmt_optional(quality.bytes_captured)}")
+    out.append(f"- **Bytes dropped**: {_fmt_optional(quality.bytes_dropped)}")
+    if quality.drop_breakdown:
+        out.append("- **Drop breakdown**:")
+        for drop in quality.drop_breakdown[:10]:
+            out.append(
+                "  - topic="
+                f"`{drop.get('topic') or drop.get('topic_id', 'unknown')}` "
+                f"reason=`{drop.get('reason', 'unknown')}` "
+                f"count={drop.get('count', 'unknown')} "
+                f"bytes={drop.get('bytes', 'unknown')}"
+            )
+    if quality.peak_queue_utilization is not None:
+        out.append(
+            f"- **Highest queue utilization**: {quality.peak_queue_utilization * 100.0:.1f}%"
+        )
+    else:
+        out.append("- **Highest queue utilization**: unknown")
+    out.append(f"- **Storage errors**: {len(quality.storage_errors)}")
+    for error in quality.storage_errors[:10]:
+        out.append(f"  - {error}")
+    out.append(f"- **Clock anomalies**: {quality.clock_anomalies}")
+    out.append(f"- **Graph coverage faults**: {quality.graph_coverage_faults}")
+    out.append(f"- **Subscription failures**: {quality.subscription_failures}")
+    out.append(f"- **Runtime callback faults**: {quality.runtime_callback_faults}")
+    out.append(f"- **RMW-reported messages lost**: {quality.rmw_messages_lost}")
+    out.append(f"- **Best-effort topics observed**: {quality.best_effort_topics}")
+    out.append(f"- **Delivery accounting scope**: {_fmt_optional(quality.delivery_scope)}")
+    out.append(f"- **Topic coverage truncated**: {quality.topic_coverage_truncated}")
+    out.append(f"- **Node coverage truncated**: {quality.node_coverage_truncated}")
+    out.append(f"- **Clean close**: {_fmt_optional(quality.clean)}")
+    out.append(f"- **Recovered segment present**: {quality.recovered}")
+    if quality.recovery_discarded_tail_bytes is not None:
+        out.append(f"- **Recovery discarded tail bytes**: {quality.recovery_discarded_tail_bytes}")
+    out.append(
+        "- **Recovery unwritten tail loss unknown**: "
+        f"{quality.recovery_unwritten_tail_loss_unknown}"
+    )
+    if quality.recovery_last_sequence_low32 is not None:
+        out.append(
+            "- **Last recovered MCAP sequence (low 32 bits)**: "
+            f"{quality.recovery_last_sequence_low32}"
+        )
+    if quality.recovery_corruption_reason:
+        out.append(f"- **Recovery reason**: {quality.recovery_corruption_reason}")
+    out.append(f"- **Evidence records retained**: {_fmt_optional(quality.retained_events)}")
+    out.append(f"- **Rolling segments evicted**: {quality.retention_evicted_segments}")
+    out.append(f"- **Rolling events evicted**: {quality.retention_evicted_events}")
+    out.append(f"- **Rolling bytes evicted**: {quality.retention_evicted_bytes}")
+    if quality.history_complete is not None:
+        out.append(f"- **Requested pre-trigger history complete**: {quality.history_complete}")
+    if quality.post_window_elapsed is not None:
+        out.append(f"- **Post-trigger window elapsed**: {quality.post_window_elapsed}")
+    if quality.capture_start is not None or quality.capture_end is not None:
+        start = _fmt_t(quality.capture_start) if quality.capture_start else "unknown"
+        end = _fmt_t(quality.capture_end) if quality.capture_end else "unknown"
+        out.append(f"- **Capture interval**: {start} to {end}")
+    if quality.monotonic_start_ns is not None or quality.monotonic_end_ns is not None:
+        out.append(
+            "- **Monotonic interval (ns)**: "
+            f"{_fmt_optional(quality.monotonic_start_ns)} to "
+            f"{_fmt_optional(quality.monotonic_end_ns)}"
+        )
+    if quality.incomplete_reasons:
+        out.append(
+            "- **Integrity reasons**: "
+            + ", ".join(f"`{reason}`" for reason in quality.incomplete_reasons)
+        )
+    if quality.completeness != "complete":
+        out.extend(
+            [
+                "",
+                "> Native evidence is incomplete. Likely-cause confidence is "
+                "limited, and missing evidence may change the ranking.",
+            ]
+        )
+    out.append("")
+    return "\n".join(out)
+
+
+def _fmt_optional(value) -> str:
+    return "unknown" if value is None else str(value)
 
 
 def _timeline_section(timeline: list[TimelineEvent]) -> str:
@@ -185,8 +293,7 @@ def _signatures_section(reader: BundleReader) -> str:
     os_blob = ver.payload.get("os") or {}
     py_blob = ver.payload.get("python") or {}
     out.append(
-        f"- os: `{os_blob.get('name')} {os_blob.get('version')}` "
-        f"(kernel `{os_blob.get('kernel')}`)"
+        f"- os: `{os_blob.get('name')} {os_blob.get('version')}` (kernel `{os_blob.get('kernel')}`)"
     )
     out.append(f"- python: `{py_blob.get('version')}`")
     out.append(f"- blackboxrs: `{ver.payload.get('blackboxrs_version')}`")
@@ -288,9 +395,7 @@ def _fingerprint_section(fp: FailureFingerprint | None) -> str:
     out.append(f"- **id**: `{fp.fingerprint_id}`")
     out.append(f"- **algorithm**: {fp.algorithm_version}")
     classes = payload.get("detector_classes") or []
-    out.append(
-        f"- **detectors**: {', '.join(classes) if classes else '(none)'}"
-    )
+    out.append(f"- **detectors**: {', '.join(classes) if classes else '(none)'}")
     subs = payload.get("subsystems") or []
     out.append(f"- **subsystems**: {', '.join(subs) if subs else '(none)'}")
     topo = payload.get("topology_signature")
@@ -329,48 +434,53 @@ def _recommended_rule_section(
         return ""
     return (
         _section("Recommended preflight rule")
-        + "Adopt with `robot-blackbox prevention adopt --from-incident <id>`.\n\n"
-        "```yaml\n"
-        + yaml_block.rstrip()
-        + "\n```\n"
+        + "Adopt with `robot-blackbox prevention adopt --from-incident <bundle-dir>`.\n\n"
+        "```yaml\n" + yaml_block.rstrip() + "\n```\n"
     )
 
 
-def _yaml_for_top_cause(
-    top: LikelyCauseHypothesis, triggers: list[DetectorTrigger]
-) -> str | None:
+def _yaml_for_top_cause(top: LikelyCauseHypothesis, triggers: list[DetectorTrigger]) -> str | None:
     """Map a top hypothesis to a concrete preflight YAML when possible."""
-    cause_lower = top.cause.lower()
-    if "qos mismatch" in cause_lower:
-        topic = _trigger_subject(triggers, "QoSMismatchDetector") or "<topic>"
-        return (
-            f"check: qos_match\n"
-            f"params:\n"
-            f"  topic: {topic!r}\n"
-            f"severity_on_fail: block\n"
-            f"rationale: |\n"
-            f"  Generated from incident: {top.cause}\n"
-        )
-    if "stopped emitting" in cause_lower:
-        topic = _trigger_subject(triggers, "DeadTopicDetector") or "<topic>"
-        return (
-            f"check: topic_present\n"
-            f"params:\n"
-            f"  topic: {topic!r}\n"
-            f"  min_publishers: 1\n"
-            f"severity_on_fail: block\n"
-            f"rationale: |\n"
-            f"  Generated from incident: {top.cause}\n"
-        )
+    incident = _minimal_incident_for_rule_render(top)
+    try:
+        derivation = derive_rule_from_incident(incident, triggers)
+    except PreventionDerivationError:
+        return None
+    check = derivation.rule.check
+    lines = [
+        f"check: {check.kind}",
+        "params:",
+    ]
+    for key, value in check.params.items():
+        lines.append(f"  {key}: {value!r}")
+    lines.extend(
+        [
+            f"severity_on_fail: {check.severity_on_fail}",
+            "rationale: |",
+            f"  Generated from incident evidence: {top.cause}",
+        ]
+    )
+    return "\n".join(lines) + "\n"
     return None
 
 
-def _trigger_subject(triggers: list[DetectorTrigger], cls: str) -> str | None:
-    for t in triggers:
-        short = t.detector_class.rsplit(".", 1)[-1]
-        if short == cls:
-            return t.subject
-    return None
+def _minimal_incident_for_rule_render(top: LikelyCauseHypothesis):
+    """Build the small Incident surface derivation needs for report YAML."""
+    from datetime import datetime, timezone
+
+    from .models import Incident
+
+    now = datetime.now(timezone.utc)
+    return Incident(
+        incident_id="inc_report_preview",
+        created_at=now,
+        window_start=now,
+        window_end=now,
+        session_id="report_preview",
+        title="report preview",
+        bundle_path=".",
+        likely_causes=[top],
+    )
 
 
 def _attachments_section(reader: BundleReader) -> str:
@@ -403,6 +513,7 @@ def render(reader: BundleReader) -> str:
     chunks: list[str] = [
         _header(incident),
         _summary(incident),
+        _capture_quality_section(incident.capture_quality),
         _timeline_section(timeline),
         _triggers_section(triggers),
         _causes_section(causes),

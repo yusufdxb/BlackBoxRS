@@ -70,7 +70,7 @@ class ClockProducerConfig:
     an NTP peer via ``chronyc`` or ``ntpq``, and optionally the ROS
     ``/clock`` topic if sim-time is active.
 
-    ``include_ros_clock="auto"`` mirrors ``runtime.use_sim_time`` — in
+    ``include_ros_clock="auto"`` mirrors ``runtime.use_sim_time``. In
     practice this means the producer checks whether ``rclpy`` is
     importable and whether a ``/clock`` subscriber actually receives
     messages before adding the source to a snapshot.
@@ -96,11 +96,11 @@ class ProcessSignalsCollectorConfig:
     against the full cmdline string).  The default patterns cover common
     ROS 2 and controller node invocations:
 
-    - ``*ros2*``       — catches ``ros2 run foo bar`` and similar
-    - ``*rclpy*``      — catches ``python3 -m rclpy.*`` style launches
-    - ``*controller*`` — hardware-interface / ros2_control nodes
-    - ``*nav2*``       — navigation stack nodes
-    - ``*moveit*``     — MoveIt 2 nodes
+    - ``*ros2*`` catches ``ros2 run foo bar`` and similar
+    - ``*rclpy*`` catches ``python3 -m rclpy.*`` style launches
+    - ``*controller*`` catches hardware-interface / ros2_control nodes
+    - ``*nav2*`` catches navigation stack nodes
+    - ``*moveit*`` catches MoveIt 2 nodes
 
     ``max_tracked`` caps the snapshot size so the payload stays bounded
     even on busy robot computers.
@@ -150,10 +150,28 @@ class AnomalyThresholds:
 
 @dataclass
 class FrequencyConfig:
-    """Configuration for the topic frequency anomaly detector."""
+    """Configuration for the topic frequency anomaly detector.
+
+    ``tolerance_percent`` controls entry into the anomalous state. The
+    detector enters when the rate remains below that percentage from the
+    learned baseline. ``recovery_tolerance_percent`` controls exit and must
+    represent a point closer to the baseline for effective hysteresis.
+    """
 
     tolerance_percent: float = 20.0
+    recovery_tolerance_percent: float = 10.0
     min_consecutive_samples: int = 2
+
+    def __post_init__(self) -> None:
+        if not 0.0 < self.tolerance_percent < 100.0:
+            raise ConfigError("frequency tolerance_percent must be between 0 and 100")
+        if not 0.0 <= self.recovery_tolerance_percent < self.tolerance_percent:
+            raise ConfigError(
+                "frequency recovery_tolerance_percent must be non-negative "
+                "and smaller than tolerance_percent"
+            )
+        if self.min_consecutive_samples < 1:
+            raise ConfigError("frequency min_consecutive_samples must be at least 1")
 
 
 @dataclass
@@ -210,9 +228,7 @@ class AnomalyEngineConfig:
     frequency: FrequencyConfig = field(default_factory=FrequencyConfig)
     dead_topic: DeadTopicConfig = field(default_factory=DeadTopicConfig)
     tf_topology: TfTopologyConfig = field(default_factory=TfTopologyConfig)
-    process_signals: ProcessSignalsConfig = field(
-        default_factory=ProcessSignalsConfig
-    )
+    process_signals: ProcessSignalsConfig = field(default_factory=ProcessSignalsConfig)
     clock_skew: ClockSkewConfig = field(default_factory=ClockSkewConfig)
     custom_detectors: list[dict] = field(default_factory=list)
     observer_mode: bool = False
@@ -244,9 +260,7 @@ class RuntimeConfig:
 
     def __post_init__(self) -> None:
         if self.role not in ("onboard", "observer"):
-            raise ConfigError(
-                f"runtime.role must be 'onboard' or 'observer', got {self.role!r}"
-            )
+            raise ConfigError(f"runtime.role must be 'onboard' or 'observer', got {self.role!r}")
 
     @property
     def is_observer(self) -> bool:
@@ -287,6 +301,42 @@ class Rosbag2RecorderConfig:
     topics: list[str] = field(default_factory=list)
 
 
+@dataclass
+class CaptureConfig:
+    """Select the evidence-capture backend.
+
+    The Python backend remains the compatibility default. ``cpp`` starts the
+    bounded native recorder with the daemon and makes its current session
+    available to incident construction. ``native_session_path`` can override
+    that handoff for offline analysis.
+    """
+
+    backend: str = "python"
+    topics: list[str] = field(default_factory=list)
+    native_output_dir: str = "~/.blackboxrs/native"
+    native_session_path: str | None = None
+    native_command: list[str] = field(
+        default_factory=lambda: [
+            "ros2",
+            "run",
+            "blackbox_capture_cpp",
+            "blackbox_capture",
+        ]
+    )
+    native_startup_timeout_sec: float = 5.0
+    native_shutdown_timeout_sec: float = 10.0
+
+    def __post_init__(self) -> None:
+        if self.backend not in ("python", "cpp"):
+            raise ConfigError(f"capture.backend must be 'python' or 'cpp', got {self.backend!r}")
+        if not self.native_command or not all(
+            isinstance(part, str) and part for part in self.native_command
+        ):
+            raise ConfigError("capture.native_command must contain executable arguments")
+        if self.native_startup_timeout_sec <= 0 or self.native_shutdown_timeout_sec <= 0:
+            raise ConfigError("capture native startup and shutdown timeouts must be positive")
+
+
 # ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
@@ -317,6 +367,7 @@ class BlackBoxConfig:
     ros_monitor: RosMonitorConfig = field(default_factory=RosMonitorConfig)
     system_monitor: SystemMonitorConfig = field(default_factory=SystemMonitorConfig)
     anomaly_engine: AnomalyEngineConfig = field(default_factory=AnomalyEngineConfig)
+    capture: CaptureConfig = field(default_factory=CaptureConfig)
     rosbag2: Rosbag2RecorderConfig = field(default_factory=Rosbag2RecorderConfig)
     prometheus: PrometheusConfig = field(default_factory=PrometheusConfig)
 
@@ -373,8 +424,8 @@ class BlackBoxConfig:
             A populated :class:`BlackBoxConfig`.
 
         Raises:
-            ConfigError: Only when ``strict=True`` and unknown keys are
-                present in the YAML file.
+            ConfigError: If a configured value is invalid, or when
+                ``strict=True`` and unknown keys are present in the YAML file.
         """
         path = Path(os.path.expanduser(path or _DEFAULT_CONFIG_PATH))
         if not path.is_file():
@@ -416,6 +467,7 @@ _NESTED_MAP: dict[str, type] = {
     "ros_monitor": RosMonitorConfig,
     "system_monitor": SystemMonitorConfig,
     "anomaly_engine": AnomalyEngineConfig,
+    "capture": CaptureConfig,
     "rosbag2": Rosbag2RecorderConfig,
     "prometheus": PrometheusConfig,
 }
@@ -494,7 +546,7 @@ def _dict_to_config(
     - ``True``: raise :class:`ConfigError` on the first scope containing
       unknown keys.
 
-    The ``source`` parameter is purely diagnostic — it's woven into the
+    The ``source`` parameter is purely diagnostic. It is woven into the
     warning / error message so operators can trace which file caused
     the complaint.
     """

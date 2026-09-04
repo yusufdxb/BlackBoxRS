@@ -15,7 +15,7 @@ try:
     _HAS_PSUTIL = True
 except ImportError:  # pragma: no cover
     _HAS_PSUTIL = False
-    logger.warning("psutil not installed — MemoryCollector will return empty results")
+    logger.warning("psutil not installed: MemoryCollector will return empty results")
 
 _MB = 1024 * 1024
 
@@ -29,11 +29,11 @@ class MemoryCollector:
         Returns:
             A dictionary with the following keys:
 
-            - ``memory_percent`` — physical memory utilization (0–100).
-            - ``memory_used_mb`` — physical memory in use (MiB).
-            - ``memory_total_mb`` — total physical memory (MiB).
-            - ``swap_percent`` — swap utilization (0–100).
-            - ``swap_used_mb`` — swap in use (MiB).
+            - ``memory_percent``: physical memory utilization (0–100).
+            - ``memory_used_mb``: physical memory in use (MiB).
+            - ``memory_total_mb``: total physical memory (MiB).
+            - ``swap_percent``: swap utilization (0–100).
+            - ``swap_used_mb``: swap in use (MiB).
 
             Returns an empty dict if *psutil* is not available.
         """
