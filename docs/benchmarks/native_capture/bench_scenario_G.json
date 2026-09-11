@@ -1,0 +1,310 @@
+{
+  "build": {
+    "build_type": null,
+    "compiler": null,
+    "rmw_implementation": null,
+    "ros_distro": "humble"
+  },
+  "capture_backend": "cpp",
+  "capture_quality": null,
+  "counters": {
+    "admitted": 6597,
+    "committed": 3019,
+    "dropped": 24595,
+    "dropped_bytes": 25578800,
+    "durable": null,
+    "durable_observed_lower_bound": 2042,
+    "received": 31192,
+    "sent": 29999,
+    "serialized_committed": 0,
+    "serialized_committed_bytes": 0,
+    "serialized_dropped": 24595,
+    "serialized_retained": 0,
+    "serialized_retained_bytes": 0
+  },
+  "drop_breakdown": [
+    {
+      "bytes": 2557360,
+      "count": 2459,
+      "first_monotonic_ns": 494365216231,
+      "first_sequence": 4300,
+      "last_monotonic_ns": 520115214052,
+      "last_sequence": 31184,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic0",
+      "topic_id": 1
+    },
+    {
+      "bytes": 2557360,
+      "count": 2459,
+      "first_monotonic_ns": 494356223067,
+      "first_sequence": 4291,
+      "last_monotonic_ns": 520116216890,
+      "last_sequence": 31185,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic1",
+      "topic_id": 2
+    },
+    {
+      "bytes": 2558400,
+      "count": 2460,
+      "first_monotonic_ns": 494357176583,
+      "first_sequence": 4292,
+      "last_monotonic_ns": 520117214139,
+      "last_sequence": 31186,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic2",
+      "topic_id": 3
+    },
+    {
+      "bytes": 2558400,
+      "count": 2460,
+      "first_monotonic_ns": 494358167779,
+      "first_sequence": 4293,
+      "last_monotonic_ns": 520118421849,
+      "last_sequence": 31187,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic3",
+      "topic_id": 4
+    },
+    {
+      "bytes": 2557360,
+      "count": 2459,
+      "first_monotonic_ns": 494359185847,
+      "first_sequence": 4294,
+      "last_monotonic_ns": 520119226055,
+      "last_sequence": 31188,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic4",
+      "topic_id": 5
+    },
+    {
+      "bytes": 2557360,
+      "count": 2459,
+      "first_monotonic_ns": 494360198865,
+      "first_sequence": 4295,
+      "last_monotonic_ns": 520120230004,
+      "last_sequence": 31189,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic5",
+      "topic_id": 6
+    },
+    {
+      "bytes": 2558400,
+      "count": 2460,
+      "first_monotonic_ns": 494361216222,
+      "first_sequence": 4296,
+      "last_monotonic_ns": 520121218243,
+      "last_sequence": 31190,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic6",
+      "topic_id": 7
+    },
+    {
+      "bytes": 2558400,
+      "count": 2460,
+      "first_monotonic_ns": 494362216949,
+      "first_sequence": 4297,
+      "last_monotonic_ns": 520122224471,
+      "last_sequence": 31191,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic7",
+      "topic_id": 8
+    },
+    {
+      "bytes": 2558400,
+      "count": 2460,
+      "first_monotonic_ns": 494363224407,
+      "first_sequence": 4298,
+      "last_monotonic_ns": 520123217821,
+      "last_sequence": 31192,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic8",
+      "topic_id": 9
+    },
+    {
+      "bytes": 2557360,
+      "count": 2459,
+      "first_monotonic_ns": 494364216153,
+      "first_sequence": 4299,
+      "last_monotonic_ns": 520114214303,
+      "last_sequence": 31183,
+      "reason": 7,
+      "topic": "/blackbox_bench/topic9",
+      "topic_id": 10
+    }
+  ],
+  "generated_at": "2026-08-09T04:07:01.494475Z",
+  "git_dirty": true,
+  "git_sha": "55e50f4f713102fb8825d06029351b1c0d2a2d09",
+  "latency_us": {
+    "ingest": {
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "population": 0,
+      "sample_cap": 100000,
+      "sample_size": 0,
+      "valid": false
+    },
+    "trigger_to_flush": {
+      "p50": null,
+      "p95": null,
+      "p99": null
+    },
+    "write": {
+      "p50": null,
+      "p95": null,
+      "p99": null
+    }
+  },
+  "lifecycle": {
+    "capture_exit_code": -15,
+    "final_status_state": "SHEDDING",
+    "forced_shutdown": true,
+    "publisher_exit_code": 0,
+    "shutdown_drain_ms": 10001.193742000054,
+    "startup_latency_ms": 181.71302299998615,
+    "status_source": "status_topic_periodic"
+  },
+  "machine": {
+    "architecture": "x86_64",
+    "gpu_recorded": false,
+    "hostname_recorded": false,
+    "logical_cpu_count": 24,
+    "os": "Linux",
+    "os_release": "6.8.0-136-generic"
+  },
+  "provenance": {
+    "capture_command": [
+      "ros2",
+      "run",
+      "blackbox_capture_cpp",
+      "blackbox_capture",
+      "--ros-args",
+      "--params-file",
+      "/tmp/blackboxrs-native-bench-k7do5pjl/recorder.yaml"
+    ],
+    "failure_injection": {
+      "expect_storage_fault": false,
+      "fail_after_bytes": -1,
+      "writer_delay_ms": 5
+    },
+    "generated_recorder_params": true,
+    "latency_clock_domain": "local_steady",
+    "publisher_command": [
+      "ros2",
+      "run",
+      "blackbox_capture_bench",
+      "publisher",
+      "--topics",
+      "10",
+      "--aggregate-rate",
+      "1000.0",
+      "--payload-bytes",
+      "1024",
+      "--duration-sec",
+      "30.0",
+      "--discovery-warmup-sec",
+      "1.0",
+      "--qos",
+      "best_effort",
+      "--qos-depth",
+      "10",
+      "--topic-prefix",
+      "/blackbox_bench/topic",
+      "--run-id",
+      "46c7ccf3b14f",
+      "--result-json",
+      "/tmp/blackboxrs-native-bench-k7do5pjl/publisher.json",
+      "--burst-every-sec",
+      "0.0",
+      "--burst-duration-ms",
+      "0.0",
+      "--burst-multiplier",
+      "1.0",
+      "--churn-every-sec",
+      "0.0",
+      "--churn-down-ms",
+      "0.0"
+    ],
+    "resource_process_selection": "native recorder descendant of ros2 run wrapper",
+    "work_directory_retained": false
+  },
+  "queue": {
+    "capacity": 4096,
+    "depth": 3577,
+    "peak_depth": 3654,
+    "peak_utilization": 0.89208984375
+  },
+  "recovery": null,
+  "resources": {
+    "cpu_percent": {
+      "max": 2.999112484638765,
+      "mean": 2.7321216538563458,
+      "min": 1.999188285573929,
+      "p50": 2.9989221543955367,
+      "p95": 2.999088990886699,
+      "p99": 2.999106857366205
+    },
+    "rss_mb": {
+      "max": 47.76171875,
+      "mean": 47.65385584677419,
+      "min": 45.47265625,
+      "p50": 47.76171875,
+      "p95": 47.76171875,
+      "p99": 47.76171875
+    }
+  },
+  "scenario": {
+    "aggregate_rate_hz": 1000.0,
+    "burst_duration_ms": 0.0,
+    "burst_every_sec": 0.0,
+    "burst_multiplier": 1.0,
+    "churn_down_ms": 0.0,
+    "churn_every_sec": 0.0,
+    "duration_sec": 30.0,
+    "expect_storage_fault": false,
+    "fail_after_bytes": -1,
+    "name": "G",
+    "payload_bytes": 1024,
+    "qos": "best_effort",
+    "qos_depth": 10,
+    "run_id": "46c7ccf3b14f",
+    "shared_steady_clock_domain": true,
+    "topics": 10,
+    "writer_delay_injection_ms": 5
+  },
+  "schema_version": "blackboxrs.capture_benchmark.v1",
+  "storage": {
+    "bytes": 0,
+    "bytes_per_second": 0.0,
+    "errors": 0,
+    "partial_bytes": 4324793,
+    "partial_segments": 1,
+    "retained_bytes": 0,
+    "retention_evicted_bytes": 0,
+    "retention_evicted_segments": 0,
+    "segments": 0,
+    "sidecars": 0
+  },
+  "validity": {
+    "errors": [
+      "capture did not provide an authoritative terminal status",
+      "no closed MCAP segment was found",
+      "capture exited with code -15",
+      "capture exceeded the shutdown deadline and was terminated",
+      "recorder received count does not reconcile with committed plus dropped",
+      "ordinary benchmark did not end in STOPPED_CLEAN",
+      "publisher sent count does not reconcile with serialized committed plus recorder-accounted serialized drops; DDS or pre-callback loss is unexplained"
+    ],
+    "latency_reason": "publisher steady timestamp to recorder callback steady timestamp",
+    "publisher_and_capture_workload_matched": true,
+    "publisher_to_callback_latency_valid": false,
+    "valid": false,
+    "warnings": [
+      "no final capture_quality.json was found",
+      "only a periodic durable lower bound was observed; no STOPPED_CLEAN status made the final durable count authoritative"
+    ]
+  }
+}

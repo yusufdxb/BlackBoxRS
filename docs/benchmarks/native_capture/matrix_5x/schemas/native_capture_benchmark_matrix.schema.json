@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blackboxrs.dev/schema/native_capture_benchmark_matrix.v1.json",
+  "title": "BlackBoxRS matched capture benchmark matrix",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "matrix_id",
+    "publication",
+    "validity",
+    "provenance",
+    "schedule",
+    "workload",
+    "backends",
+    "comparison_scope"
+  ],
+  "properties": {
+    "schema_version": {"const": "blackboxrs.capture_benchmark_matrix.v1"},
+    "generated_at": {"type": ["string", "null"]},
+    "matrix_id": {"type": "string"},
+    "publication": {
+      "type": "object",
+      "required": [
+        "eligible",
+        "exploratory",
+        "retained_evidence_path",
+        "retained_schema_paths",
+        "note"
+      ],
+      "properties": {
+        "eligible": {"type": "boolean"},
+        "exploratory": {"type": "boolean"},
+        "retained_evidence_path": {"type": ["string", "null"]},
+        "retained_schema_paths": {
+          "type": ["object", "null"],
+          "additionalProperties": {"type": "string"}
+        },
+        "note": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "validity": {
+      "type": "object",
+      "required": ["valid", "all_child_artifacts_valid", "errors"],
+      "properties": {
+        "valid": {"type": "boolean"},
+        "all_child_artifacts_valid": {"type": "boolean"},
+        "errors": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "provenance": {"type": "object"},
+    "schedule": {
+      "type": "object",
+      "required": [
+        "strategy",
+        "first_backend",
+        "repetitions_per_backend",
+        "workload_arguments",
+        "child_timeout_sec",
+        "runs"
+      ],
+      "properties": {
+        "strategy": {"type": "string"},
+        "first_backend": {"enum": ["native", "rosbag2"]},
+        "repetitions_per_backend": {"type": "integer", "minimum": 1},
+        "workload_arguments": {"type": "array", "items": {"type": "string"}},
+        "child_timeout_sec": {"type": "number", "exclusiveMinimum": 0},
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "launch_index",
+              "pair_index",
+              "position_in_pair",
+              "backend",
+              "artifact",
+              "sha256",
+              "valid",
+              "errors"
+            ],
+            "properties": {
+              "launch_index": {"type": "integer", "minimum": 1},
+              "pair_index": {"type": "integer", "minimum": 1},
+              "position_in_pair": {"enum": [1, 2]},
+              "backend": {"enum": ["native", "rosbag2"]},
+              "artifact": {"type": "string"},
+              "sha256": {"type": ["string", "null"]},
+              "valid": {"type": "boolean"},
+              "errors": {"type": "array", "items": {"type": "string"}}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "workload": {"type": ["object", "null"]},
+    "backends": {
+      "type": "object",
+      "required": ["native", "rosbag2"],
+      "additionalProperties": {
+        "type": "object",
+        "required": ["launch_count", "expected_launch_count", "all_valid", "metrics"]
+      }
+    },
+    "comparison_scope": {
+      "type": "object",
+      "required": [
+        "included_metrics",
+        "excluded_metrics",
+        "durability_equivalence_claimed",
+        "aggregation",
+        "null_policy"
+      ],
+      "properties": {
+        "included_metrics": {"type": "array", "items": {"type": "string"}},
+        "excluded_metrics": {"type": "object", "additionalProperties": {"type": "string"}},
+        "durability_equivalence_claimed": {"const": false},
+        "aggregation": {"type": "string"},
+        "null_policy": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -33,7 +33,7 @@ CHRONYC_AHEAD = (
 )
 
 CHRONYC_UNSYNC = (
-    # Ref-ID is 0.0.0.0 — no peer selected
+    # Ref-ID is 0.0.0.0: no peer selected
     "00000000,0.0.0.0,0,0.000000000,0.000000000,"
     "0.000000000,0.000,0.000,0.000,0.000,0.0\n"
 )
@@ -76,7 +76,7 @@ class TestParseChronyc:
         name, epoch = result[0]
         assert name == "ntp:ntp.ubuntu.com"
         # epoch_sec should be close to current time (within a few seconds
-        # of test execution — the offset in the fixture is tiny)
+        # of test execution: the offset in the fixture is tiny)
         assert abs(epoch - time.time()) < 5.0
 
     def test_peer_name_prefixed_with_ntp(self):
@@ -142,7 +142,7 @@ class TestParseNtpq:
 
 
 # ---------------------------------------------------------------------------
-# ClockSkewCollector — helper builders
+# ClockSkewCollector: helper builders
 # ---------------------------------------------------------------------------
 
 
@@ -172,7 +172,7 @@ def _make_collector(
 
 
 # ---------------------------------------------------------------------------
-# ClockSkewCollector — single source: no event emitted
+# ClockSkewCollector: single source: no event emitted
 # ---------------------------------------------------------------------------
 
 
@@ -187,7 +187,7 @@ class TestClockCollectorSingleSource:
 
     def test_no_ntp_tool_available_skips_cleanly(self):
         """When NTP tool is not on PATH and ros is disabled, only system
-        source is gathered — no event."""
+        source is gathered: no event."""
         bus = MagicMock()
         with (
             patch(
@@ -207,7 +207,7 @@ class TestClockCollectorSingleSource:
 
 
 # ---------------------------------------------------------------------------
-# ClockSkewCollector — two sources: event emitted
+# ClockSkewCollector: two sources: event emitted
 # ---------------------------------------------------------------------------
 
 
@@ -297,7 +297,7 @@ class TestClockCollectorTwoSources:
 
 
 # ---------------------------------------------------------------------------
-# ClockSkewCollector — read-window guard
+# ClockSkewCollector: read-window guard
 # ---------------------------------------------------------------------------
 
 
@@ -307,7 +307,7 @@ class TestReadWindowGuard:
         return None and not publish."""
         bus = MagicMock()
         collector = _make_collector(include_ntp=False, bus=bus)
-        collector.set_window_budget(0.0)  # zero budget — always fails
+        collector.set_window_budget(0.0)  # zero budget: always fails
 
         # We need at least 2 sources to trigger the publish path, but with
         # zero budget the window guard fires first.  Patch _collect_sources
@@ -321,7 +321,7 @@ class TestReadWindowGuard:
                     {"name": "system", "epoch_sec": 1000.0},
                     {"name": "ntp:fake", "epoch_sec": 1000.5},
                 ],
-                0.200,  # 200 ms window — always exceeds a zero budget
+                0.200,  # 200 ms window: always exceeds a zero budget
             ),
         ):
             result = collector.tick()

@@ -7,7 +7,7 @@ they never touch the user's actual ``~/.blackboxrs``.  Coverage:
   writes an identity pidfile, flushes events to the JSONL log, and
   exits cleanly on SIGTERM.
 * **Background lifecycle**: ``start`` (default, detached) + ``status``
-  + ``stop`` — the common operator path.
+  + ``stop``: the common operator path.
 * **Stale pidfile refusal**: a leftover pidfile pointing at a dead
   (or foreign) PID must be refused by ``status``/``stop`` and cleaned
   up, and the next ``start`` must succeed without needing manual
@@ -71,7 +71,7 @@ def _write_observer_config(dest: Path, log_dir: Path, observed_host: str) -> Non
     """Observer-mode config. ROS disabled because there's no live graph
     in this subprocess test, and system_monitor is auto-disabled by
     ``apply_runtime_role`` anyway. We exercise the role plumbing, the
-    startup log line, and the bundle metadata path — not live capture."""
+    startup log line, and the bundle metadata path, not live capture."""
     dest.write_text(
         textwrap.dedent(
             f"""\
@@ -166,7 +166,7 @@ class TestCliForegroundLifecycle:
             ), "pidfile did not appear within 5s"
 
             payload = json.loads(pid_file.read_text())
-            # Identity payload is the new contract — must include pid,
+            # Identity payload is the new contract: must include pid,
             # starttime (Linux), and cmdline.
             assert payload["pid"] == proc.pid, (
                 f"pidfile pid ({payload['pid']}) != subprocess pid ({proc.pid})"
@@ -217,7 +217,7 @@ class TestCliForegroundLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# Background lifecycle — start (detached) + status + stop
+# Background lifecycle: start (detached) + status + stop
 # ---------------------------------------------------------------------------
 
 
@@ -301,7 +301,7 @@ class TestCliBackgroundLifecycle:
             daemon_pid = payload["pid"]
             assert daemon_pid > 0
             # The background child is a different process from the CLI
-            # invocation above — the CLI exited after starting it.
+            # invocation above: the CLI exited after starting it.
             assert isinstance(payload.get("starttime"), int)
             assert "blackboxrs" in payload.get("cmdline", "").lower()
 
@@ -386,7 +386,7 @@ class TestCliBackgroundLifecycle:
             # Still only one daemon.
             payload_after = json.loads(pid_file.read_text())
             assert payload_after["pid"] == daemon_pid, (
-                "pidfile changed — second start may have replaced the daemon"
+                "pidfile changed: second start may have replaced the daemon"
             )
         finally:
             _run_cli(["stop"], env=env, timeout=10.0)
@@ -434,7 +434,7 @@ class TestCliRefusesStalePidfile:
         self, tmp_path: Path
     ):
         """A pidfile left behind pointing at a dead PID must be
-        treated as stale by the CLI and cleaned up — otherwise
+        treated as stale by the CLI and cleaned up; otherwise
         ``start`` would wrongly refuse to run ever again."""
         _, blackbox_dir, _, env = _prepare_isolated_home(tmp_path)
         pid_file = blackbox_dir / "blackboxrs.pid"
@@ -444,7 +444,7 @@ class TestCliRefusesStalePidfile:
             json.dumps(
                 {
                     "pid": dead_pid,
-                    "starttime": 1,  # arbitrary — process is dead anyway
+                    "starttime": 1,  # arbitrary: process is dead anyway
                     "cmdline": "python -m blackboxrs start --foreground",
                 }
             )
@@ -517,7 +517,7 @@ class TestCliRefusesStalePidfile:
         try:
             payload = _wait_for_pid_file(pid_file, timeout=5.0)
             assert payload["pid"] != dead_pid, (
-                "new daemon reused the stale PID — cleanup path broken"
+                "new daemon reused the stale PID: cleanup path broken"
             )
         finally:
             _run_cli(["stop"], env=env, timeout=10.0)
@@ -525,7 +525,7 @@ class TestCliRefusesStalePidfile:
 
 
 # ---------------------------------------------------------------------------
-# Observer-mode lifecycle — runtime.role: observer, end-to-end
+# Observer-mode lifecycle: runtime.role: observer, end-to-end
 # ---------------------------------------------------------------------------
 
 

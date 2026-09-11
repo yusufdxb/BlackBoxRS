@@ -107,16 +107,39 @@ def _split_db3_files(dir_path: Path) -> list[Path]:
     if metadata_path.exists():
         import yaml
 
-        with open(metadata_path, "r", encoding="utf-8") as fh:
-            metadata = yaml.safe_load(fh)
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as fh:
+                metadata = yaml.safe_load(fh)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"Malformed rosbag2 metadata.yaml: {exc}") from exc
         try:
             rel_paths = metadata["rosbag2_bagfile_information"][
                 "relative_file_paths"
             ]
         except (KeyError, TypeError):
-            rel_paths = None
+            raise ValueError(
+                f"metadata.yaml is missing rosbag2 relative_file_paths: {metadata_path}"
+            )
         if rel_paths:
-            return [dir_path / rel for rel in rel_paths]
+            seen: set[Path] = set()
+            resolved: list[Path] = []
+            root = dir_path.resolve()
+            for rel in rel_paths:
+                rel_str = str(rel)
+                candidate = (dir_path / rel_str).resolve()
+                try:
+                    candidate.relative_to(root)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"metadata.yaml bag file escapes bag directory: {rel_str!r}"
+                    ) from exc
+                if candidate in seen:
+                    raise ValueError(
+                        f"metadata.yaml lists duplicate bag file {rel_str!r}"
+                    )
+                seen.add(candidate)
+                resolved.append(candidate)
+            return resolved
     return sorted(dir_path.glob("*.db3"))
 
 

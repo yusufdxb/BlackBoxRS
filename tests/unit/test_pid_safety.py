@@ -105,7 +105,7 @@ class TestIsRunningIdentityCheck:
                 {
                     "pid": my_pid,
                     "starttime": _read_starttime_of(my_pid),
-                    # pytest is running us — pretend the pidfile was
+                    # pytest is running us: pretend the pidfile was
                     # written for some unrelated command.
                     "cmdline": "/usr/bin/firefox",
                 }
@@ -202,7 +202,7 @@ class TestWritePidFileAtomicAndIdentified:
         assert isinstance(payload["starttime"], int)
         assert "cmdline" in payload
         # Our current process cmdline should contain 'python' or the
-        # pytest runner path — just assert it's non-empty.
+        # pytest runner path: just assert it's non-empty.
         assert payload["cmdline"]
 
     def test_write_pid_file_is_atomic(self, pid_paths):

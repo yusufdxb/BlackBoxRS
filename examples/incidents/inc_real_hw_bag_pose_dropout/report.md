@@ -117,7 +117,7 @@ _Truncated: 5394 additional rows in `timeline.json`._
 
 **Version signature**
 
-- hash: `daec1ad3e331f79e6002dcb60a6390d06027456af322635109e3db2d38f4ffb9`
+- hash: `c223ecfefffb5489aefde564fc26ad3b4eba055ef706b6eb3f8e0f8c5d8f868e`
 - os: `Ubuntu 22.04` (kernel `6.8.0-124-generic`)
 - python: `3.10.12`
 - blackboxrs: `0.4.1`

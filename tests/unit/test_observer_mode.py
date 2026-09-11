@@ -214,14 +214,14 @@ class TestAnomalyEngineObserverMode:
         added without a producer, add it to the orphans list here until
         the producer ships, then move it to _CURRENTLY_WIRED.
         """
-        orphan_detectors: list[str] = []  # empty — all three orphans closed
+        orphan_detectors: list[str] = []  # empty: all three orphans closed
         for orphan in orphan_detectors:
             for mode in (False, True):
                 engine = self._make_engine(observer_mode=mode)
                 names = {d.name for d in engine._detectors}
                 assert orphan not in names, (
                     f"{orphan} re-introduced into engine without a producer "
-                    f"in system_monitor — see engine.py header."
+                    f"in system_monitor; see engine.py header."
                 )
         # Assert the invariant explicitly so the test body is visible
         assert len(orphan_detectors) == 0, (

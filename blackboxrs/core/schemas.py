@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from blackboxrs.core.clock import Clock
 
@@ -65,12 +65,65 @@ class QoSProfileData(BaseModel):
     )
 
 
+class CaptureQuality(BaseModel):
+    """Evidence-integrity summary supplied by a capture backend."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: Literal["python", "cpp"]
+    completeness: Literal["complete", "incomplete", "unknown"] = "unknown"
+    received: int | None = Field(default=None, ge=0)
+    captured: int | None = Field(default=None, ge=0)
+    committed: int | None = Field(default=None, ge=0)
+    durable: int | None = Field(default=None, ge=0)
+    dropped: int | None = Field(default=None, ge=0)
+    bytes_captured: int | None = Field(default=None, ge=0)
+    bytes_dropped: int | None = Field(default=None, ge=0)
+    drop_breakdown: list[dict[str, Any]] = Field(default_factory=list)
+    peak_queue_utilization: float | None = Field(default=None, ge=0.0, le=1.0)
+    storage_errors: list[str] = Field(default_factory=list)
+    clock_anomalies: int = Field(default=0, ge=0)
+    graph_coverage_faults: int = Field(default=0, ge=0)
+    subscription_failures: int = Field(default=0, ge=0)
+    runtime_callback_faults: int = Field(default=0, ge=0)
+    rmw_messages_lost: int = Field(default=0, ge=0)
+    delivery_observability_faults: int = Field(default=0, ge=0)
+    best_effort_topics: int = Field(default=0, ge=0)
+    topic_coverage_truncated: bool = False
+    node_coverage_truncated: bool = False
+    delivery_scope: str | None = None
+    capture_start: datetime | None = None
+    capture_end: datetime | None = None
+    monotonic_start_ns: int | None = Field(default=None, ge=0)
+    monotonic_end_ns: int | None = Field(default=None, ge=0)
+    clean: bool | None = None
+    recovered: bool = False
+    recovery_discarded_tail_bytes: int | None = Field(default=None, ge=0)
+    recovery_unwritten_tail_loss_unknown: bool = False
+    recovery_last_sequence_low32: int | None = Field(default=None, ge=0, le=(1 << 32) - 1)
+    recovery_corruption_reason: str | None = None
+    segments: int = Field(default=0, ge=0)
+    retained_events: int | None = Field(default=None, ge=0)
+    retention_evicted_segments: int = Field(default=0, ge=0)
+    retention_evicted_events: int = Field(default=0, ge=0)
+    retention_evicted_bytes: int = Field(default=0, ge=0)
+    history_complete: bool | None = None
+    post_window_elapsed: bool | None = None
+    malformed_records: int = Field(default=0, ge=0)
+    sequence_gaps: list[tuple[int, int]] = Field(default_factory=list)
+    incomplete_reasons: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Unified event envelope
 # ---------------------------------------------------------------------------
 
 _SOURCE_TYPE = Literal[
-    "ros_monitor", "system_monitor", "anomaly_engine", "rosbag_recorder"
+    "ros_monitor",
+    "system_monitor",
+    "anomaly_engine",
+    "rosbag_recorder",
+    "native_capture",
 ]
 _SEVERITY_TYPE = Literal["debug", "info", "warning", "error", "critical"]
 
@@ -83,22 +136,14 @@ class BlackBoxEvent(BaseModel):
     fill in boilerplate fields every time.
     """
 
-    timestamp: datetime = Field(
-        ..., description="UTC timestamp in ISO 8601 format."
-    )
-    source: _SOURCE_TYPE = Field(
-        ..., description="Subsystem that produced this event."
-    )
+    timestamp: datetime = Field(..., description="UTC timestamp in ISO 8601 format.")
+    source: _SOURCE_TYPE = Field(..., description="Subsystem that produced this event.")
     event_type: str = Field(
         ...,
         description="Specific event kind, e.g. 'ros.frequency', 'system.cpu'.",
     )
-    severity: _SEVERITY_TYPE = Field(
-        default="info", description="Log-style severity level."
-    )
-    data: dict[str, Any] = Field(
-        default_factory=dict, description="Metric-specific payload."
-    )
+    severity: _SEVERITY_TYPE = Field(default="info", description="Log-style severity level.")
+    data: dict[str, Any] = Field(default_factory=dict, description="Metric-specific payload.")
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Contextual metadata: hostname, session_id, node name, etc.",
@@ -202,6 +247,24 @@ class BlackBoxEvent(BaseModel):
         return cls(
             timestamp=Clock.now(),
             source="rosbag_recorder",
+            event_type=event_type,
+            severity=severity,
+            data=data,
+            metadata=dict(meta),
+        )
+
+    @classmethod
+    def native_event(
+        cls,
+        event_type: str,
+        data: dict[str, Any],
+        severity: _SEVERITY_TYPE = "info",
+        **meta: Any,
+    ) -> BlackBoxEvent:
+        """Create an event adapted from the native capture stream."""
+        return cls(
+            timestamp=Clock.now(),
+            source="native_capture",
             event_type=event_type,
             severity=severity,
             data=data,

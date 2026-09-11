@@ -27,7 +27,7 @@ class Session:
             ``None`` in onboard mode (because the local hostname *is*
             the observed host); set to the operator-supplied robot
             label in observer mode so bundles can name both sides.
-        role: ``"onboard"`` or ``"observer"`` — mirrors
+        role: ``"onboard"`` or ``"observer"``: mirrors
             ``RuntimeConfig.role`` so downstream code can tell them
             apart without reaching back to the config.
         start_time: UTC datetime when the session was created.

@@ -1,0 +1,353 @@
+{
+  "backends": {
+    "native": {
+      "all_valid": true,
+      "expected_launch_count": 5,
+      "launch_count": 5,
+      "metrics": {
+        "publisher_calls": {
+          "median": 149999.0,
+          "null_count": 0,
+          "p95": 149999.0,
+          "run_count": 5,
+          "run_statistic": "identical instrumented publisher invocation for both backends",
+          "supported": true,
+          "unit": "messages",
+          "unsupported_reason": null
+        },
+        "recorder_cpu_percent_mean": {
+          "median": 9.929356885567023,
+          "null_count": 0,
+          "p95": 10.05600386481191,
+          "run_count": 5,
+          "run_statistic": "per-run mean for the matched recorder-process accounting boundary",
+          "supported": true,
+          "unit": "percent_of_one_logical_cpu",
+          "unsupported_reason": null
+        },
+        "recorder_peak_rss_mb": {
+          "median": 47.75,
+          "null_count": 0,
+          "p95": 47.82890625,
+          "run_count": 5,
+          "run_statistic": "per-run maximum for the matched recorder-process accounting boundary",
+          "supported": true,
+          "unit": "MiB",
+          "unsupported_reason": null
+        },
+        "serialized_retained_bytes": {
+          "median": 40799728.0,
+          "null_count": 0,
+          "p95": 40799728.0,
+          "run_count": 5,
+          "run_statistic": "serialized payload bytes retained on the matched workload topics only",
+          "supported": true,
+          "unit": "bytes",
+          "unsupported_reason": null
+        },
+        "serialized_retained_messages": {
+          "median": 149999.0,
+          "null_count": 0,
+          "p95": 149999.0,
+          "run_count": 5,
+          "run_statistic": "full serialized records retained on the matched workload topics only",
+          "supported": true,
+          "unit": "messages",
+          "unsupported_reason": null
+        }
+      }
+    },
+    "rosbag2": {
+      "all_valid": true,
+      "expected_launch_count": 5,
+      "launch_count": 5,
+      "metrics": {
+        "publisher_calls": {
+          "median": 149999.0,
+          "null_count": 0,
+          "p95": 149999.0,
+          "run_count": 5,
+          "run_statistic": "identical instrumented publisher invocation for both backends",
+          "supported": true,
+          "unit": "messages",
+          "unsupported_reason": null
+        },
+        "recorder_cpu_percent_mean": {
+          "median": 8.063867819898134,
+          "null_count": 0,
+          "p95": 9.323496704663196,
+          "run_count": 5,
+          "run_statistic": "per-run mean for the matched recorder-process accounting boundary",
+          "supported": true,
+          "unit": "percent_of_one_logical_cpu",
+          "unsupported_reason": null
+        },
+        "recorder_peak_rss_mb": {
+          "median": 60.69140625,
+          "null_count": 0,
+          "p95": 60.7296875,
+          "run_count": 5,
+          "run_statistic": "per-run maximum for the matched recorder-process accounting boundary",
+          "supported": true,
+          "unit": "MiB",
+          "unsupported_reason": null
+        },
+        "serialized_retained_bytes": {
+          "median": 40799728.0,
+          "null_count": 0,
+          "p95": 40799728.0,
+          "run_count": 5,
+          "run_statistic": "serialized payload bytes retained on the matched workload topics only",
+          "supported": true,
+          "unit": "bytes",
+          "unsupported_reason": null
+        },
+        "serialized_retained_messages": {
+          "median": 149999.0,
+          "null_count": 0,
+          "p95": 149999.0,
+          "run_count": 5,
+          "run_statistic": "full serialized records retained on the matched workload topics only",
+          "supported": true,
+          "unit": "messages",
+          "unsupported_reason": null
+        }
+      }
+    }
+  },
+  "comparison_scope": {
+    "aggregation": "linear-interpolated median and p95 across per-run statistics",
+    "durability_equivalence_claimed": false,
+    "excluded_metrics": {
+      "durability": "native fsync semantics and rosbag2 close/finalization are not equivalent; this matrix makes no durability-equivalence claim",
+      "ingest_latency": "rosbag2 requires sampled realtime-to-monotonic correction while native timestamps use the local monotonic clock directly",
+      "queue_and_drop_accounting": "the buffering models differ and stock rosbag2 has no equivalent reasoned-drop ledger",
+      "startup_and_shutdown_latency": "backend liveness markers and close semantics do not establish equivalent durability boundaries",
+      "storage_bytes": "native storage includes control chronology and has a different durability policy"
+    },
+    "included_metrics": [
+      "recorder_cpu_percent_mean",
+      "recorder_peak_rss_mb",
+      "publisher_calls",
+      "serialized_retained_messages",
+      "serialized_retained_bytes"
+    ],
+    "null_policy": "if any run reports null or non-numeric for a metric, that backend aggregate remains null and unsupported"
+  },
+  "generated_at": "2026-08-11T19:03:06.583686Z",
+  "matrix_id": "native-rosbag2-5x",
+  "provenance": {
+    "build_type": "RelWithDebInfo",
+    "capture_executable": "install/matrix_5x_ec3a6e7/blackbox_capture_cpp/lib/blackbox_capture_cpp/blackbox_capture",
+    "capture_executable_sha256": "65ef75667d9b0a97800bb9e79b2f3268d2d0fdc8df3a1a19c2bb921fc9c94f18",
+    "cmake_cache": "build/matrix_5x_ec3a6e7/blackbox_capture_cpp/CMakeCache.txt",
+    "cmake_cache_sha256": "47e62d474dd6edb4f32197ce8d9ff15a69922c6f70be5230f8189f37bdf06c11",
+    "compiler": "/usr/bin/c++",
+    "compiler_version": "c++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0",
+    "git_clean_at_start": true,
+    "git_sha": "ec3a6e7991d7674948fadc0d3200f74acd87feb0",
+    "install_prefix": "install/matrix_5x_ec3a6e7",
+    "install_sourced_via_ament_prefix_path": true,
+    "package_prefixes": {
+      "blackbox_capture_bench": "install/matrix_5x_ec3a6e7/blackbox_capture_bench",
+      "blackbox_capture_cpp": "install/matrix_5x_ec3a6e7/blackbox_capture_cpp"
+    },
+    "publisher_executable": "install/matrix_5x_ec3a6e7/blackbox_capture_bench/lib/blackbox_capture_bench/publisher",
+    "publisher_executable_sha256": "6c6de7d9bcfba91086662af6fa3c3b0c908600b6614aa354a0c808f07666409a",
+    "rmw_implementation": "rmw_fastrtps_cpp",
+    "ros_distro": "humble",
+    "ros_domain_id": 87,
+    "source_provenance": {
+      "blackbox_capture_bench": {
+        "installed_executable_not_older_than_source": true,
+        "installed_executable_sha256": "6c6de7d9bcfba91086662af6fa3c3b0c908600b6614aa354a0c808f07666409a",
+        "source_tree": "src/blackbox_capture_bench",
+        "source_tree_sha256": "2112966cdf2b0b0a8f968555b018070a94964318eb7d086d91ea9b697c432fe0"
+      },
+      "blackbox_capture_cpp": {
+        "installed_executable_not_older_than_source": true,
+        "installed_executable_sha256": "65ef75667d9b0a97800bb9e79b2f3268d2d0fdc8df3a1a19c2bb921fc9c94f18",
+        "source_tree": "src/blackbox_capture_cpp",
+        "source_tree_sha256": "b371de1b998e7dde4fd4fab5a78819099a660c731603ad353d6957f6f644c622"
+      }
+    }
+  },
+  "publication": {
+    "eligible": true,
+    "exploratory": false,
+    "note": "Publication eligibility requires every child and every preflight gate.",
+    "retained_evidence_path": "docs/benchmarks/native_capture/matrix_5x",
+    "retained_schema_paths": {
+      "child_artifact": "schemas/native_capture_benchmark.schema.json",
+      "matrix_summary": "schemas/native_capture_benchmark_matrix.schema.json"
+    }
+  },
+  "schedule": {
+    "child_timeout_sec": 180.0,
+    "first_backend": "native",
+    "repetitions_per_backend": 5,
+    "runs": [
+      {
+        "artifact": "runs/01_native_pair01.json",
+        "backend": "native",
+        "errors": [],
+        "launch_index": 1,
+        "pair_index": 1,
+        "position_in_pair": 1,
+        "sha256": "45f626662aaeefa17158d162e691aec0c5c3634260ed6e59153fd866772c9eda",
+        "valid": true
+      },
+      {
+        "artifact": "runs/02_rosbag2_pair01.json",
+        "backend": "rosbag2",
+        "errors": [],
+        "launch_index": 2,
+        "pair_index": 1,
+        "position_in_pair": 2,
+        "sha256": "1380cf732e20fefa59f67fa41cf4db36915f9b7162bf3c7d1120288b2226bae5",
+        "valid": true
+      },
+      {
+        "artifact": "runs/03_rosbag2_pair02.json",
+        "backend": "rosbag2",
+        "errors": [],
+        "launch_index": 3,
+        "pair_index": 2,
+        "position_in_pair": 1,
+        "sha256": "99f9d93b0644c7765715de7ea979888ae08e95c968e38a3004ee3d02457804e9",
+        "valid": true
+      },
+      {
+        "artifact": "runs/04_native_pair02.json",
+        "backend": "native",
+        "errors": [],
+        "launch_index": 4,
+        "pair_index": 2,
+        "position_in_pair": 2,
+        "sha256": "52c348facc6688e28ea693d21eb1a603753bc28178a3e3529e28ac895c487ed7",
+        "valid": true
+      },
+      {
+        "artifact": "runs/05_native_pair03.json",
+        "backend": "native",
+        "errors": [],
+        "launch_index": 5,
+        "pair_index": 3,
+        "position_in_pair": 1,
+        "sha256": "ccc07d870d89a567fde3954d5fa502da141dd71fce583ed7546460c26e7e6b4f",
+        "valid": true
+      },
+      {
+        "artifact": "runs/06_rosbag2_pair03.json",
+        "backend": "rosbag2",
+        "errors": [],
+        "launch_index": 6,
+        "pair_index": 3,
+        "position_in_pair": 2,
+        "sha256": "ec7290812694824811069df74f8316e109887471084d5dc093d9ca54eeed76e3",
+        "valid": true
+      },
+      {
+        "artifact": "runs/07_rosbag2_pair04.json",
+        "backend": "rosbag2",
+        "errors": [],
+        "launch_index": 7,
+        "pair_index": 4,
+        "position_in_pair": 1,
+        "sha256": "aaf5031ef6414eebfcaf0c778a87efd92f7aba2ab3ac554288f69b5a52bd66a2",
+        "valid": true
+      },
+      {
+        "artifact": "runs/08_native_pair04.json",
+        "backend": "native",
+        "errors": [],
+        "launch_index": 8,
+        "pair_index": 4,
+        "position_in_pair": 2,
+        "sha256": "0d922cceef320e80e4b54c32be2d984b5d865e792c9d34b6b3c17f5f797b2305",
+        "valid": true
+      },
+      {
+        "artifact": "runs/09_native_pair05.json",
+        "backend": "native",
+        "errors": [],
+        "launch_index": 9,
+        "pair_index": 5,
+        "position_in_pair": 1,
+        "sha256": "1e75cabae053112d92b14de3026e057ea5022da82b2fa9c5f803137379980eec",
+        "valid": true
+      },
+      {
+        "artifact": "runs/10_rosbag2_pair05.json",
+        "backend": "rosbag2",
+        "errors": [],
+        "launch_index": 10,
+        "pair_index": 5,
+        "position_in_pair": 2,
+        "sha256": "1042440e278031ca1789a9643b0a2adffdd274d33784fc8b487990cb4510427d",
+        "valid": true
+      }
+    ],
+    "strategy": "paired order alternates AB then BA",
+    "workload_arguments": [
+      "--scenario",
+      "custom",
+      "--topics",
+      "10",
+      "--rate",
+      "5000.0",
+      "--payload-bytes",
+      "256",
+      "--duration-sec",
+      "30.0",
+      "--discovery-warmup-sec",
+      "2.0",
+      "--qos",
+      "best_effort",
+      "--qos-depth",
+      "10",
+      "--topic-prefix",
+      "/blackbox_bench/topic",
+      "--burst-every-sec",
+      "0.0",
+      "--burst-duration-ms",
+      "0.0",
+      "--burst-multiplier",
+      "1.0",
+      "--churn-every-sec",
+      "0.0",
+      "--churn-down-ms",
+      "0.0",
+      "--sample-period-sec",
+      "1.0",
+      "--startup-timeout-sec",
+      "15.0",
+      "--shutdown-timeout-sec",
+      "10.0"
+    ]
+  },
+  "schema_version": "blackboxrs.capture_benchmark_matrix.v1",
+  "validity": {
+    "all_child_artifacts_valid": true,
+    "errors": [],
+    "valid": true
+  },
+  "workload": {
+    "aggregate_rate_hz": 5000.0,
+    "burst_duration_ms": 0.0,
+    "burst_every_sec": 0.0,
+    "burst_multiplier": 1.0,
+    "churn_down_ms": 0.0,
+    "churn_every_sec": 0.0,
+    "duration_sec": 30.0,
+    "expect_storage_fault": false,
+    "fail_after_bytes": -1,
+    "name": "custom",
+    "payload_bytes": 256,
+    "qos": "best_effort",
+    "qos_depth": 10,
+    "shared_steady_clock_domain": true,
+    "topics": 10,
+    "writer_delay_injection_ms": 0
+  }
+}

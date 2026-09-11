@@ -16,7 +16,7 @@ host:
    experiences when a monitor fires as fast as the host allows.
 
 The benchmark is **deliberately single-host, single-process**, and
-uses ``time.perf_counter`` wall clock — not a statistical CPU / memory
+uses ``time.perf_counter`` wall clock, not a statistical CPU / memory
 profile.  It answers "how many events per second can this code push
 through on a developer workstation?" and not much more.  It is not a
 substitute for real robot-fleet measurements.
@@ -74,7 +74,7 @@ from blackboxrs.logging.writer import RotatingJsonlWriter  # noqa: E402
 
 
 def _sample_event() -> BlackBoxEvent:
-    """A realistic-size event — mirrors what SystemMonitor emits."""
+    """A realistic-size event: mirrors what SystemMonitor emits."""
     return BlackBoxEvent(
         timestamp=Clock.now(),
         source="system_monitor",

@@ -14,6 +14,74 @@ The bundle is the artifact. Everything else is plumbing.
 
 ---
 
+## Bounded native capture plane
+
+BlackBoxRS separates high-rate evidence capture from incident intelligence. A
+bounded C++ ROS 2 recorder owns the ingestion hot path; Python owns incident
+construction, causal ranking, replay, reporting, and prevention.
+
+```mermaid
+flowchart LR
+    ROS[ROS 2 and DDS] --> CPP[blackbox_capture_cpp<br/>bounded serialized capture]
+    CPP --> MCAP[versioned MCAP segments<br/>quality metadata]
+    MCAP --> PY[BlackBoxRS Python<br/>reason, report, prevent]
+```
+
+The `rclcpp` recorder captures configured topics through generic serialized
+subscriptions, records steady and ROS clocks, orders graph and trigger events in
+the same chronology, and writes through a fixed-capacity descriptor ring and
+fixed-block payload arena. The capture-owned allocation estimate must fit the
+configured memory ceiling before startup. Traffic is shed by priority tier as
+queue utilization climbs, so robot control and state topics are the last
+evidence given up, every post-callback recorder drop is counted by topic and
+reason, and upstream delivery limitations explicitly make evidence incomplete.
+
+Continuous history is bounded by bytes and segment count. A native trigger closes
+the post-trigger window and publishes a versioned incident manifest with the
+actual retained interval. Python reads that evidence through
+`NativeCaptureReader`; it does not reimplement MCAP details or move semantic
+incident logic into C++.
+
+When native capture covers the ROS monitor's topic scope, C++ also computes
+bounded per-topic rate summaries from the already-captured callbacks. Python
+receives only low-rate `ros.frequency` facts instead of creating duplicate typed
+subscriptions and deserializing every message a second time. Graph, QoS, TF,
+causal analysis, reporting, and prevention keep their existing contracts.
+
+The existing Python capture backend remains the default:
+
+```yaml
+capture:
+  backend: python
+```
+
+Native capture is opt-in while the promotion gates are evaluated. See
+[native capture architecture](docs/native_capture_architecture.md),
+[format contract](docs/native_capture_format.md), and
+[promotion gate](docs/native_capture_promotion_gate.md). The repository includes
+a configurable ROS 2 load generator and machine-readable benchmark supervisor,
+but this README makes no performance claim without retained benchmark artifacts.
+
+After building and sourcing the ROS workspace, the daemon owns the native process
+when configured with:
+
+```yaml
+capture:
+  backend: cpp
+  topics: [/imu/data, /joint_states, /cmd_vel, /tf, /tf_static]
+  native_output_dir: ~/.blackboxrs/native
+```
+
+The recorder publishes a READY session pointer and machine-readable health and
+final status. The daemon supervises the child after startup, turns storage faults,
+unexpected exit, and incomplete shutdown into BlackBoxRS events, and copies
+selected MCAP evidence into incident attachments. The output root is capped
+across restarts by native storage parameters. Python remains active for semantic
+detectors and incident intelligence. Standalone mode is the supported deployment;
+safe component unload remains an open promotion gate.
+
+---
+
 ## The problem, concretely
 
 A ROS 2 robot fails on a field test. Today that costs you:
@@ -29,6 +97,7 @@ With BlackBoxRS the daemon is already running, so the failure is already capture
 robot-blackbox incident build --since 5m
 # -> ~/.blackboxrs/incidents/inc_2026-05-07T14-22-00_a3f2/
 #    ├── report.md
+#    ├── manifest.json
 #    ├── incident.json
 #    ├── timeline.json
 #    ├── fingerprint.json
@@ -37,6 +106,14 @@ robot-blackbox incident build --since 5m
 ```
 
 You read `report.md`. The likely cause is named with a confidence score, and every claim in it links straight to the evidence file that backs it (`events.jsonl#L11`, `triggers.json#trg_df6aa081`). One command converts the incident into a `PreventionRule`, and `robot-blackbox preflight` fires that rule before the next launch.
+
+Before downstream use, the bundle can verify itself:
+
+```bash
+robot-blackbox incident verify ~/.blackboxrs/incidents/inc_*
+```
+
+New bundles are written through a staging directory and finalized with a root `manifest.json`. The manifest records bundle format version, producer metadata, required/optional file paths, byte sizes, and SHA-256 checksums. This detects incomplete or modified local artifacts. Finalized bundles are closed to late `incident attach` mutations. The manifest is not a signature, authentication system, or tamper-proof security mechanism.
 
 ---
 
@@ -113,6 +190,60 @@ graph LR
 
 ---
 
+## Two-minute replay-to-prevention demo
+
+Run the deterministic offline prevention loop:
+
+```bash
+./examples/demo_replay_prevention_loop.py
+```
+
+Expected high-level output:
+
+```text
+[1/5] Replaying recorded robot failure
+  incident_id: inc_...
+  source_trigger_id: trg_...
+  detector_class: ...DeadTopicDetector
+  source_event_ref: events.jsonl#L...
+  confidence: 0.98
+  silence_precursor: silence interval on /die: 2.6s gap (timeout 2.0s)
+
+[2/5] Adopting and persisting prevention rule
+  rule_id: rule_...
+  rule_type: topic_present
+  source_incident_id: inc_...
+  source_fingerprint: fpr_...
+  source_trigger_id: trg_...
+
+[3/5] Proving the matching bad launch condition is blocked
+[  BLOCK] topic_present ...
+
+[4/5] Proving a nearby valid launch condition passes
+[   PASS] topic_present ...
+
+[5/5] Evidence summary
+PASS: recorded incident produced structured evidence
+PASS: prevention rule retained source provenance
+PASS: matching launch condition was blocked
+PASS: nearby valid configuration passed
+BOUNDARY: offline deterministic replay; no live robot validation
+```
+
+This deterministic offline demo replays a supported recorded incident,
+derives a traceable prevention rule, and verifies that matching
+launch-time conditions are blocked through the public BlackBoxRS CLI. It
+does not constitute live robot or onboard prevention validation.
+
+Dependencies: Python 3.10+, the normal BlackBoxRS Python dependencies,
+and no ROS 2 daemon or physical robot. The demo creates a temporary
+sqlite rosbag2 fixture, incident bundle, and rule directory, then removes
+them when it exits. The unrelated-trigger adoption guard is kept as a
+regression test in `tests/unit/test_prevention_derivation.py` rather than
+shown in the two-minute walkthrough.
+
+---
+
 ## A sample bundle
 
 `examples/incidents/inc_demo_tf_break/` is a synthetic-but-realistic TF-break incident, committed to the repo and generated by real code. The top of its `report.md`:
@@ -157,7 +288,7 @@ params:
 severity_on_fail: block
 ```
 
-Read the whole thing without running anything:
+Read the whole committed report without running anything:
 
 ```bash
 robot-blackbox incident show examples/incidents/inc_demo_tf_break/
@@ -167,23 +298,23 @@ robot-blackbox incident show examples/incidents/inc_demo_tf_break/
 
 ## What works today
 
-- **Capture.** ROS 2 topic introspection and host telemetry feed seven anomaly detectors (`threshold`, `frequency`, `dead_topic`, `qos_mismatch`, `tf_topology`, `clock_skew`, `process_signals`), all with hysteresis (`min_consecutive_samples`, default 2) so a single noisy sample can't trip a false alarm. JSONL logging with size and age rotation; optional anomaly-triggered `rosbag2` recording. Measured FPR/TPR per detector is published in `docs/DETECTOR_CHARACTERISTICS.md`.
-- **Incident bundles.** `IncidentBuilder` slices the JSONL log into a typed bundle: events, triggers, signatures, timeline, fingerprint, report.
+- **Capture.** The compatibility Python backend keeps ROS 2 topic introspection, JSONL rotation, host telemetry, and optional anomaly-triggered `rosbag2` recording. The opt-in `blackbox_capture_cpp` backend adds bounded generic serialized ingestion, graph chronology, dual clocks, explicit loss accounting, rolling MCAP retention, and pre/post-trigger manifests. Both feed the same Python incident intelligence. The seven semantic detectors remain `threshold`, `frequency`, `dead_topic`, `qos_mismatch`, `tf_topology`, `clock_skew`, and `process_signals`. Measured detector FPR/TPR is published in `docs/DETECTOR_CHARACTERISTICS.md`.
+- **Incident bundles.** `IncidentBuilder` slices the JSONL log into a typed bundle: events, triggers, signatures, timeline, fingerprint, report. New bundles are staged, validated, checksummed, and atomically published on first creation with a root `manifest.json`.
 - **Grounded reports.** Every claim in `report.md` resolves to a file in the bundle (`events.jsonl#Ln`, `triggers.json#<id>`). No orphan assertions.
 - **Deterministic signatures.** sha256 over ROS distro, RMW, an env subset, attached files, and OS / Python / driver state. Same inputs, same hash.
 - **Failure fingerprinting (v1).** A stable id from detector classes, subsystems, signature fields, and topic-set topology. Seed two bundles identically and they collide; perturb any input and the id moves.
 - **Likely-cause ranking.** Detector-class weight plus a severity bonus. Confidence below 0.5 carries an explicit caveat; at or above 0.7 the cause is promoted to the summary. Weights are hand-calibrated (`blackboxrs/incident/cause.py:8-18`).
-- **Prevention.** `PreventionRule` + `PreflightCheck` YAML I/O and a `PreflightRunner` with 0/1/2 exit codes (pass / block / warn). All seven check kinds are real: `topic_present`, `qos_match`, `node_running` are live rclpy graph queries; `env_var`, `param_value`, `resource_threshold`, `custom_python` run against `os.environ`, the ROS 2 parameter API, `psutil`, and a user-supplied import path. Unknown kinds raise at load time, never silently skip.
+- **Prevention.** `PreventionRule` + `PreflightCheck` YAML I/O and a `PreflightRunner` with 0/1/2 exit codes (pass / block / warn). Derived rules record the source incident, fingerprint, trigger id, detector class, and evidence ref that justified the rule. Rule derivation and adoption require a finalized, integrity-valid bundle. Active blocking rules fail closed when a check errors or cannot run. All seven check kinds are real: `topic_present`, `qos_match`, `node_running` are live rclpy graph queries; `env_var`, `param_value`, `resource_threshold`, `custom_python` run against `os.environ`, the ROS 2 parameter API, `psutil`, and a user-supplied import path. Unknown kinds raise at load time, never silently skip.
 - **Observer mode, end to end.** `tests/integration/test_observer_live.py` boots a real rclpy publisher and asserts an observer-role daemon fires `anomaly.dead_topic` over DDS within 5s of the publisher going quiet, inside the Docker Humble CI job.
-- **Offline bag replay.** `robot-blackbox replay-bag` replays a recorded `.mcap` or `.db3` through the real detectors, entirely offline, with a virtual clock pinned to bag time. It reads `.db3` split files (the chunks `ros2 bag record` produces on a long session) by merging every file `metadata.yaml` lists, not just the first one, a bug that had been silently dropping ~9% of messages.
-- **CLI.** `robot-blackbox incident build / show / list / attach`, `preflight`, `prevention adopt --from-incident / list`, `replay-bag`.
-- **547 tests pass**, plus 2 gated skips on hosted runners (one rclpy-gated, one gated on a local real-hardware bag not present in CI). CI runs lint + unit + integration on Python 3.10 / 3.11 / 3.12, a benchmark regression gate, a detector-FPR smoke run, and a live ROS 2 Humble Docker job on every commit to `main`.
+- **Offline bag replay.** `robot-blackbox replay-bag` replays recorded `.mcap` or `.db3` topic-arrival timing through the real `DeadTopicDetector`, entirely offline, with a virtual clock pinned to bag time. It reads `.db3` split files (the chunks `ros2 bag record` produces on a long session) by merging every file `metadata.yaml` lists, not just the first one, a bug that had been silently dropping ~9% of messages. A hardware-free integration test covers the public replay -> adopt -> preflight path for a structured dead-topic incident: the derived rule preserves incident, fingerprint, trigger, detector, and event provenance, blocks a matching missing-topic preflight, and passes a nearby healthy graph.
+- **CLI.** `robot-blackbox incident build / show / list / attach / verify / replay`, `preflight`, `prevention adopt --from-incident / list`, `replay-bag`.
+- **CI covers lint, unit, and integration tests** on Python 3.10 / 3.11 / 3.12, plus native GCC and Clang builds, sanitizers, fuzz smoke tests, benchmark gates, and live ROS 2 Humble verification. The supported Docker image installs the C++ recorder and must reproduce all 909 committed bag messages with exact per-topic CDR payload order and clean loss accounting under both supported RMW implementations.
 
 ## What's next
 
 - **Live onboard capture.** The committed real-hardware evidence is offline replay of a real GO2 bag. A bundle captured live, on the robot, during an actual field failure is the single largest remaining gap and the next thing to land.
 - **Cross-incident clustering.** `cluster_id` is already reserved on `FailureFingerprint`; targeted for v0.5.
-- **`incident pack` / `unpack`** for portable tarballs.
+- **`incident pack` / `unpack`** for portable tarballs built on top of manifest verification.
 
 Deliberately out of scope for now: a web dashboard and multi-host capture. Single-host first, and the bundle is the artifact. The bundle format is forward-compatible when multi-host arrives.
 

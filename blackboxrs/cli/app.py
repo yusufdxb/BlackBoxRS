@@ -33,6 +33,7 @@ from blackboxrs.cli.incident_cmd import (
     preflight_cmd,
     prevention_group,
 )
+from blackboxrs.cli.benchmark_cmd import benchmark_group
 from blackboxrs.logging.reader import LogReader
 
 # Glob pattern used by the writer.  Keeping it in one place so the
@@ -56,6 +57,7 @@ def cli() -> None:
 cli.add_command(incident_group)
 cli.add_command(preflight_cmd)
 cli.add_command(prevention_group)
+cli.add_command(benchmark_group)
 
 
 # ---------------------------------------------------------------------------
@@ -479,6 +481,7 @@ def replay_bag_cmd(
 
     cfg = BlackBoxConfig.default()
     cfg.log_dir = str(log_dir)
+    cfg.anomaly_engine.dead_topic.timeout_sec = timeout_sec
     bundle = build_incident(
         window_start=result.window_start,
         window_end=result.window_end,
@@ -532,8 +535,8 @@ log_max_files: 20
 event_bus_queue_maxsize: 1024
 
 # Where this daemon runs relative to the robot.
-#   role: onboard   (default) — colocated with the ROS 2 node graph.
-#   role: observer  — running on a workstation, capturing the robot's
+#   role: onboard   (default): colocated with the ROS 2 node graph.
+#   role: observer, running on a workstation, capturing the robot's
 #                    DDS traffic remotely. Set observed_host to a
 #                    free-form label for the robot you're watching;
 #                    see docs/QUICKSTART_REMOTE.md.
@@ -577,6 +580,7 @@ anomaly_engine:
     min_consecutive_samples: 2
   frequency:
     tolerance_percent: 20.0
+    recovery_tolerance_percent: 10.0
     min_consecutive_samples: 2
   dead_topic:
     timeout_sec: 5.0
@@ -720,7 +724,7 @@ def _iter_tail_events(
     yields every new :class:`BlackBoxEvent` that is appended.  When the
     writer rotates (i.e. a lexicographically newer file appears in the
     directory), the generator transparently switches to the new file
-    starting from its beginning — events written to the new file before
+    starting from its beginning: events written to the new file before
     we caught up would otherwise be lost.
 
     Args:
@@ -763,7 +767,7 @@ def _iter_tail_events(
                     pass
                 current = newest
                 fh = open(current, "r", encoding="utf-8")
-                # Read from the start of the new file — we don't want
+                # Read from the start of the new file: we don't want
                 # to miss events that were written between rotation and
                 # the moment we noticed.
                 continue

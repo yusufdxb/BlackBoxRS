@@ -37,3 +37,10 @@ Thumbs.db
 
 # BlackBoxRS logs
 .blackboxrs/logs/
+
+# Generated local benchmark output
+artifacts/
+
+# colcon workspace output (native capture packages)
+log/
+install/

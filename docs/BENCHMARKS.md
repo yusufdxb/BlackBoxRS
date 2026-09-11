@@ -148,3 +148,130 @@ Rules of thumb:
 - `event_bus.publish_rate_eps` dropping below ~500k is a regression.
 - `pipeline.delivered` going *down* at identical `events` +
   `queue_depth` means the consumer got slower (or the writer did).
+
+# ROS 2 reliability benchmark
+
+BlackBoxRS also ships a local reliability benchmark through:
+
+```bash
+robot-blackbox benchmark list --include-unsupported
+robot-blackbox benchmark run --include-unsupported --output-dir artifacts/blackboxrs_benchmark
+robot-blackbox benchmark report artifacts/blackboxrs_benchmark/raw_results.json
+```
+
+This benchmark is separate from the performance envelope above. It measures
+whether supported local ROS 2 failure classes exercise the real BlackBoxRS
+pipeline:
+
+- production-shaped `BlackBoxEvent` inputs
+- `EventBus` plus `AnomalyEngine`
+- built-in detectors
+- incident bundle creation
+- finalized manifest and checksum validation
+- replay agreement fields where the local scenario supports replay semantics
+- prevention rule derivation for eligible detectors
+- preflight recurrence blocking and healthy-control pass checks
+
+The benchmark deliberately does not add new detectors. Unsupported failure
+classes remain visible in the JSON and Markdown report instead of being
+silently skipped.
+
+## Reliability scenario taxonomy
+
+| Scenario | Status | Detector or path | Healthy control |
+|----------|--------|------------------|-----------------|
+| `healthy_topic_publisher` | supported | none expected | yes |
+| `dead_topic_dropout` | supported | `DeadTopicDetector` | `healthy_topic_publisher` |
+| `healthy_qos_compatible_graph` | supported | none expected | yes |
+| `qos_mismatch_reliability` | supported | `QoSMismatchDetector` | `healthy_qos_compatible_graph` |
+| `healthy_tf_stream` | supported | none expected | yes |
+| `tf_stale_transform` | supported | `TfTopologyDetector` | `healthy_tf_stream` |
+| `corrupted_bundle_rejection` | supported artifact check | bundle integrity validator | not applicable |
+| `unsupported_prevention_condition` | supported preflight check | fail-closed preflight runner | not applicable |
+| `duplicate_or_forbidden_publisher` | unsupported | no current detector | not applicable |
+
+Unsupported examples are not faked. Duplicate publishers, forbidden
+publishers, missing required publishers, TF discontinuity, clock freeze,
+clock rewind, and process restart do not currently have benchmark support
+unless a current detector or validation path can observe them.
+
+## Result fields
+
+Raw results are written to `raw_results.json`; aggregate data is written to
+`summary.json`; a concise table is written to `report.md`. Each repetition
+records:
+
+- scenario id and repetition
+- pass, fail, error, skipped, or unsupported status
+- whether a fault was injected
+- expected and observed detector
+- detection latency and clock mode
+- anomaly count and duplicate alert count
+- incident bundle path and integrity state
+- trigger-to-evidence traceability result
+- replay support and agreement
+- prevention derivation result
+- recurrence-block and healthy-control preflight result
+- runtime duration
+- environment metadata, including version, host, platform, git commit, and
+  dirty-worktree state when available
+- unavailable CPU and peak memory overhead fields as `null`
+
+## Metrics and clocks
+
+`detection_latency_sec` is defined as:
+
+```text
+anomaly emission time - fault activation time
+```
+
+The local synthetic scenarios use `virtual_ros_time`, the same process-global
+clock mechanism used by offline replay. Runtime duration uses Python monotonic
+wall time around each repetition and is reported separately from detection
+latency. Wall-clock runtime is not converted into ROS time.
+
+Latency is unavailable for healthy controls and artifact-only scenarios. CPU
+overhead and peak memory overhead are not measured by this reliability
+benchmark; those fields remain `null` until a matched baseline/on profiler is
+added.
+
+## Repetitions and summaries
+
+Default supported scenarios run five repetitions. Reports include minimum,
+median, and maximum latency for scenarios where latency is measurable. With
+five repetitions, p95 is intentionally not reported because it would imply
+more statistical precision than the sample supports.
+
+Benchmark success requires the relevant stage to pass:
+
+- healthy controls must emit no fault anomaly
+- fault scenarios must emit the expected detector and anomaly kind
+- wrong-detector-only matches fail
+- finalized incident bundles must validate successfully
+- corrupted bundles pass only when corruption is rejected
+- replay agreement failures fail replay-supported scenarios
+- prevention-supported scenarios must derive an enforceable rule
+- recurrence blocking must not break the paired healthy control
+- unsupported scenarios remain reported as unsupported and are not counted as
+  passes
+
+## Evidence boundary
+
+The reliability benchmark supports claims about reproducible local synthetic
+and artifact scenarios. It does not support claims about:
+
+- real-world precision or recall
+- low false-positive rates outside the executed healthy controls
+- production safety
+- universal ROS 2 graph coverage
+- live robot or Go2 validation
+- Jetson or NVIDIA hardware performance
+- superiority over rosbag plus scripts without a real baseline
+
+For external claims, cite the generated `report.md`, `summary.json`, exact
+command, environment metadata, scenario count, repetition count, and any
+unsupported scenarios.
+
+The CI benchmark regression gate currently runs the performance-envelope
+script (`scripts/benchmark.py`). The reliability benchmark is a local
+evidence-producing command and is not yet a CI gate.
