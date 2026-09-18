@@ -253,8 +253,25 @@ def incident_attach(bundle: str, path: str, do_copy: bool) -> None:
     type=click.Path(file_okay=False),
     help=f"Prevention rules directory (default: {_DEFAULT_RULES_DIR}).",
 )
-def preflight_cmd(rules_dir: str | None) -> None:
+@click.option(
+    "--profile",
+    "profile_name",
+    default=None,
+    help="Run the flight-recorder hardware preflight for this profile (e.g. go2) "
+         "instead of the prevention rules. Same as `robot-blackbox flight preflight`.",
+)
+@click.option("--listen", type=float, default=None,
+              help="With --profile: seconds to listen for traffic.")
+@click.option("--evidence-dir", default=None, help="With --profile: evidence directory.")
+@click.option("--json", "as_json", is_flag=True, help="With --profile: print JSON.")
+def preflight_cmd(rules_dir: str | None, profile_name: str | None = None,
+                  listen: float | None = None, evidence_dir: str | None = None,
+                  as_json: bool = False) -> None:
     """Run preflight checks; exit 0 (pass) / 1 (block) / 2 (warn)."""
+    if profile_name is not None:
+        from blackboxrs.cli.flight_cmd import run_flight_preflight
+        run_flight_preflight(profile_name, evidence_dir, listen, None, (), as_json)
+        return
     rdir = Path(rules_dir).expanduser() if rules_dir else _DEFAULT_RULES_DIR
     rules = load_rules(rdir)
     if not rules:
