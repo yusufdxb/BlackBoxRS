@@ -1,0 +1,1695 @@
+{
+  "note": "Same synthetic GO2 load, same workstation, before (02a23bc, rclpy SingleThreadedExecutor) and after (recorder wait loop). profile go2.",
+  "runs": {
+    "before_x1": {
+      "scale": 1.0,
+      "duration_s": 60.0,
+      "offered_msgs_per_s": 1152.7,
+      "published": 69164,
+      "received": 69164,
+      "missing_total": 0,
+      "missing_fraction": 0.0,
+      "recorder_cpu_percent_mean": 45.0,
+      "recorder_cpu_percent_max": 56.0,
+      "recorder_rss_mb_start": 69.4,
+      "recorder_rss_mb_max": 117.8,
+      "recorder_stop_and_finalize_s": 0.09,
+      "per_topic": {
+        "/lowstate": {
+          "published": 28960,
+          "received": 28960,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 482.7
+        },
+        "/sportmodestate": {
+          "published": 17457,
+          "received": 17457,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 290.9
+        },
+        "/utlidar/robot_odom": {
+          "published": 9009,
+          "received": 9009,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 150.1
+        },
+        "/lf/lowstate": {
+          "published": 2988,
+          "received": 2988,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 49.8
+        },
+        "/lf/sportmodestate": {
+          "published": 2987,
+          "received": 2987,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 49.8
+        },
+        "/nav/cmd_vel": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/cmd_vel": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/helix/arbiter/status": {
+          "published": 1194,
+          "received": 1194,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/helix/hold": {
+          "published": 597,
+          "received": 597,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 9.9
+        },
+        "/helix/sink/trace": {
+          "published": 1194,
+          "received": 1194,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/api/sport/request": {
+          "published": 1194,
+          "received": 1194,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/api/sport/response": {
+          "published": 1194,
+          "received": 1194,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        }
+      },
+      "bundle": {
+        "status": "complete",
+        "records": 28365,
+        "seconds_before_trigger": 10.0,
+        "seconds_after_trigger": 14.785,
+        "ring_evicted_in_window": 0,
+        "writer_errors": 0,
+        "recorder_receipt_delay": {
+          "max_s": 0.021739,
+          "n": 2723,
+          "p05_s": 0.000149,
+          "p50_s": 0.000727,
+          "p95_abs_dev_s": 0.001874,
+          "p95_s": 0.002601,
+          "spread_min_max_s": 0.021662,
+          "spread_p05_p95_s": 0.002452
+        },
+        "bundle_mb": 9.9
+      },
+      "samples": [
+        {
+          "t": 1.0,
+          "cpu": 42.0,
+          "rss_mb": 69.4
+        },
+        {
+          "t": 2.0,
+          "cpu": 43.0,
+          "rss_mb": 71.4
+        },
+        {
+          "t": 3.0,
+          "cpu": 45.0,
+          "rss_mb": 73.4
+        },
+        {
+          "t": 4.0,
+          "cpu": 45.0,
+          "rss_mb": 75.4
+        },
+        {
+          "t": 5.0,
+          "cpu": 44.0,
+          "rss_mb": 77.4
+        },
+        {
+          "t": 6.0,
+          "cpu": 45.0,
+          "rss_mb": 79.3
+        },
+        {
+          "t": 7.0,
+          "cpu": 44.0,
+          "rss_mb": 81.3
+        },
+        {
+          "t": 8.0,
+          "cpu": 44.0,
+          "rss_mb": 83.3
+        },
+        {
+          "t": 9.0,
+          "cpu": 45.0,
+          "rss_mb": 85.3
+        },
+        {
+          "t": 10.0,
+          "cpu": 46.0,
+          "rss_mb": 87.3
+        },
+        {
+          "t": 11.0,
+          "cpu": 44.0,
+          "rss_mb": 89.2
+        },
+        {
+          "t": 12.0,
+          "cpu": 44.0,
+          "rss_mb": 89.3
+        },
+        {
+          "t": 13.0,
+          "cpu": 42.0,
+          "rss_mb": 89.3
+        },
+        {
+          "t": 14.0,
+          "cpu": 43.0,
+          "rss_mb": 89.3
+        },
+        {
+          "t": 15.0,
+          "cpu": 42.9,
+          "rss_mb": 89.3
+        },
+        {
+          "t": 16.0,
+          "cpu": 45.1,
+          "rss_mb": 89.3
+        },
+        {
+          "t": 17.0,
+          "cpu": 44.0,
+          "rss_mb": 89.3
+        },
+        {
+          "t": 18.0,
+          "cpu": 44.0,
+          "rss_mb": 89.3
+        },
+        {
+          "t": 19.0,
+          "cpu": 45.0,
+          "rss_mb": 89.3
+        },
+        {
+          "t": 20.0,
+          "cpu": 45.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 21.0,
+          "cpu": 46.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 22.0,
+          "cpu": 46.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 23.0,
+          "cpu": 44.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 24.0,
+          "cpu": 47.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 25.0,
+          "cpu": 47.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 26.0,
+          "cpu": 46.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 27.0,
+          "cpu": 43.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 28.0,
+          "cpu": 48.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 29.0,
+          "cpu": 44.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 30.0,
+          "cpu": 43.0,
+          "rss_mb": 89.4
+        },
+        {
+          "t": 31.0,
+          "cpu": 40.0,
+          "rss_mb": 89.7
+        },
+        {
+          "t": 32.0,
+          "cpu": 47.0,
+          "rss_mb": 90.1
+        },
+        {
+          "t": 33.0,
+          "cpu": 43.0,
+          "rss_mb": 91.9
+        },
+        {
+          "t": 34.0,
+          "cpu": 43.0,
+          "rss_mb": 93.7
+        },
+        {
+          "t": 35.0,
+          "cpu": 43.9,
+          "rss_mb": 95.6
+        },
+        {
+          "t": 36.0,
+          "cpu": 42.0,
+          "rss_mb": 97.4
+        },
+        {
+          "t": 37.0,
+          "cpu": 44.0,
+          "rss_mb": 99.3
+        },
+        {
+          "t": 38.0,
+          "cpu": 47.1,
+          "rss_mb": 101.1
+        },
+        {
+          "t": 39.0,
+          "cpu": 46.0,
+          "rss_mb": 103.0
+        },
+        {
+          "t": 40.0,
+          "cpu": 46.0,
+          "rss_mb": 104.8
+        },
+        {
+          "t": 41.0,
+          "cpu": 44.0,
+          "rss_mb": 106.6
+        },
+        {
+          "t": 42.0,
+          "cpu": 48.0,
+          "rss_mb": 108.5
+        },
+        {
+          "t": 43.0,
+          "cpu": 49.9,
+          "rss_mb": 110.4
+        },
+        {
+          "t": 44.0,
+          "cpu": 45.0,
+          "rss_mb": 112.2
+        },
+        {
+          "t": 45.0,
+          "cpu": 49.0,
+          "rss_mb": 114.0
+        },
+        {
+          "t": 46.0,
+          "cpu": 56.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 47.0,
+          "cpu": 46.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 48.0,
+          "cpu": 44.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 49.0,
+          "cpu": 43.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 50.0,
+          "cpu": 46.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 51.0,
+          "cpu": 46.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 52.0,
+          "cpu": 42.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 53.0,
+          "cpu": 47.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 54.0,
+          "cpu": 46.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 55.0,
+          "cpu": 43.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 56.0,
+          "cpu": 44.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 57.0,
+          "cpu": 44.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 58.0,
+          "cpu": 44.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 59.0,
+          "cpu": 45.0,
+          "rss_mb": 117.8
+        },
+        {
+          "t": 60.0,
+          "cpu": 43.0,
+          "rss_mb": 117.8
+        }
+      ]
+    },
+    "before_x3": {
+      "scale": 3.0,
+      "duration_s": 60.0,
+      "offered_msgs_per_s": 3509.7,
+      "published": 210583,
+      "received": 209709,
+      "missing_total": 874,
+      "missing_fraction": 0.00415,
+      "recorder_cpu_percent_mean": 91.3,
+      "recorder_cpu_percent_max": 100.0,
+      "recorder_rss_mb_start": 73.3,
+      "recorder_rss_mb_max": 214.3,
+      "recorder_stop_and_finalize_s": 0.11,
+      "per_topic": {
+        "/lowstate": {
+          "published": 89469,
+          "received": 88835,
+          "missing": 634,
+          "message_lost_event": 0,
+          "published_hz": 1491.1
+        },
+        "/sportmodestate": {
+          "published": 52804,
+          "received": 52564,
+          "missing": 240,
+          "message_lost_event": 0,
+          "published_hz": 880.1
+        },
+        "/utlidar/robot_odom": {
+          "published": 27055,
+          "received": 27055,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 450.9
+        },
+        "/lf/lowstate": {
+          "published": 8968,
+          "received": 8968,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 149.5
+        },
+        "/lf/sportmodestate": {
+          "published": 8968,
+          "received": 8968,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 149.5
+        },
+        "/nav/cmd_vel": {
+          "published": 3588,
+          "received": 3588,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/cmd_vel": {
+          "published": 3588,
+          "received": 3588,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/helix/arbiter/status": {
+          "published": 3588,
+          "received": 3588,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/helix/hold": {
+          "published": 1794,
+          "received": 1794,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 29.9
+        },
+        "/helix/sink/trace": {
+          "published": 3587,
+          "received": 3587,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/api/sport/request": {
+          "published": 3587,
+          "received": 3587,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/api/sport/response": {
+          "published": 3587,
+          "received": 3587,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        }
+      },
+      "bundle": {
+        "status": "complete",
+        "records": 87158,
+        "seconds_before_trigger": 10.0,
+        "seconds_after_trigger": 14.81,
+        "ring_evicted_in_window": 0,
+        "writer_errors": 0,
+        "recorder_receipt_delay": {
+          "max_s": 0.126658,
+          "n": 8182,
+          "p05_s": 0.000133,
+          "p50_s": 0.000425,
+          "p95_abs_dev_s": 0.000514,
+          "p95_s": 0.00094,
+          "spread_min_max_s": 0.126592,
+          "spread_p05_p95_s": 0.000807
+        },
+        "bundle_mb": 29.76
+      },
+      "samples": [
+        {
+          "t": 1.0,
+          "cpu": 91.0,
+          "rss_mb": 73.3
+        },
+        {
+          "t": 2.0,
+          "cpu": 89.0,
+          "rss_mb": 79.1
+        },
+        {
+          "t": 3.0,
+          "cpu": 90.0,
+          "rss_mb": 85.0
+        },
+        {
+          "t": 4.0,
+          "cpu": 90.0,
+          "rss_mb": 90.8
+        },
+        {
+          "t": 5.0,
+          "cpu": 95.0,
+          "rss_mb": 96.6
+        },
+        {
+          "t": 6.0,
+          "cpu": 90.0,
+          "rss_mb": 102.4
+        },
+        {
+          "t": 7.0,
+          "cpu": 90.0,
+          "rss_mb": 108.2
+        },
+        {
+          "t": 8.0,
+          "cpu": 90.0,
+          "rss_mb": 114.0
+        },
+        {
+          "t": 9.0,
+          "cpu": 90.0,
+          "rss_mb": 119.8
+        },
+        {
+          "t": 10.0,
+          "cpu": 91.0,
+          "rss_mb": 125.7
+        },
+        {
+          "t": 11.0,
+          "cpu": 90.0,
+          "rss_mb": 131.5
+        },
+        {
+          "t": 12.0,
+          "cpu": 90.0,
+          "rss_mb": 131.5
+        },
+        {
+          "t": 13.0,
+          "cpu": 90.0,
+          "rss_mb": 131.5
+        },
+        {
+          "t": 14.0,
+          "cpu": 91.0,
+          "rss_mb": 131.5
+        },
+        {
+          "t": 15.0,
+          "cpu": 89.0,
+          "rss_mb": 131.6
+        },
+        {
+          "t": 16.0,
+          "cpu": 89.0,
+          "rss_mb": 131.6
+        },
+        {
+          "t": 17.0,
+          "cpu": 90.0,
+          "rss_mb": 131.6
+        },
+        {
+          "t": 18.0,
+          "cpu": 89.0,
+          "rss_mb": 131.6
+        },
+        {
+          "t": 19.0,
+          "cpu": 91.0,
+          "rss_mb": 131.6
+        },
+        {
+          "t": 20.0,
+          "cpu": 90.0,
+          "rss_mb": 131.6
+        },
+        {
+          "t": 21.0,
+          "cpu": 90.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 22.0,
+          "cpu": 90.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 23.0,
+          "cpu": 91.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 24.0,
+          "cpu": 91.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 25.0,
+          "cpu": 91.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 26.0,
+          "cpu": 90.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 27.0,
+          "cpu": 89.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 28.0,
+          "cpu": 89.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 29.0,
+          "cpu": 91.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 30.0,
+          "cpu": 90.0,
+          "rss_mb": 131.7
+        },
+        {
+          "t": 31.0,
+          "cpu": 80.0,
+          "rss_mb": 132.6
+        },
+        {
+          "t": 32.0,
+          "cpu": 94.0,
+          "rss_mb": 135.2
+        },
+        {
+          "t": 33.0,
+          "cpu": 93.0,
+          "rss_mb": 140.7
+        },
+        {
+          "t": 34.0,
+          "cpu": 93.0,
+          "rss_mb": 146.1
+        },
+        {
+          "t": 35.0,
+          "cpu": 94.0,
+          "rss_mb": 151.6
+        },
+        {
+          "t": 36.0,
+          "cpu": 93.7,
+          "rss_mb": 156.9
+        },
+        {
+          "t": 37.0,
+          "cpu": 97.3,
+          "rss_mb": 162.2
+        },
+        {
+          "t": 38.0,
+          "cpu": 96.0,
+          "rss_mb": 167.7
+        },
+        {
+          "t": 39.0,
+          "cpu": 93.0,
+          "rss_mb": 173.2
+        },
+        {
+          "t": 40.0,
+          "cpu": 96.0,
+          "rss_mb": 178.6
+        },
+        {
+          "t": 41.0,
+          "cpu": 92.0,
+          "rss_mb": 184.6
+        },
+        {
+          "t": 42.0,
+          "cpu": 94.0,
+          "rss_mb": 190.1
+        },
+        {
+          "t": 43.0,
+          "cpu": 93.0,
+          "rss_mb": 195.6
+        },
+        {
+          "t": 44.0,
+          "cpu": 96.0,
+          "rss_mb": 201.1
+        },
+        {
+          "t": 45.0,
+          "cpu": 92.0,
+          "rss_mb": 206.5
+        },
+        {
+          "t": 46.0,
+          "cpu": 100.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 47.0,
+          "cpu": 89.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 48.0,
+          "cpu": 91.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 49.0,
+          "cpu": 91.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 50.0,
+          "cpu": 92.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 51.0,
+          "cpu": 90.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 52.0,
+          "cpu": 92.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 53.0,
+          "cpu": 90.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 54.0,
+          "cpu": 90.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 55.0,
+          "cpu": 91.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 56.0,
+          "cpu": 91.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 57.0,
+          "cpu": 91.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 58.0,
+          "cpu": 90.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 59.0,
+          "cpu": 90.0,
+          "rss_mb": 214.3
+        },
+        {
+          "t": 60.0,
+          "cpu": 91.0,
+          "rss_mb": 214.3
+        }
+      ]
+    },
+    "after_x1": {
+      "scale": 1.0,
+      "duration_s": 60.0,
+      "offered_msgs_per_s": 1145.6,
+      "published": 68738,
+      "received": 68738,
+      "missing_total": 0,
+      "missing_fraction": 0.0,
+      "recorder_cpu_percent_mean": 10.4,
+      "recorder_cpu_percent_max": 22.0,
+      "recorder_rss_mb_start": 69.4,
+      "recorder_rss_mb_max": 116.0,
+      "recorder_stop_and_finalize_s": 0.09,
+      "per_topic": {
+        "/lowstate": {
+          "published": 28843,
+          "received": 28843,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 480.7
+        },
+        "/sportmodestate": {
+          "published": 17264,
+          "received": 17264,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 287.7
+        },
+        "/utlidar/robot_odom": {
+          "published": 8932,
+          "received": 8932,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 148.9
+        },
+        "/lf/lowstate": {
+          "published": 2979,
+          "received": 2979,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 49.6
+        },
+        "/lf/sportmodestate": {
+          "published": 2979,
+          "received": 2979,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 49.6
+        },
+        "/nav/cmd_vel": {
+          "published": 1191,
+          "received": 1191,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.8
+        },
+        "/cmd_vel": {
+          "published": 1191,
+          "received": 1191,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.8
+        },
+        "/helix/arbiter/status": {
+          "published": 1191,
+          "received": 1191,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.8
+        },
+        "/helix/hold": {
+          "published": 595,
+          "received": 595,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 9.9
+        },
+        "/helix/sink/trace": {
+          "published": 1191,
+          "received": 1191,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.8
+        },
+        "/api/sport/request": {
+          "published": 1191,
+          "received": 1191,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.8
+        },
+        "/api/sport/response": {
+          "published": 1191,
+          "received": 1191,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.8
+        }
+      },
+      "bundle": {
+        "status": "complete",
+        "records": 28289,
+        "seconds_before_trigger": 10.0,
+        "seconds_after_trigger": 15.0,
+        "ring_evicted_in_window": 0,
+        "writer_errors": 0,
+        "recorder_receipt_delay": {
+          "max_s": 0.009504,
+          "n": 2706,
+          "p05_s": 2.6e-05,
+          "p50_s": 0.000192,
+          "p95_abs_dev_s": 0.002347,
+          "p95_s": 0.002539,
+          "spread_min_max_s": 0.009486,
+          "spread_p05_p95_s": 0.002514
+        },
+        "bundle_mb": 9.87
+      },
+      "samples": [
+        {
+          "t": 1.0,
+          "cpu": 9.0,
+          "rss_mb": 69.4
+        },
+        {
+          "t": 2.0,
+          "cpu": 9.0,
+          "rss_mb": 71.2
+        },
+        {
+          "t": 3.0,
+          "cpu": 11.0,
+          "rss_mb": 73.1
+        },
+        {
+          "t": 4.0,
+          "cpu": 13.0,
+          "rss_mb": 74.9
+        },
+        {
+          "t": 5.0,
+          "cpu": 9.0,
+          "rss_mb": 76.9
+        },
+        {
+          "t": 6.0,
+          "cpu": 9.0,
+          "rss_mb": 78.8
+        },
+        {
+          "t": 7.0,
+          "cpu": 7.0,
+          "rss_mb": 80.7
+        },
+        {
+          "t": 8.0,
+          "cpu": 9.0,
+          "rss_mb": 82.6
+        },
+        {
+          "t": 9.0,
+          "cpu": 7.0,
+          "rss_mb": 84.5
+        },
+        {
+          "t": 10.0,
+          "cpu": 10.0,
+          "rss_mb": 86.4
+        },
+        {
+          "t": 11.0,
+          "cpu": 10.0,
+          "rss_mb": 87.8
+        },
+        {
+          "t": 12.0,
+          "cpu": 12.0,
+          "rss_mb": 87.9
+        },
+        {
+          "t": 13.0,
+          "cpu": 9.0,
+          "rss_mb": 87.9
+        },
+        {
+          "t": 14.0,
+          "cpu": 10.0,
+          "rss_mb": 88.0
+        },
+        {
+          "t": 15.0,
+          "cpu": 9.0,
+          "rss_mb": 88.0
+        },
+        {
+          "t": 16.0,
+          "cpu": 9.0,
+          "rss_mb": 88.0
+        },
+        {
+          "t": 17.0,
+          "cpu": 9.0,
+          "rss_mb": 88.0
+        },
+        {
+          "t": 18.0,
+          "cpu": 10.0,
+          "rss_mb": 88.0
+        },
+        {
+          "t": 19.0,
+          "cpu": 10.0,
+          "rss_mb": 88.0
+        },
+        {
+          "t": 20.0,
+          "cpu": 9.0,
+          "rss_mb": 88.0
+        },
+        {
+          "t": 21.0,
+          "cpu": 10.0,
+          "rss_mb": 88.0
+        },
+        {
+          "t": 22.0,
+          "cpu": 12.0,
+          "rss_mb": 88.6
+        },
+        {
+          "t": 23.0,
+          "cpu": 9.0,
+          "rss_mb": 88.6
+        },
+        {
+          "t": 24.0,
+          "cpu": 10.0,
+          "rss_mb": 88.6
+        },
+        {
+          "t": 25.0,
+          "cpu": 10.0,
+          "rss_mb": 88.6
+        },
+        {
+          "t": 26.0,
+          "cpu": 9.0,
+          "rss_mb": 88.6
+        },
+        {
+          "t": 27.0,
+          "cpu": 11.0,
+          "rss_mb": 88.6
+        },
+        {
+          "t": 28.0,
+          "cpu": 12.0,
+          "rss_mb": 88.6
+        },
+        {
+          "t": 29.0,
+          "cpu": 13.0,
+          "rss_mb": 88.6
+        },
+        {
+          "t": 30.0,
+          "cpu": 11.0,
+          "rss_mb": 88.6
+        },
+        {
+          "t": 31.0,
+          "cpu": 15.0,
+          "rss_mb": 88.9
+        },
+        {
+          "t": 32.0,
+          "cpu": 15.0,
+          "rss_mb": 89.0
+        },
+        {
+          "t": 33.0,
+          "cpu": 11.0,
+          "rss_mb": 90.6
+        },
+        {
+          "t": 34.0,
+          "cpu": 10.0,
+          "rss_mb": 92.4
+        },
+        {
+          "t": 35.0,
+          "cpu": 9.0,
+          "rss_mb": 94.2
+        },
+        {
+          "t": 36.0,
+          "cpu": 9.0,
+          "rss_mb": 96.0
+        },
+        {
+          "t": 37.0,
+          "cpu": 9.0,
+          "rss_mb": 97.8
+        },
+        {
+          "t": 38.0,
+          "cpu": 13.0,
+          "rss_mb": 99.5
+        },
+        {
+          "t": 39.0,
+          "cpu": 12.0,
+          "rss_mb": 100.9
+        },
+        {
+          "t": 40.0,
+          "cpu": 12.0,
+          "rss_mb": 102.7
+        },
+        {
+          "t": 41.0,
+          "cpu": 10.0,
+          "rss_mb": 104.5
+        },
+        {
+          "t": 42.0,
+          "cpu": 11.0,
+          "rss_mb": 106.4
+        },
+        {
+          "t": 43.0,
+          "cpu": 12.0,
+          "rss_mb": 108.2
+        },
+        {
+          "t": 44.0,
+          "cpu": 11.0,
+          "rss_mb": 110.0
+        },
+        {
+          "t": 45.0,
+          "cpu": 12.0,
+          "rss_mb": 111.8
+        },
+        {
+          "t": 46.0,
+          "cpu": 22.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 47.0,
+          "cpu": 10.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 48.0,
+          "cpu": 10.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 49.0,
+          "cpu": 10.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 50.0,
+          "cpu": 9.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 51.0,
+          "cpu": 10.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 52.0,
+          "cpu": 8.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 53.0,
+          "cpu": 10.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 54.0,
+          "cpu": 9.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 55.0,
+          "cpu": 10.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 56.0,
+          "cpu": 10.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 57.0,
+          "cpu": 9.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 58.0,
+          "cpu": 9.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 59.0,
+          "cpu": 10.0,
+          "rss_mb": 116.0
+        },
+        {
+          "t": 60.0,
+          "cpu": 9.0,
+          "rss_mb": 116.0
+        }
+      ]
+    },
+    "after_x3": {
+      "scale": 3.0,
+      "duration_s": 60.0,
+      "offered_msgs_per_s": 3514.4,
+      "published": 210867,
+      "received": 210867,
+      "missing_total": 0,
+      "missing_fraction": 0.0,
+      "recorder_cpu_percent_mean": 19.6,
+      "recorder_cpu_percent_max": 70.0,
+      "recorder_rss_mb_start": 73.0,
+      "recorder_rss_mb_max": 212.4,
+      "recorder_stop_and_finalize_s": 0.11,
+      "per_topic": {
+        "/lowstate": {
+          "published": 89653,
+          "received": 89653,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 1494.2
+        },
+        "/sportmodestate": {
+          "published": 52897,
+          "received": 52897,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 881.6
+        },
+        "/utlidar/robot_odom": {
+          "published": 27077,
+          "received": 27077,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 451.3
+        },
+        "/lf/lowstate": {
+          "published": 8966,
+          "received": 8966,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 149.4
+        },
+        "/lf/sportmodestate": {
+          "published": 8965,
+          "received": 8965,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 149.4
+        },
+        "/nav/cmd_vel": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/cmd_vel": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/helix/arbiter/status": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/helix/hold": {
+          "published": 1793,
+          "received": 1793,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 29.9
+        },
+        "/helix/sink/trace": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/api/sport/request": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/api/sport/response": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        }
+      },
+      "bundle": {
+        "status": "complete",
+        "records": 87453,
+        "seconds_before_trigger": 10.0,
+        "seconds_after_trigger": 15.0,
+        "ring_evicted_in_window": 0,
+        "writer_errors": 0,
+        "recorder_receipt_delay": {
+          "max_s": 0.054482,
+          "n": 8179,
+          "p05_s": 2.2e-05,
+          "p50_s": 0.000148,
+          "p95_abs_dev_s": 0.000294,
+          "p95_s": 0.000442,
+          "spread_min_max_s": 0.054468,
+          "spread_p05_p95_s": 0.000419
+        },
+        "bundle_mb": 29.85
+      },
+      "samples": [
+        {
+          "t": 1.0,
+          "cpu": 21.0,
+          "rss_mb": 73.0
+        },
+        {
+          "t": 2.0,
+          "cpu": 22.0,
+          "rss_mb": 78.6
+        },
+        {
+          "t": 3.0,
+          "cpu": 18.0,
+          "rss_mb": 84.2
+        },
+        {
+          "t": 4.0,
+          "cpu": 20.0,
+          "rss_mb": 89.9
+        },
+        {
+          "t": 5.0,
+          "cpu": 19.0,
+          "rss_mb": 95.6
+        },
+        {
+          "t": 6.0,
+          "cpu": 16.0,
+          "rss_mb": 101.2
+        },
+        {
+          "t": 7.0,
+          "cpu": 17.0,
+          "rss_mb": 106.8
+        },
+        {
+          "t": 8.0,
+          "cpu": 18.0,
+          "rss_mb": 112.4
+        },
+        {
+          "t": 9.0,
+          "cpu": 17.0,
+          "rss_mb": 118.0
+        },
+        {
+          "t": 10.0,
+          "cpu": 16.0,
+          "rss_mb": 123.7
+        },
+        {
+          "t": 11.0,
+          "cpu": 22.0,
+          "rss_mb": 129.3
+        },
+        {
+          "t": 12.0,
+          "cpu": 16.0,
+          "rss_mb": 129.4
+        },
+        {
+          "t": 13.0,
+          "cpu": 17.0,
+          "rss_mb": 129.4
+        },
+        {
+          "t": 14.0,
+          "cpu": 17.0,
+          "rss_mb": 129.4
+        },
+        {
+          "t": 15.0,
+          "cpu": 17.0,
+          "rss_mb": 129.5
+        },
+        {
+          "t": 16.0,
+          "cpu": 18.0,
+          "rss_mb": 129.5
+        },
+        {
+          "t": 17.0,
+          "cpu": 16.0,
+          "rss_mb": 129.5
+        },
+        {
+          "t": 18.0,
+          "cpu": 16.0,
+          "rss_mb": 129.5
+        },
+        {
+          "t": 19.0,
+          "cpu": 17.0,
+          "rss_mb": 129.5
+        },
+        {
+          "t": 20.0,
+          "cpu": 16.0,
+          "rss_mb": 129.5
+        },
+        {
+          "t": 21.0,
+          "cpu": 18.0,
+          "rss_mb": 129.5
+        },
+        {
+          "t": 22.0,
+          "cpu": 20.0,
+          "rss_mb": 129.6
+        },
+        {
+          "t": 23.0,
+          "cpu": 19.0,
+          "rss_mb": 129.6
+        },
+        {
+          "t": 24.0,
+          "cpu": 19.0,
+          "rss_mb": 129.6
+        },
+        {
+          "t": 25.0,
+          "cpu": 20.0,
+          "rss_mb": 129.6
+        },
+        {
+          "t": 26.0,
+          "cpu": 16.0,
+          "rss_mb": 129.6
+        },
+        {
+          "t": 27.0,
+          "cpu": 17.0,
+          "rss_mb": 129.6
+        },
+        {
+          "t": 28.0,
+          "cpu": 17.0,
+          "rss_mb": 129.6
+        },
+        {
+          "t": 29.0,
+          "cpu": 18.0,
+          "rss_mb": 129.6
+        },
+        {
+          "t": 30.0,
+          "cpu": 17.0,
+          "rss_mb": 129.6
+        },
+        {
+          "t": 31.0,
+          "cpu": 34.0,
+          "rss_mb": 130.4
+        },
+        {
+          "t": 32.0,
+          "cpu": 28.0,
+          "rss_mb": 133.0
+        },
+        {
+          "t": 33.0,
+          "cpu": 22.0,
+          "rss_mb": 138.3
+        },
+        {
+          "t": 34.0,
+          "cpu": 22.0,
+          "rss_mb": 143.5
+        },
+        {
+          "t": 35.0,
+          "cpu": 21.0,
+          "rss_mb": 148.8
+        },
+        {
+          "t": 36.0,
+          "cpu": 21.0,
+          "rss_mb": 154.1
+        },
+        {
+          "t": 37.0,
+          "cpu": 23.0,
+          "rss_mb": 159.4
+        },
+        {
+          "t": 38.0,
+          "cpu": 22.0,
+          "rss_mb": 164.6
+        },
+        {
+          "t": 39.0,
+          "cpu": 26.0,
+          "rss_mb": 169.8
+        },
+        {
+          "t": 40.0,
+          "cpu": 21.0,
+          "rss_mb": 175.1
+        },
+        {
+          "t": 41.0,
+          "cpu": 20.0,
+          "rss_mb": 180.9
+        },
+        {
+          "t": 42.0,
+          "cpu": 21.0,
+          "rss_mb": 186.3
+        },
+        {
+          "t": 43.0,
+          "cpu": 20.0,
+          "rss_mb": 191.5
+        },
+        {
+          "t": 44.0,
+          "cpu": 21.0,
+          "rss_mb": 196.8
+        },
+        {
+          "t": 45.0,
+          "cpu": 19.0,
+          "rss_mb": 202.1
+        },
+        {
+          "t": 46.0,
+          "cpu": 70.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 47.0,
+          "cpu": 17.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 48.0,
+          "cpu": 16.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 49.0,
+          "cpu": 18.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 50.0,
+          "cpu": 16.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 51.0,
+          "cpu": 17.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 52.0,
+          "cpu": 16.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 53.0,
+          "cpu": 16.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 54.0,
+          "cpu": 17.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 55.0,
+          "cpu": 17.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 56.0,
+          "cpu": 17.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 57.0,
+          "cpu": 17.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 58.0,
+          "cpu": 16.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 59.0,
+          "cpu": 17.0,
+          "rss_mb": 212.4
+        },
+        {
+          "t": 60.0,
+          "cpu": 16.0,
+          "rss_mb": 212.4
+        }
+      ]
+    }
+  },
+  "host": {
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "cpu_count": 24,
+    "python": "3.10.12",
+    "rmw": "rmw_cyclonedds_cpp"
+  }
+}

@@ -94,8 +94,7 @@ class FlightRecorder:
         self.node = rclpy.create_node(NODE_NAME, namespace=NODE_NAMESPACE, context=self._ctx,
                                       enable_rosout=False, start_parameter_services=False)
         self.session["use_sim_time"] = bool(self.node.get_parameter("use_sim_time").value)
-        self._executor = _InfoExecutor(context=self._ctx)
-        self._executor.add_node(self.node)
+        self._ros_clock = self.node.get_clock()
         self.core = FlightCore(profile, self._new_writer, can_open=self._can_open)
         self.sampler = SystemSampler(profile.evidence_path, gpu=gpu)
         self.session["gpu_backend"] = self.sampler.gpu_backend
@@ -122,6 +121,8 @@ class FlightRecorder:
             logger.warning("HELIX is running and this profile subscribes to /cmd_vel: HELIX "
                            "preflight C6 will refuse its stages. Use --profile go2_helix.")
             self.session["helix_cmd_vel_conflict"] = True
+        # Created last: the spinner snapshots the node's subscriptions and timers.
+        self._executor = _Spinner(self.node, self._ctx)
         self._write_session_file("recording")
 
     # -- setup -------------------------------------------------------------
@@ -193,7 +194,7 @@ class FlightRecorder:
                 logger.warning("%s: profile fields not in message: %s", spec.name, missing)
         rec = make_msg_record(
             topic=spec.name, role=spec.role, msg_type=spec.type, data=data,
-            t_mono_ns=mono, t_wall_ns=wall, t_ros_ns=self.node.get_clock().now().nanoseconds,
+            t_mono_ns=mono, t_wall_ns=wall, t_ros_ns=self._ros_clock.now().nanoseconds,
             dds_src_ns=(info or {}).get("source_timestamp"),
             dds_rx_ns=(info or {}).get("received_timestamp"), stored=store)
         self.core.ingest(rec)
@@ -249,6 +250,7 @@ class FlightRecorder:
                                                                   / 1e6, 2), **payload))
 
     def _tick(self) -> None:
+        self._executor.poll_events()
         while True:
             try:
                 self.core.ingest(self._sys_queue.get_nowait())
@@ -292,10 +294,9 @@ class FlightRecorder:
         self.core.wait_writers()
         self._write_session_file("stopped")
         try:
-            self._executor.remove_node(self.node)
+            self._executor.close()
             self.node.destroy_node()
         finally:
-            self._executor.shutdown()
             if self._ctx.ok():
                 self._rclpy.shutdown(context=self._ctx)
         return list(self.core.closed_bundles)
@@ -315,47 +316,108 @@ def _qos_str(q: Any) -> str:
         return str(q)
 
 
-def _make_info_executor():
-    from rclpy.executors import SingleThreadedExecutor
+class _Spinner:
+    """Lean single-threaded wait loop for the recorder node.
 
-    class InfoExecutor(SingleThreadedExecutor):
-        """Hands (message, message_info) to callbacks that ask for it.
+    rclpy's ``SingleThreadedExecutor`` rebuilds its wait set from Python
+    (callback-group checks, handle context managers, one Task and coroutine
+    per callback, and two QoS event waitables per subscription) for every
+    single message. At the GO2 rates (~1,000 msg/s) that bookkeeping, not
+    the recorder's own work, was two thirds of the recorder's CPU, which put
+    the Orin NX at a full core. This loop keeps the handles entered for the
+    whole run, re-arms one wait set per wakeup, drains every queued sample
+    from each ready subscription before waiting again, and hands
+    ``(message, message_info)`` to callbacks marked ``_bbrs_info`` (Humble's
+    executor drops the rmw message info, which carries the DDS source and
+    reception timestamps).
 
-        Humble's executor drops the rmw message info (DDS source and
-        reception timestamps). The recorder needs both, so for callbacks
-        marked ``_bbrs_info`` this executor passes them through.
-        """
+    QoS events (message lost, incompatible QoS) are counters, not data. They
+    are polled with a zero-timeout wait by :meth:`poll_events`, which the
+    recorder calls from its health tick, instead of being added to every
+    message wait.
 
-        def _take_subscription(self, sub):  # noqa: ANN001
-            with sub.handle:
-                taken = sub.handle.take_message(sub.msg_type, sub.raw)
-            if taken is None:
-                return None
-            if getattr(sub.callback, "_bbrs_info", False):
-                return _Taken(taken[0], taken[1] if len(taken) > 1 else None)
-            return taken[0]
+    Every message is still taken and handed to its callback one by one, in
+    arrival order per topic, so nothing is sampled or dropped here.
+    """
 
-        async def _execute_subscription(self, sub, msg):  # noqa: ANN001
-            if msg is None:
-                return
-            if isinstance(msg, _Taken):
-                sub.callback(msg.msg, msg.info)
-            else:
-                sub.callback(msg)
+    def __init__(self, node: Any, context: Any) -> None:
+        from contextlib import ExitStack
 
-    return InfoExecutor
+        from rclpy.impl.implementation_singleton import rclpy_implementation as _rclpy
 
+        self._rclpy_impl = _rclpy
+        self._context = context
+        self._stack = ExitStack()
+        self._subs = list(node.subscriptions)
+        self._timers = list(node.timers)
+        self._events = [w for w in node.waitables
+                        if w.get_num_entities().num_events and not
+                        (w.get_num_entities().num_subscriptions or w.get_num_entities().num_timers)]
+        for ent in self._subs + self._timers:
+            self._stack.enter_context(ent.handle)
+        for w in self._events:
+            self._stack.enter_context(w)
+        self._stack.enter_context(context.handle)
+        self._sub_by_ptr = {s.handle.pointer: s for s in self._subs}
+        self._tmr_by_ptr = {t.handle.pointer: t for t in self._timers}
+        self._ws = _rclpy.WaitSet(len(self._subs), 0, len(self._timers), 0, 0, 0,
+                                  context.handle)
+        self._ev_ws = _rclpy.WaitSet(0, 0, 0, 0, 0, len(self._events), context.handle)
+        self.drain_limit = 1000
 
-class _Taken:
-    __slots__ = ("msg", "info")
+    def spin_once(self, timeout_sec: float) -> None:
+        from rclpy.exceptions import TimerCancelledError
 
-    def __init__(self, msg: Any, info: Any) -> None:
-        self.msg = msg
-        self.info = info if isinstance(info, dict) else None
+        ws = self._ws
+        ws.clear_entities()
+        for s in self._subs:
+            ws.add_subscription(s.handle)
+        for t in self._timers:
+            ws.add_timer(t.handle)
+        ws.wait(int(timeout_sec * 1e9))
+        if not self._context.ok():
+            return
+        for ptr in ws.get_ready_entities("timer"):
+            tmr = self._tmr_by_ptr.get(ptr)
+            if tmr is None or not tmr.handle.is_timer_ready():
+                continue
+            try:
+                tmr.handle.call_timer()
+            except TimerCancelledError:
+                continue
+            tmr.callback()
+        for ptr in ws.get_ready_entities("subscription"):
+            sub = self._sub_by_ptr.get(ptr)
+            if sub is None:
+                continue
+            take, cls, raw, cb = sub.handle.take_message, sub.msg_type, sub.raw, sub.callback
+            info_cb = getattr(cb, "_bbrs_info", False)
+            for _ in range(self.drain_limit):
+                taken = take(cls, raw)
+                if taken is None:
+                    break
+                if info_cb:
+                    info = taken[1] if len(taken) > 1 else None
+                    cb(taken[0], info if isinstance(info, dict) else None)
+                else:
+                    cb(taken[0])
 
+    def poll_events(self) -> None:
+        if not self._events:
+            return
+        ws = self._ev_ws
+        ws.clear_entities()
+        for w in self._events:
+            w.add_to_wait_set(ws)
+        ws.wait(0)
+        for w in self._events:
+            if w.is_ready(ws):
+                data = w.take_data()
+                if data:
+                    w.callback(data)
 
-def _InfoExecutor(**kw: Any):  # noqa: N802
-    return _make_info_executor()(**kw)
+    def close(self) -> None:
+        self._stack.close()
 
 
 def run_recorder(profile: FlightProfile, session: dict[str, Any], *,

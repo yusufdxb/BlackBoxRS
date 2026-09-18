@@ -338,8 +338,35 @@ payloads. Each run is 60 s sustained with a marker-triggered bundle under load.
   (30,004 records, 14 MB) finalizes 0.22 s after shutdown.
 * Stopping the recorder and finalizing takes 0.07 s at 1x and 0.13 s at 3x.
 
-On this machine the Python backend meets the GO2 workload with no loss. If
-preflight on the payload reports the recorder over its CPU limit, drop the
+### Recorder wait loop
+
+On the GO2 payload (Orin NX) the recorder above measured 97.8 % of one core
+on the `go2_helix` profile, so its own preflight `recorder_load` check was
+NO-GO. A sampling profile of the same synthetic load on the workstation put
+66 % of the recorder's samples inside rclpy's
+`SingleThreadedExecutor.wait_for_ready_callbacks` (wait-set rebuild in Python,
+two QoS event waitables per subscription, one Task per callback) and only
+11 % in the recorder's own message callback.
+
+The recorder now runs its own wait loop (`_Spinner` in
+`blackboxrs/flight/recorder.py`): handles stay entered for the whole run, one
+wait set is re-armed per wakeup, every queued sample of a ready subscription
+is taken before waiting again, and QoS events are polled on the health tick.
+Every message is still taken and recorded; nothing is sampled away, and the
+bundle format is unchanged. Raw numbers:
+[`benchmarks/flight_python_2026-09-18_spinner.json`](benchmarks/flight_python_2026-09-18_spinner.json).
+
+| Load | Offered | Loop | Received / published | Recorder CPU (mean / max, % of one core) |
+|---|---|---|---|---|
+| 1x GO2 | 1,153 msg/s | rclpy executor | 69,164 / 69,164 (0 missing) | 45.0 / 56 |
+| 1x GO2 | 1,146 msg/s | recorder wait loop | 68,738 / 68,738 (0 missing) | 10.4 / 22 |
+| 3x GO2 | 3,510 msg/s | rclpy executor | 209,709 / 210,583 (874 missing) | 91.3 / 100 |
+| 3x GO2 | 3,514 msg/s | recorder wait loop | 210,867 / 210,867 (0 missing) | 19.6 / 70 |
+
+The maxima are the seconds in which a marker-triggered bundle writes its
+pre-trigger window. The payload has not been re-measured with the new loop;
+run `robot-blackbox flight preflight --profile go2_helix` there before relying
+on it. If preflight still reports the recorder over its CPU limit, drop the
 heaviest streams for that run (`--exclude-topic /lowstate --exclude-topic
 /sportmodestate`; the `/lf/*` versions stay).
 
