@@ -1,0 +1,207 @@
+# BlackBoxRS GO2 flight-recorder profile.
+#
+# Passive capture for Unitree GO2 hardware experiments (HELIX motion
+# arbitration stages, Phoenix sim2real deployments). The recorder only
+# SUBSCRIBES. It creates no publisher on any topic listed here, and a test
+# (tests/unit/flight/test_no_publish.py) fails if that ever changes.
+#
+# Every topic is optional unless `required: true`. A topic that is absent,
+# or whose message type is not importable on the recording host, is written
+# to the bundle manifest as unavailable with the reason. It is never
+# replaced by synthetic data.
+#
+# Field lists keep bundles small. Every arrival is still counted for rate,
+# gap and loss statistics, even on topics stored at a reduced rate
+# (store_max_hz).
+
+profile: go2
+schema_version: 1
+description: >-
+  Unitree GO2 + HELIX motion-arbitration + Phoenix sim2real passive capture.
+
+evidence_dir: ~/blackboxrs_evidence
+min_free_disk_mb: 2048
+
+buffer:
+  pre_trigger_sec: 10.0
+  post_trigger_sec: 15.0
+  # Hard caps on the rolling buffer. Oldest records go first when a cap is hit,
+  # and every eviction inside the pre-trigger window is counted in the bundle.
+  max_records: 400000
+  max_bytes: 268435456   # 256 MiB (serialized JSON size estimate)
+
+preflight:
+  listen_sec: 3.0
+  # HELIX and the unitree_ros2 workspace run on Cyclone DDS on the payload.
+  expect_rmw: rmw_cyclonedds_cpp
+  # Limits on the recorder's own load while preflight listens (percent of one
+  # core, resident memory). Above either, preflight is NO-GO.
+  max_recorder_cpu_percent: 50.0
+  max_recorder_rss_mb: 500
+
+sampling:
+  graph_poll_sec: 0.5
+  system_sample_hz: 2.0
+  health_tick_sec: 0.25
+
+# Thresholds copied from HELIX hw_stage.py so the report judges a stop the
+# same way the stage runner does (STOPPED_SPEED, STOP_DEADLINE_S, and the
+# Stage E "moving at injection" criterion).
+stop_criteria:
+  stopped_speed_mps: 0.03
+  stop_deadline_sec: 1.5
+  moving_speed_mps: 0.05
+  pose_speed_baseline_sec: 0.05
+
+# Publishers of these roles run on the payload Jetson with HELIX, so their
+# DDS source timestamps and embedded stamps share one clock. Latencies between
+# them are computed on emission time. Any pair outside this set is timed on the
+# recorder's receipt clock and labelled as such.
+co_hosted_roles:
+  - helix_fault
+  - recovery_hint
+  - recovery_action
+  - helix_hold
+  - arbiter_status
+  - cmd_vel_out
+  - cmd_vel_source
+  - sink_trace
+  - sport_request
+
+expected_nodes:
+  - /helix_arbiter
+  - /helix_recovery_node
+  - /helix_diagnosis_node
+  - /helix_go2_sport_sink
+
+triggers:
+  helix_hold_asserted: true
+  recovery_action_stop:
+    enabled: true
+    actions: [STOP_AND_HOLD]
+    statuses: [ACCEPTED]
+  arbiter_forced_zero:
+    enabled: true
+    reasons: [HELIX_HOLD, HELIX_STATE_STALE, HELIX_STATE_MISSING]
+  node_disappeared: true
+  topic_stale: true
+  manual_marker: true
+  # A trigger inside an open incident is attached to it as a secondary
+  # trigger instead of opening a new bundle.
+  max_incidents_per_run: 20
+
+topics:
+  # --- GO2 sport API (robot-facing command channel, observed only) ---------
+  - name: /api/sport/request
+    type: unitree_api/msg/Request
+    role: sport_request
+    fields: [header.identity.id, header.identity.api_id, header.lease.id, header.policy.noreply, parameter]
+  - name: /api/sport/response
+    type: unitree_api/msg/Response
+    role: sport_response
+    fields: [header.identity.id, header.identity.api_id, header.status.code, data]
+
+  # --- GO2 state ----------------------------------------------------------
+  - name: /utlidar/robot_odom
+    type: nav_msgs/msg/Odometry
+    role: odometry
+    # Measured on the GO2: 151 Hz (docs/go2_field_notes.md). HELIX preflight C9
+    # requires >= 50 Hz; below 80 % of 150 Hz this preflight warns.
+    expected_hz: 150.0
+    stale_after_sec: 0.5
+    fields: [header.stamp, header.frame_id, child_frame_id, pose.pose.position, pose.pose.orientation, twist.twist.linear, twist.twist.angular]
+    # Observed on the GO2 (docs/go2_field_notes.md, HELIX GO2_FIELD_NOTES.md).
+    frame_ids: {header.frame_id: odom, child_frame_id: base_link}
+  - name: /sportmodestate
+    type: unitree_go/msg/SportModeState
+    role: go2_state
+    expected_hz: 295.0   # measured on the GO2 (docs/go2_field_notes.md)
+    store_max_hz: 50.0
+    fields: [stamp, error_code, mode, progress, gait_type, position, body_height, velocity, yaw_speed]
+  - name: /lf/sportmodestate
+    type: unitree_go/msg/SportModeState
+    role: go2_state
+    fields: [stamp, error_code, mode, progress, gait_type, position, body_height, velocity, yaw_speed]
+  - name: /lowstate
+    type: unitree_go/msg/LowState
+    role: go2_state
+    expected_hz: 500.0   # measured on the GO2 (docs/go2_field_notes.md)
+    store_max_hz: 20.0
+    fields: [tick, power_v, power_a, bms_state.soc, bms_state.current, foot_force, temperature_ntc1]
+  - name: /lf/lowstate
+    type: unitree_go/msg/LowState
+    role: go2_state
+    fields: [tick, power_v, power_a, bms_state.soc, foot_force]
+  - name: /wirelesscontroller
+    type: unitree_go/msg/WirelessController
+    role: operator_remote
+    # Publishes only while a stick or key is pressed, so silence is not a fault.
+    fields: [lx, ly, rx, ry, keys]
+
+  # --- Velocity commands ---------------------------------------------------
+  - name: /cmd_vel
+    type: geometry_msgs/msg/Twist
+    role: cmd_vel_out
+  - name: /nav/cmd_vel
+    type: geometry_msgs/msg/Twist
+    role: cmd_vel_source
+  - name: /teleop/cmd_vel
+    type: geometry_msgs/msg/Twist
+    role: cmd_vel_source
+
+  # --- HELIX ---------------------------------------------------------------
+  - name: /helix/faults
+    type: helix_msgs/msg/FaultEvent
+    role: helix_fault
+  - name: /helix/recovery_hints
+    type: helix_msgs/msg/RecoveryHint
+    role: recovery_hint
+  - name: /helix/recovery_actions
+    type: helix_msgs/msg/RecoveryAction
+    role: recovery_action
+  - name: /helix/hold
+    type: helix_msgs/msg/HelixHold
+    role: helix_hold
+    stale_after_sec: 0.5
+  - name: /helix/arbiter/status
+    type: helix_msgs/msg/ArbiterStatus
+    role: arbiter_status
+    stale_after_sec: 0.5
+  - name: /helix/sink/trace
+    type: std_msgs/msg/String
+    role: sink_trace
+  - name: /helix/node_health
+    type: diagnostic_msgs/msg/DiagnosticArray
+    role: helix_health
+  - name: /helix/explanations
+    type: std_msgs/msg/String
+    role: helix_diagnosis_text
+
+  # --- Phoenix sim2real ------------------------------------------------------
+  - name: /phoenix/estop
+    type: std_msgs/msg/Bool
+    role: phoenix_safety
+  - name: /phoenix/shield
+    type: std_msgs/msg/Float64MultiArray
+    role: phoenix_safety
+    fields: [data]
+  - name: /joint_group_position_controller/command
+    type: std_msgs/msg/Float64MultiArray
+    role: phoenix_action
+    store_max_hz: 50.0
+    fields: [data]
+  - name: /imu/data
+    type: sensor_msgs/msg/Imu
+    role: phoenix_observation
+    store_max_hz: 50.0
+    fields: [header.stamp, orientation, angular_velocity, linear_acceleration]
+  - name: /joint_states
+    type: sensor_msgs/msg/JointState
+    role: phoenix_observation
+    store_max_hz: 50.0
+    fields: [header.stamp, position, velocity, effort]
+  - name: /phoenix/foot_force
+    type: std_msgs/msg/Float32MultiArray
+    role: phoenix_observation
+    store_max_hz: 50.0
+    fields: [data]

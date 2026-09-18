@@ -1,0 +1,20 @@
+# GO2 profile for runs beside the HELIX motion arbiter (hardware stages A-F).
+#
+# Identical to `go2` except that the recorder does NOT subscribe to /cmd_vel.
+# HELIX preflight check C6 requires /cmd_vel to have exactly one consumer,
+# the GO2 sport sink, and ArbiterStatus.sink_subscribers counts /cmd_vel
+# subscribers. A recorder subscription there would make HELIX refuse the
+# stage and would change HELIX's own evidence, so it stays off.
+#
+# /cmd_vel is still reconstructed, from two better-placed sources:
+#   * ArbiterStatus.out_linear_x/y, out_angular_z: what the arbiter published
+#     on /cmd_vel at each tick (sequence-numbered);
+#   * the sink trace `input` field: what the sink actually received on /cmd_vel.
+# The report labels which source a /cmd_vel stage came from.
+
+extends: go2
+profile: go2_helix
+description: >-
+  GO2 + HELIX motion-arbitration capture that leaves /cmd_vel to the sink.
+exclude_topics:
+  - /cmd_vel
