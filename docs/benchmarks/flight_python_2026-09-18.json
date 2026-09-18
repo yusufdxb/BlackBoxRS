@@ -1,0 +1,499 @@
+{
+  "schema": "blackboxrs.flight.benchmark.v1",
+  "date": "2026-09-18",
+  "host": {
+    "arch": "x86_64",
+    "logical_cpus": 24,
+    "os": "Ubuntu 22.04 (Linux 6.8)",
+    "python": "3.10.12",
+    "ros": "humble",
+    "rmw": "rmw_cyclonedds_cpp",
+    "note": "development workstation; NOT the GO2 payload (Jetson Orin NX), which is unmeasured"
+  },
+  "workload": "GO2 rates from docs/go2_field_notes.md (/lowstate 500 Hz, /sportmodestate 295 Hz, /utlidar/robot_odom 151 Hz) plus /lf/* at 50 Hz and HELIX topics at 10-20 Hz; real unitree_go, unitree_api, nav_msgs, helix_msgs types; synthetic default-valued payloads; 60 s sustained per run; ROS_LOCALHOST_ONLY=1",
+  "core_offline": {
+    "records": 72000,
+    "ingest_records_per_s": 162218,
+    "cpu_percent_during_ingest": 95.3,
+    "rss_mb": 72.0,
+    "bundle_records": 30004,
+    "bundle_mb": 13.99,
+    "finalize_after_shutdown_s": 0.217
+  },
+  "live_final": [
+    {
+      "scale": 1.0,
+      "duration_s": 60.0,
+      "offered_msgs_per_s": 1171.7,
+      "published": 70302,
+      "received": 70302,
+      "missing_total": 0,
+      "missing_fraction": 0.0,
+      "recorder_cpu_percent_mean": 40.6,
+      "recorder_cpu_percent_max": 50.0,
+      "recorder_rss_mb_start": 69.5,
+      "recorder_rss_mb_max": 118.7,
+      "recorder_stop_and_finalize_s": 0.07,
+      "per_topic": {
+        "/lowstate": {
+          "published": 29891,
+          "received": 29891,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 498.2
+        },
+        "/sportmodestate": {
+          "published": 17636,
+          "received": 17636,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 293.9
+        },
+        "/utlidar/robot_odom": {
+          "published": 9028,
+          "received": 9028,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 150.5
+        },
+        "/lf/lowstate": {
+          "published": 2990,
+          "received": 2990,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 49.8
+        },
+        "/lf/sportmodestate": {
+          "published": 2990,
+          "received": 2990,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 49.8
+        },
+        "/nav/cmd_vel": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/cmd_vel": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/helix/arbiter/status": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/helix/hold": {
+          "published": 597,
+          "received": 597,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 9.9
+        },
+        "/helix/sink/trace": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/api/sport/request": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/api/sport/response": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        }
+      },
+      "bundle": {
+        "status": "complete",
+        "records": 29205,
+        "seconds_before_trigger": 10.0,
+        "seconds_after_trigger": 15.0,
+        "ring_evicted_in_window": 0,
+        "writer_errors": 0,
+        "recorder_receipt_delay": {
+          "max_s": 0.005532,
+          "n": 2728,
+          "p05_s": 0.000128,
+          "p50_s": 0.000456,
+          "p95_s": 0.000994,
+          "spread_min_max_s": 0.005444,
+          "spread_p05_p95_s": 0.000866
+        },
+        "bundle_mb": 10.15
+      }
+    },
+    {
+      "scale": 3.0,
+      "duration_s": 60.0,
+      "offered_msgs_per_s": 3515.1,
+      "published": 210908,
+      "received": 210470,
+      "missing_total": 438,
+      "missing_fraction": 0.002077,
+      "recorder_cpu_percent_mean": 89.2,
+      "recorder_cpu_percent_max": 97.0,
+      "recorder_rss_mb_start": 73.4,
+      "recorder_rss_mb_max": 214.2,
+      "recorder_stop_and_finalize_s": 0.13,
+      "per_topic": {
+        "/lowstate": {
+          "published": 89671,
+          "received": 89320,
+          "missing": 351,
+          "message_lost_event": 0,
+          "published_hz": 1494.5
+        },
+        "/sportmodestate": {
+          "published": 52907,
+          "received": 52820,
+          "missing": 87,
+          "message_lost_event": 0,
+          "published_hz": 881.8
+        },
+        "/utlidar/robot_odom": {
+          "published": 27082,
+          "received": 27082,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 451.4
+        },
+        "/lf/lowstate": {
+          "published": 8968,
+          "received": 8968,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 149.5
+        },
+        "/lf/sportmodestate": {
+          "published": 8967,
+          "received": 8967,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 149.4
+        },
+        "/nav/cmd_vel": {
+          "published": 3587,
+          "received": 3587,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/cmd_vel": {
+          "published": 3587,
+          "received": 3587,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/helix/arbiter/status": {
+          "published": 3587,
+          "received": 3587,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/helix/hold": {
+          "published": 1794,
+          "received": 1794,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 29.9
+        },
+        "/helix/sink/trace": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/api/sport/request": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/api/sport/response": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        }
+      },
+      "bundle": {
+        "status": "complete",
+        "records": 87493,
+        "seconds_before_trigger": 10.0,
+        "seconds_after_trigger": 15.0,
+        "ring_evicted_in_window": 0,
+        "writer_errors": 0,
+        "recorder_receipt_delay": {
+          "max_s": 0.076115,
+          "n": 8183,
+          "p05_s": 0.00012,
+          "p50_s": 0.000384,
+          "p95_s": 0.000817,
+          "spread_min_max_s": 0.07605,
+          "spread_p05_p95_s": 0.000696
+        },
+        "bundle_mb": 29.86
+      }
+    }
+  ],
+  "live_before_raw_subscriptions": [
+    {
+      "scale": 1.0,
+      "duration_s": 60.0,
+      "offered_msgs_per_s": 1171.5,
+      "published": 70290,
+      "received": 70290,
+      "missing_total": 0,
+      "missing_fraction": 0.0,
+      "recorder_cpu_percent_mean": 46.4,
+      "recorder_cpu_percent_max": 53.0,
+      "recorder_rss_mb_start": 69.5,
+      "recorder_rss_mb_max": 118.6,
+      "recorder_stop_and_finalize_s": 0.07,
+      "per_topic": {
+        "/lowstate": {
+          "published": 29885,
+          "received": 29885,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 498.1
+        },
+        "/sportmodestate": {
+          "published": 17633,
+          "received": 17633,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 293.9
+        },
+        "/utlidar/robot_odom": {
+          "published": 9026,
+          "received": 9026,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 150.4
+        },
+        "/lf/lowstate": {
+          "published": 2990,
+          "received": 2990,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 49.8
+        },
+        "/lf/sportmodestate": {
+          "published": 2989,
+          "received": 2989,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 49.8
+        },
+        "/nav/cmd_vel": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/cmd_vel": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/helix/arbiter/status": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/helix/hold": {
+          "published": 597,
+          "received": 597,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 9.9
+        },
+        "/helix/sink/trace": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/api/sport/request": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        },
+        "/api/sport/response": {
+          "published": 1195,
+          "received": 1195,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 19.9
+        }
+      },
+      "bundle": {
+        "status": "complete",
+        "records": 29192,
+        "seconds_before_trigger": 10.0,
+        "seconds_after_trigger": 15.0,
+        "ring_evicted_in_window": 0,
+        "writer_errors": 0,
+        "recorder_receipt_delay": {
+          "max_s": 0.005523,
+          "n": 2728,
+          "p05_s": 0.000167,
+          "p50_s": 0.000618,
+          "p95_s": 0.001083,
+          "spread_min_max_s": 0.005434,
+          "spread_p05_p95_s": 0.000915
+        },
+        "bundle_mb": 10.15
+      }
+    },
+    {
+      "scale": 3.0,
+      "duration_s": 60.0,
+      "offered_msgs_per_s": 3514.9,
+      "published": 210895,
+      "received": 210400,
+      "missing_total": 495,
+      "missing_fraction": 0.002347,
+      "recorder_cpu_percent_mean": 98.6,
+      "recorder_cpu_percent_max": 102.0,
+      "recorder_rss_mb_start": 73.2,
+      "recorder_rss_mb_max": 215.1,
+      "recorder_stop_and_finalize_s": 0.12,
+      "per_topic": {
+        "/lowstate": {
+          "published": 89663,
+          "received": 89276,
+          "missing": 387,
+          "message_lost_event": 0,
+          "published_hz": 1494.4
+        },
+        "/sportmodestate": {
+          "published": 52902,
+          "received": 52794,
+          "missing": 108,
+          "message_lost_event": 0,
+          "published_hz": 881.7
+        },
+        "/utlidar/robot_odom": {
+          "published": 27079,
+          "received": 27079,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 451.3
+        },
+        "/lf/lowstate": {
+          "published": 8968,
+          "received": 8968,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 149.5
+        },
+        "/lf/sportmodestate": {
+          "published": 8968,
+          "received": 8968,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 149.5
+        },
+        "/nav/cmd_vel": {
+          "published": 3588,
+          "received": 3588,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/cmd_vel": {
+          "published": 3588,
+          "received": 3588,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/helix/arbiter/status": {
+          "published": 3587,
+          "received": 3587,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/helix/hold": {
+          "published": 1794,
+          "received": 1794,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 29.9
+        },
+        "/helix/sink/trace": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/api/sport/request": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        },
+        "/api/sport/response": {
+          "published": 3586,
+          "received": 3586,
+          "missing": 0,
+          "message_lost_event": 0,
+          "published_hz": 59.8
+        }
+      },
+      "bundle": {
+        "status": "complete",
+        "records": 87473,
+        "seconds_before_trigger": 10.0,
+        "seconds_after_trigger": 15.0,
+        "ring_evicted_in_window": 0,
+        "writer_errors": 0,
+        "recorder_receipt_delay": {
+          "max_s": 0.056006,
+          "n": 8182,
+          "p05_s": 0.000199,
+          "p50_s": 0.000569,
+          "p95_s": 0.001089,
+          "spread_min_max_s": 0.055935,
+          "spread_p05_p95_s": 0.00089
+        },
+        "bundle_mb": 29.86
+      }
+    }
+  ]
+}
