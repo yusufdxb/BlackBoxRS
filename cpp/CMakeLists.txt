@@ -47,6 +47,14 @@ add_library(blackboxrs_core
   src/event.cpp
   src/evidence/bundle.cpp
   src/evidence/record.cpp
+  src/recorder/flight_core.cpp
+  src/replay/faults.cpp
+  src/replay/sut.cpp
+  src/replay/monitors.cpp
+  src/replay/liveness.cpp
+  src/replay/timeline.cpp
+  src/replay/engine.cpp
+  src/replay/render.cpp
 )
 add_library(blackboxrs::core ALIAS blackboxrs_core)
 add_dependencies(blackboxrs_core blackboxrs_build_info)
@@ -62,6 +70,9 @@ target_link_libraries(blackboxrs_core
   PRIVATE yaml-cpp OpenSSL::Crypto)
 blackboxrs_set_warnings(blackboxrs_core)
 
+if(BLACKBOXRS_BUILD_TOOLS)
+  add_subdirectory(tools)
+endif()
 
 if(BLACKBOXRS_BUILD_TESTS)
   enable_testing()
