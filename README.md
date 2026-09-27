@@ -1,10 +1,151 @@
 # BlackBoxRS
 
-**Incident intelligence for ROS 2 robots.** When something breaks in the field, you get a bundle you can read, not a log you have to excavate.
+**A C++20 / ROS 2 reliability runtime for deterministic flight recording, incident replay, fault injection and safety regression testing on autonomous robots.**
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![ROS 2 Humble (verified)](https://img.shields.io/badge/ROS%202-Humble%20(verified)-brightgreen)
+[![C++ runtime CI](https://github.com/yusufdxb/BlackBoxRS/actions/workflows/cpp.yml/badge.svg?branch=feat/cpp-runtime)](https://github.com/yusufdxb/BlackBoxRS/actions/workflows/cpp.yml)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)
+![ROS 2 Humble](https://img.shields.io/badge/ROS%202-Humble-brightgreen)
+![ASan UBSan TSan](https://img.shields.io/badge/sanitizers-ASan%20%C2%B7%20UBSan%20%C2%B7%20TSan-informational)
+![Hardware: not yet validated](https://img.shields.io/badge/GO2%20%2F%20Jetson-not%20yet%20validated-lightgrey)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
+
+BlackBoxRS sits beside a robot's autonomy stack, never in its control path. It records what the robot was told and what it did, with bounded memory and explicit accounting of anything it could not keep. It replays that evidence deterministically, with injected faults, through the arbitration logic, and judges it against explicit safety invariants. The same C++ code runs online as a passive monitor and offline as a regression test.
+
+![C++ runtime architecture](docs/assets/cpp_architecture.svg)
+
+| Component | What it is | Where |
+|---|---|---|
+| `blackboxrs_core` | ROS-free C++20 library: clock-domain types, typed events, bounded recording pipeline, evidence writer with integrity records, deterministic replay, 16 fault injectors, arbitration models, detectors and invariants | [`cpp/`](cpp/) |
+| `blackboxrs` CLI | `replay`, `inject`, `verify`, `faults`, `inspect`, `validate`, `benchmark`, `synth-record`, `config`, `version` | [`cpp/tools/`](cpp/tools/) |
+| `blackboxrs_ros` | rclcpp nodes: passive **recorder**, online **monitor**, offline **replay**, GO / NO-GO **preflight** | [`ros2/blackboxrs_ros/`](ros2/blackboxrs_ros/) |
+| Python | the reference implementation the C++ engine is checked against byte for byte, flight analysis and reports, the incident-intelligence daemon (below) | [`blackboxrs/`](blackboxrs/) |
+
+## Status
+
+**Software ready for hardware validation. Not validated on the GO2 or the Jetson.** Everything below was measured on an x86_64 workstation, or off-robot beside HELIX's own rehearsal with a fake GO2. The first on-robot gates (build, then passive recording with no motion) are written out step by step in [docs/CPP_HARDWARE_VALIDATION.md](docs/CPP_HARDWARE_VALIDATION.md).
+
+| Claim | Evidence |
+|---|---|
+| The C++ replay engine matches the Python reference | all 30 golden cases and 15 more fault combinations produce **byte-identical** result documents (verdict, every finding, invariant counts, causal timeline, text) in both engines; so do bundles written by the C++ recorder (`tests/cpp`) |
+| The arbitration model is the deployed HELIX logic | 2,198 decisions of HELIX's own `arbiter_core.py` (40 streams: STOP, stale command, teleop vs STOP, NaN/Inf/over-limit, hold stream lost, restarted publisher ...) reproduced exactly (`test_helix_parity`) |
+| Replay is deterministic | 100 replays of every golden case, separate processes, byte-identical (CI) |
+| It records real stacks | beside HELIX's off-robot A-F rehearsal (real HELIX nodes, `helix_msgs` and `unitree` types decoded at run time) all six stages passed; 23,140 messages, 0 dropped, every bundle verified; the Python stop-chain report reads the C++ evidence (StopMove answered, stop 0.24 s on the fake GO2) |
+| It is cheap and bounded | on real ROS traffic (real `unitree_go` LowState / SportModeState, Odometry) the recorder process used **2.8 % of one core at the GO2 rate** (946 msg/s), 17.2 % at 10x, with 0 drops and ~33 MB RSS at every scale |
+| Nothing it runs can move the robot | the only publishers are `/diagnostics` and `/blackboxrs/...`; motion and control topics are refused before a publisher exists, including through remaps; checked on a live graph (`test_passive_nodes`) |
+| Memory-safe, race-free, UB-free under test | ASan, UBSan and TSan runs of every test in CI; clang-tidy with zero warnings |
+
+It found a real bug on the way: replaying the HELIX rehearsal showed the `fresh_output` invariant (in the Python reference and the port alike) reporting a stale command when a navigation command changed between an arbiter publication and the next tick. The fix, the regression cases and the story are in commit `cb5f7f4` and [docs/REPLAY_LAB.md](docs/REPLAY_LAB.md).
+
+## Build
+
+Ubuntu 22.04, GCC 11+ (C++20), CMake 3.22, ROS 2 Humble for the nodes.
+
+```bash
+sudo apt-get install -y ninja-build nlohmann-json3-dev libyaml-cpp-dev libgtest-dev libssl-dev
+cmake -S cpp -B cpp/build/release -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build/release
+ctest --test-dir cpp/build/release                         # core: unit, integration, parity with HELIX
+source /opt/ros/humble/setup.bash
+colcon build --base-paths cpp ros2 --cmake-args -DCMAKE_BUILD_TYPE=Release   # + the ROS 2 nodes
+pip install -e ".[dev]" && pytest tests/cpp                # Python vs C++ differential tests
+```
+
+## Replay, inject, verify
+
+Every command in this block is run by `tests/cpp/test_readme_commands.py`, which checks the exit code in the comment (0 PASS, 1 FAIL, 3 INCOMPLETE / unverifiable, 4 DETECTED).
+
+<!-- cli:start -->
+```console
+$ blackboxrs verify examples/replay_lab/cases --repeat 100                       # exit 0
+$ blackboxrs replay examples/replay_lab/cases/nominal_motion.json --no-timeline  # exit 0
+$ blackboxrs replay examples/replay_lab/evidence/nominal_motion --sut twist_mux_legacy --inject drop:topic=/nav/cmd_vel,from_s=4.0   # exit 1
+$ blackboxrs inject examples/replay_lab/evidence/nominal_motion --fault drop:topic=/nav/cmd_vel,from_s=4.0 --no-timeline   # exit 4
+$ blackboxrs replay examples/replay_lab/cases/clean_stop.json --speed 10 --no-timeline    # exit 0
+$ printf 'q\n' | blackboxrs replay examples/replay_lab/cases/clean_stop.json --step      # exit 0
+$ blackboxrs faults                                                              # exit 0
+$ blackboxrs inspect examples/replay_lab/evidence/clean_stop                     # exit 0
+$ blackboxrs validate examples/replay_lab/evidence/clean_stop                    # exit 3
+$ blackboxrs synth-record --out "$WORK/synth" --seconds 2                        # exit 0
+$ blackboxrs validate "$WORK"/synth/inc_*                                        # exit 0
+$ blackboxrs config configs/go2_hardware.yaml                                    # exit 0
+$ blackboxrs benchmark --only replay --json "$WORK/bench.json"                   # exit 0
+$ blackboxrs version                                                             # exit 0
+```
+<!-- cli:end -->
+
+A stale command through the legacy mux, and what the causal timeline shows (abridged):
+
+```console
+$ blackboxrs replay examples/replay_lab/evidence/nominal_motion --sut twist_mux_legacy --inject drop:topic=/nav/cmd_vel,from_s=4.0
+fault     F1 drop(every_n=1, from_s=4.0, topic=/nav/cmd_vel) -> 40 event(s)
+
+invariants
+  NOT_EXERCISED consistent_state
+  PASS          finite_output
+  FAIL          fresh_output  first at +4.520s, 75 violating tick(s)
+  NOT_EXERCISED stop_dominance
+...
+  T0011   +3.953s  INPUT     /nav/cmd_vel command (0.150, 0.000, 0.000)
+  T0012   +4.003s  FAULT     fault F1 drop (every_n=1, from_s=4.0, topic=/nav/cmd_vel): 40 event(s) affected
+  T0013   +4.460s  DECIDE    arbitration SILENT (time-driven, no new input): no live input, nothing is published, the robot-facing sink keeps (0.150, 0.000, 0.000)
+  T0014   +4.520s  DETECT    [warning] command_source_stale /nav/cmd_vel: ... silent 0.567 s (window 0.5 s)  <- T0011  [related fault: F1]
+  T0015   +4.520s  INVARIANT [critical] stale_command_forwarded robot_output: robot-facing command [0.15, 0.0, 0.0] is not backed by a fresh valid source message  <- T0009, T0011  [related fault: F1]
+
+VERDICT   FAIL: invariant(s) violated: fresh_output
+```
+
+The same fault through the HELIX arbiter model ends in DETECTED: the source goes stale, the arbiter publishes zero, and the invariant holds. The fault injectors, invariants and verdicts are described in [docs/REPLAY_LAB.md](docs/REPLAY_LAB.md).
+
+## On a robot (passive)
+
+```bash
+ros2 run blackboxrs_ros preflight --config configs/go2_hardware.yaml        # GO / NO-GO, never moves anything
+ros2 launch blackboxrs_ros recorder_monitor.launch.py config:=$PWD/configs/go2_hardware.yaml
+# Ctrl-C: stop intake, drain, finalize every bundle, join, exit 0
+blackboxrs validate ~/blackboxrs_evidence/<session>/inc_*
+blackboxrs replay ~/blackboxrs_evidence/<session>/inc_* --sut observed
+```
+
+The recorder, monitor and preflight executables are run on a live ROS graph by `ros2/blackboxrs_ros/test/test_passive_nodes.cpp` (including SIGINT during recording and an invalid configuration starting nothing).
+
+## Performance (workstation, measured)
+
+x86_64, 24 logical CPUs, Release build. **Not the Orin NX**: the Jetson numbers are measured at gate H0/H1. Raw data in [docs/benchmarks/](docs/benchmarks/), method in [docs/CPP_BENCHMARKS.md](docs/CPP_BENCHMARKS.md).
+
+Recorder process on real ROS 2 traffic (real `unitree_go` and `nav_msgs` types, real CDR decode, `go2_helix` profile, continuous capture with fsync), 30 s per row:
+
+| Load | Offered | Received | Dropped | Recorder CPU (one core) | Peak RSS | Evidence |
+|---|---|---|---|---|---|---|
+| 1x GO2 | 946 msg/s | 28,382 / 28,382 | 0 | 2.8 % | 32.7 MB | verified |
+| 2x | 1,892 msg/s | 56,762 / 56,762 | 0 | 4.5 % | 32.6 MB | verified |
+| 5x | 4,730 msg/s | 141,902 / 141,902 | 0 | 10.0 % | 32.7 MB | verified |
+| 10x | 9,460 msg/s | 283,802 / 283,802 | 0 | 17.2 % | 32.8 MB | verified |
+
+For comparison, the Python flight recorder used 40.6 % of one core at 1x on the same workstation (with a slightly larger topic set, [docs/FLIGHT_RECORDER.md](docs/FLIGHT_RECORDER.md)) and about 98 % on the Orin NX. The C++ core also sustains 20x (20,720 msg/s) with 0 drops; subscription callbacks spend 0.5 µs median, 1.2 µs p99 handing a message to the queue; replay runs about 2,000x faster than real time.
+
+## Engineering notes
+
+* **Time.** Each clock (recorder monotonic, recorder wall, ROS, publisher source, replay) is its own `std::chrono::time_point` type; mixing them does not compile, and the replay clock has no `now()`. Ordering is `(t, origin, seq, copy)`, total and documented; equal keys are refused.
+* **Ownership and threads.** Three threads with one owner each: the executor thread only stamps clocks and moves the executor's serialized buffer into a fixed-capacity ring queue (it never blocks, never decodes, never touches the disk); one pipeline `std::jthread` owns decoding, FlightCore and all bookkeeping; one writer `std::jthread` owns the disk. Shared state is two queues and atomic counters. `stop()` closes intake, drains to a deadline, counts what it could not drain, finalizes and joins; nothing is detached.
+* **Bounded, never silent.** A full queue rejects the newest message and counts it against its topic. `received = processed + dropped_ingest + dropped_at_shutdown` is asserted under four concurrent producers. A bundle that lost anything says `complete_with_loss`; one that could not be written says `write_failed` and keeps its `.partial` name.
+* **Evidence.** The existing flight-bundle format (so every Python tool reads it), plus `integrity.json`: record count, SHA-256 streamed while writing, and a CRC-32C chunk table that locates a flipped byte, a truncation or appended data. A mutex queue measured at 6-8 M pushes/s, over 300x the 20x load, so there is no lock-free queue.
+* **Determinism across languages and architectures.** Floats are printed with Python's `repr` rules and compiled with `-ffp-contract=off` (no fused multiply-add on the aarch64 Jetson), which is what keeps replays byte-identical to Python and, at gate H0, across x86 and ARM.
+* **Sanitizers.** ASan and UBSan with GCC; TSan with Clang 14, because GCC 11's TSan runtime does not intercept `pthread_cond_clockwait` and reports a false double lock inside `condition_variable_any`. A deliberate race is detected by the same setup.
+
+Design: [docs/CPP_ARCHITECTURE.md](docs/CPP_ARCHITECTURE.md). Hardware plan: [docs/CPP_HARDWARE_VALIDATION.md](docs/CPP_HARDWARE_VALIDATION.md).
+
+## Limitations
+
+* No GO2 or Jetson result exists for the C++ runtime yet. The recorder's CPU on the Orin NX, the payload disk under fsync, and whether Cyclone supplies DDS source timestamps there are open until H0/H1.
+* Not hard real-time. "Deterministic" means replay ordering, state transitions and evidence processing are a function of (evidence, build, configuration, faults). It says nothing about Linux scheduling of the live recorder.
+* The arbitration models are models. `helix_arbiter` is checked against HELIX's own code; `twist_mux_legacy` against HELIX's measurements of twist_mux 4.3.0, not against the binary.
+* The golden replay evidence is synthetic; the HELIX rehearsal evidence is real software on a fake robot. Neither is a physical-robot recording.
+* `byte[]` (octet) arrays decode to lists of integers, where the Python recorder writes base64 per element; no profile topic uses them.
+
+---
+
+# Incident intelligence (Python daemon)
+
+The rest of this README describes the Python incident-intelligence daemon, which shares the repository and the flight-bundle evidence.
 
 When a ROS 2 robot misbehaves in the field, the honest answer to "what just happened?" is usually an afternoon of SSH, `journalctl`, and Slack archaeology. BlackBoxRS turns that afternoon into a paragraph.
 

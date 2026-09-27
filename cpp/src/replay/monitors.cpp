@@ -379,7 +379,9 @@ void CommandPath::set_latest(const std::string& topic, Latest next, std::int64_t
 }
 
 bool CommandPath::justified(const std::array<double, 3>& cmd, std::int64_t t) const {
-  for (const auto& [topic, window] : sources_) {
+  for (const auto& source : sources_) {
+    const std::string& topic = source.first;
+    const std::int64_t window = source.second;
     auto backs = [&](const Latest& m) {
       return m.valid && m.cmd && t - m.t_ns <= window + grace_ns_ && close3(*m.cmd, cmd);
     };
