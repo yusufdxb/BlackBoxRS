@@ -313,18 +313,29 @@ Json bench_soak(const Profile& profile, double scale, std::chrono::seconds durat
   const auto load = bench::go2_helix_load();
   auto rec = std::make_unique<recorder::Recorder>(profile, recorder_config(dir),
                                                   std::make_unique<bench::JsonPayloadDecoder>());
-  Json samples = Json::array();
+  // Samples are plain structs in storage reserved up front, so the
+  // measuring harness does not itself grow the RSS it measures (a JSON
+  // object per sample did, by about 1 MB over 30 min).
+  struct Sample {
+    double t_s;
+    double rss_mb;
+    std::size_t queue_depth;
+    std::uint64_t records_written;
+    std::uint64_t dropped;
+  };
+  std::vector<Sample> raw;
+  raw.reserve(static_cast<std::size_t>(duration.count()) + 16);
   std::atomic<bool> running{true};
   std::jthread sampler([&] {
     const auto t0 = Clock::now();
     while (running.load()) {
       std::this_thread::sleep_for(1s);
       const auto m = rec->metrics();
-      samples.push_back({{"t_s", std::chrono::duration<double>(Clock::now() - t0).count()},
-                         {"rss_mb", recorder::current_rss_mb().value_or(0.0)},
-                         {"queue_depth", m.ingest.depth},
-                         {"records_written", m.writer.records_written},
-                         {"dropped", m.dropped_ingest}});
+      if (raw.size() < raw.capacity()) {
+        raw.push_back({std::chrono::duration<double>(Clock::now() - t0).count(),
+                       recorder::current_rss_mb().value_or(0.0), m.ingest.depth,
+                       m.writer.records_written, m.dropped_ingest});
+      }
     }
   });
   const bench::GeneratorResult g = bench::run_load(*rec, load, scale, duration, 0);
@@ -334,6 +345,14 @@ Json bench_soak(const Profile& profile, double scale, std::chrono::seconds durat
   const auto m = rec->metrics();
   const auto bundles = rec->bundles();
   rec.reset();
+  Json samples = Json::array();
+  for (const Sample& x : raw) {
+    samples.push_back({{"t_s", x.t_s},
+                       {"rss_mb", x.rss_mb},
+                       {"queue_depth", x.queue_depth},
+                       {"records_written", x.records_written},
+                       {"dropped", x.dropped}});
+  }
   // RSS slope after a warmup of 10 % of the run (least squares, MB per hour).
   std::vector<double> ts;
   std::vector<double> rs;

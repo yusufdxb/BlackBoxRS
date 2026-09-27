@@ -1,0 +1,169 @@
+{
+  "environment": {
+    "arch": "x86_64",
+    "build_type": "Debug",
+    "compiler": "GNU 11.4.0",
+    "cpu_model": "AMD Ryzen 9 9900X 12-Core Processor",
+    "git_dirty": false,
+    "git_sha": "7e100e51956d4dd10e2ce928e786d5b1cf02c77e",
+    "kernel": "6.8.0-138-generic",
+    "logical_cpus": 24,
+    "version": "0.5.0"
+  },
+  "load": [
+    {
+      "hz_at_1x": 500.0,
+      "in_profile": true,
+      "rate_source": "measured on GO2 (field notes 2026-09-01/02)",
+      "topic": "/lowstate"
+    },
+    {
+      "hz_at_1x": 295.0,
+      "in_profile": true,
+      "rate_source": "measured on GO2 (field notes 2026-09-01/02)",
+      "topic": "/sportmodestate"
+    },
+    {
+      "hz_at_1x": 151.0,
+      "in_profile": true,
+      "rate_source": "measured on GO2 (field notes 2026-09-01/02)",
+      "topic": "/utlidar/robot_odom"
+    },
+    {
+      "hz_at_1x": 50.0,
+      "in_profile": true,
+      "rate_source": "HELIX arbiter.yaml rate_hz",
+      "topic": "/helix/arbiter/status"
+    },
+    {
+      "hz_at_1x": 20.0,
+      "in_profile": true,
+      "rate_source": "HELIX recovery hold publisher (20 Hz)",
+      "topic": "/helix/hold"
+    },
+    {
+      "hz_at_1x": 20.0,
+      "in_profile": true,
+      "rate_source": "navigation source as in the Replay Lab evidence",
+      "topic": "/nav/cmd_vel"
+    }
+  ],
+  "peak_rss_mb": 61.640625,
+  "profile": {
+    "name": "go2_helix",
+    "path": "./blackboxrs/flight/profiles/go2_helix.yaml",
+    "sha256": "2fb27b3b5086960af595be12e0a9a2b33bf26d2f7f9327dc6bff937cb585392e"
+  },
+  "record": [
+    {
+      "bytes_written": 3869851,
+      "cpu_percent": {
+        "pipeline_thread": 1.9003684907621645,
+        "process_including_load_generator": 4.475868070556893,
+        "writer_thread": 0.5000969712532012
+      },
+      "dropped_at_shutdown": 0,
+      "dropped_events": 0,
+      "dropped_ingest": 0,
+      "duration_s": 9.998060951,
+      "evidence": "verified",
+      "expected_msgs_per_sec": 1036.0,
+      "offered": 10360,
+      "offered_msgs_per_sec": 1036.200924436633,
+      "peak_queue_depth": 3,
+      "processed": 10360,
+      "push_latency_us": {
+        "max": 7.539,
+        "p50": 0.77,
+        "p95": 1.32,
+        "p99": 2.58,
+        "samples": 648
+      },
+      "queue_capacity": 65536,
+      "received": 10360,
+      "records_written": 10383,
+      "rss_mb": {
+        "before": 11.1953125,
+        "end": 22.76171875
+      },
+      "scale": 1.0,
+      "stop_s": 0.01234045,
+      "write_mb_per_sec": 0.3870601528602344,
+      "writer_max_lag_ms": 11.850459
+    },
+    {
+      "bytes_written": 18856450,
+      "cpu_percent": {
+        "pipeline_thread": 8.000269097851403,
+        "process_including_load_generator": 17.901583920092467,
+        "writer_thread": 2.400080729355421
+      },
+      "dropped_at_shutdown": 0,
+      "dropped_events": 0,
+      "dropped_ingest": 0,
+      "duration_s": 9.999663639,
+      "evidence": "verified",
+      "expected_msgs_per_sec": 5180.0,
+      "offered": 51800,
+      "offered_msgs_per_sec": 5180.174240858783,
+      "peak_queue_depth": 4,
+      "processed": 51800,
+      "push_latency_us": {
+        "max": 5.44,
+        "p50": 0.73,
+        "p95": 1.23,
+        "p99": 1.39,
+        "samples": 3238
+      },
+      "queue_capacity": 65536,
+      "received": 51800,
+      "records_written": 51823,
+      "rss_mb": {
+        "before": 22.76171875,
+        "end": 30.44921875
+      },
+      "scale": 5.0,
+      "stop_s": 0.015581436,
+      "write_mb_per_sec": 1.8857084278772511,
+      "writer_max_lag_ms": 14.247748
+    }
+  ],
+  "replay": [
+    {
+      "case": "nominal_motion",
+      "dispatches_per_sec": 28975.222133655585,
+      "ms_per_replay": 25.435525450000004,
+      "replay_x_realtime": 235.89054654265064,
+      "runs": 20
+    },
+    {
+      "case": "clean_stop",
+      "dispatches_per_sec": 28681.493251059597,
+      "ms_per_replay": 25.940071999999997,
+      "replay_x_realtime": 231.43925730044236,
+      "runs": 20
+    },
+    {
+      "case": "stale_command__twist_mux_legacy",
+      "dispatches_per_sec": 25896.09724506896,
+      "ms_per_replay": 26.915252649999996,
+      "replay_x_realtime": 222.92192750418045,
+      "runs": 20
+    },
+    {
+      "case": "teleop_vs_stop__helix_arbiter",
+      "dispatches_per_sec": 26051.472861053528,
+      "ms_per_replay": 29.3649424,
+      "replay_x_realtime": 204.4462037834612,
+      "runs": 20
+    }
+  ],
+  "schema": "blackboxrs.benchmark.v1",
+  "serialize": {
+    "mb_per_sec": 66.24007284289004,
+    "mean_record_bytes": 426.073,
+    "records": 200000.0,
+    "records_per_sec": 155466.48776826984
+  },
+  "warning": "not a Release build: numbers are not representative"
+}
