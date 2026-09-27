@@ -79,15 +79,29 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Replay Lab tests (unit, faults, invariants, golden cases, determinism, fixtures)
-        # No ROS, robot or network needed. test_helix_parity skips here: it
-        # needs a HELIX checkout (HELIX_SRC), which is a separate repository.
+      - name: Check out HELIX at the pinned commit (arbiter parity)
+        uses: actions/checkout@v5
+        with:
+          repository: yusufdxb/helix
+          ref: b31a9ce8b49cd5f282b02c8dc5ee6d25287bb186
+          path: helix-src
+          fetch-depth: 0
+
+      - name: Replay Lab tests (unit, faults, invariants, golden cases, determinism, parity)
+        # No ROS, robot or network needed. HELIX_SRC enables the checks that
+        # compare the vendored HELIX files and the adapter with HELIX itself.
+        env:
+          HELIX_SRC: ${{ github.workspace }}/helix-src
         run: |
           python -m pytest -q tests/unit/lab
 
-      - name: Golden cases through the CLI, three identical replays each
+      - name: Arbiter parity gate
         run: |
           mkdir -p artifacts
+          python scripts/parity/gate.py --helix-src helix-src --json artifacts/parity_gate.json
+
+      - name: Golden cases through the CLI, three identical replays each
+        run: |
           robot-blackbox lab verify examples/replay_lab/cases --repeat 3 \
             --json artifacts/replay_lab_verify.json
 
