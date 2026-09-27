@@ -185,9 +185,7 @@ Json coerce(const ParamSpec& spec, const Json& v) {
   switch (spec.type) {
     case ParamType::f64: {
       double d = 0.0;
-      if (v.is_boolean()) {
-        bad_param(spec, v);
-      } else if (v.is_number()) {
+      if (v.is_number() && !v.is_boolean()) {
         d = v.get<double>();
       } else if (v.is_string()) {
         const auto p = parse_float_text(v.get<std::string>());

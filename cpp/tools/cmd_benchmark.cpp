@@ -186,6 +186,7 @@ Json bench_queue() {
     });
     {
       std::vector<std::jthread> ps;
+      ps.reserve(static_cast<std::size_t>(producers));
       for (int p = 0; p < producers; ++p) {
         ps.emplace_back([&] {
           for (std::uint64_t i = 0; i < kEach; ++i) {

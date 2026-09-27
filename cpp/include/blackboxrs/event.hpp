@@ -35,6 +35,7 @@ struct OrderKey {
   std::int32_t origin = 0;
   std::int64_t a = 0;
   std::int64_t b = 0;
+  // NOLINTNEXTLINE(modernize-use-nullptr): clang-tidy 14 false positive on a defaulted <=>
   friend constexpr auto operator<=>(const OrderKey&, const OrderKey&) = default;
 };
 

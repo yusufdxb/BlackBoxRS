@@ -54,6 +54,7 @@ Timeline::Timeline(const std::vector<InjectionLog>& faults, std::set<std::string
       source_topics_(std::move(source_topics)),
       observer_(std::move(observer)) {
   std::vector<const InjectionLog*> sorted;
+  sorted.reserve(faults.size());
   for (const auto& f : faults) {
     sorted.push_back(&f);
   }

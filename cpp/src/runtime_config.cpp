@@ -3,11 +3,13 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 #include "blackboxrs/integrity.hpp"
 
@@ -19,21 +21,22 @@ namespace {
 // Every control-path topic in HELIX's own list of real motion topics
 // (helix preflight.py) and the GO2 vendor control topics. /helix/hold can
 // release a hold, so it is a control topic too.
-const std::vector<std::string> kForbidden{"/cmd_vel",
-                                          "/nav/cmd_vel",
-                                          "/teleop/cmd_vel",
-                                          "/helix/cmd_vel",
-                                          "/helix/hold",
-                                          "/api/sport/request",
-                                          "/lowcmd",
-                                          "/wirelesscontroller",
-                                          "/api/motion_switcher/request",
-                                          "/api/robot_state/request"};
-const std::vector<std::string> kForbiddenPrefixes{"/api/", "/helix_dry/"};
+constexpr std::array<std::string_view, 10> kForbidden{"/cmd_vel",
+                                                      "/nav/cmd_vel",
+                                                      "/teleop/cmd_vel",
+                                                      "/helix/cmd_vel",
+                                                      "/helix/hold",
+                                                      "/api/sport/request",
+                                                      "/lowcmd",
+                                                      "/wirelesscontroller",
+                                                      "/api/motion_switcher/request",
+                                                      "/api/robot_state/request"};
+constexpr std::array<std::string_view, 2> kForbiddenPrefixes{"/api/", "/helix_dry/"};
 
 class Reader {
  public:
-  Reader(YAML::Node root, std::string where) : root_(std::move(root)), where_(std::move(where)) {}
+  // YAML::Node is a reference-counted handle: copying it is the intended use.
+  Reader(const YAML::Node& root, std::string where) : root_(root), where_(std::move(where)) {}
 
   YAML::Node section(const char* name) {
     seen_.insert(name);
@@ -139,11 +142,15 @@ std::vector<std::string> str_list(const Reader& r, const YAML::Node& n, const st
 
 }  // namespace
 
+// Built on first use, so an allocation failure is an ordinary, catchable
+// exception rather than one thrown during static initialization.
 const std::vector<std::string>& builtin_forbidden_topics() {
-  return kForbidden;
+  static const std::vector<std::string> v(kForbidden.begin(), kForbidden.end());
+  return v;
 }
 const std::vector<std::string>& builtin_forbidden_prefixes() {
-  return kForbiddenPrefixes;
+  static const std::vector<std::string> v(kForbiddenPrefixes.begin(), kForbiddenPrefixes.end());
+  return v;
 }
 
 std::string expand_user(const std::string& path) {
@@ -315,14 +322,14 @@ RuntimeConfig load_runtime_config(const std::string& path) {
 
     YAML::Node s = r.section("safety");
     r.check_unknown(s, {"forbidden_publish_topics", "forbidden_publish_prefixes"}, "safety.");
-    c.forbidden_topics = kForbidden;
+    c.forbidden_topics = builtin_forbidden_topics();
     for (auto& t : str_list(r, s["forbidden_publish_topics"], "safety.forbidden_publish_topics")) {
       if (t.empty() || t.front() != '/') {
         r.fail("safety.forbidden_publish_topics: '" + t + "' must be fully qualified");
       }
       c.forbidden_topics.push_back(std::move(t));
     }
-    c.forbidden_prefixes = kForbiddenPrefixes;
+    c.forbidden_prefixes = builtin_forbidden_prefixes();
     for (auto& p :
          str_list(r, s["forbidden_publish_prefixes"], "safety.forbidden_publish_prefixes")) {
       c.forbidden_prefixes.push_back(std::move(p));

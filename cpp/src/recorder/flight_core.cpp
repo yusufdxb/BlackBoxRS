@@ -26,9 +26,9 @@ bool contains(const std::vector<std::string>& v, const Json* x) {
   return std::find(v.begin(), v.end(), x->get<std::string>()) != v.end();
 }
 
-Json get_or(const Json& d, const char* key, Json def) {
+Json get_or(const Json& d, const char* key, const Json& def) {
   const auto it = d.find(key);
-  return it == d.end() ? std::move(def) : *it;
+  return it == d.end() ? def : *it;
 }
 
 }  // namespace

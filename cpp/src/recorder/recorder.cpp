@@ -113,7 +113,7 @@ Recorder::Recorder(Profile profile, RecorderConfig config, std::unique_ptr<Messa
         if (ec) {
           return {false, "disk_unknown: " + ec.message()};
         }
-        const auto free_mb = static_cast<std::int64_t>(space.available / (1024 * 1024));
+        const auto free_mb = static_cast<std::int64_t>(space.available / (1024ULL * 1024ULL));
         if (free_mb < floor_mb) {
           return {false, "disk_pressure: " + std::to_string(free_mb) + " MB free < floor " +
                              std::to_string(floor_mb) + " MB"};
