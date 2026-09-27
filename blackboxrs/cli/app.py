@@ -29,6 +29,7 @@ from blackboxrs.cli.formatters import (
     format_status,
 )
 from blackboxrs.cli.flight_cmd import flight_group
+from blackboxrs.cli.lab_cmd import lab_group
 from blackboxrs.cli.incident_cmd import (
     incident_group,
     preflight_cmd,
@@ -58,6 +59,7 @@ cli.add_command(incident_group)
 cli.add_command(preflight_cmd)
 cli.add_command(prevention_group)
 cli.add_command(flight_group)
+cli.add_command(lab_group)
 
 
 # ---------------------------------------------------------------------------
