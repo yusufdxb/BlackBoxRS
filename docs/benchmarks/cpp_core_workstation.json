@@ -4,8 +4,8 @@
     "build_type": "Release",
     "compiler": "GNU 11.4.0",
     "cpu_model": "AMD Ryzen 9 9900X 12-Core Processor",
-    "git_dirty": true,
-    "git_sha": "cf4169fc474eba99daf3fdc0a762dcee20ffa751",
+    "git_dirty": false,
+    "git_sha": "20cef290353777f1f21e1f00a4ac9e39d8c9c580",
     "kernel": "6.8.0-138-generic",
     "logical_cpus": 24,
     "version": "0.5.0"
@@ -48,7 +48,7 @@
       "topic": "/nav/cmd_vel"
     }
   ],
-  "peak_rss_mb": 472.77734375,
+  "peak_rss_mb": 473.06640625,
   "profile": {
     "name": "go2_helix",
     "path": "./blackboxrs/flight/profiles/go2_helix.yaml",
@@ -57,246 +57,246 @@
   "queue": [
     {
       "consumed": 500000,
-      "high_water": 556,
+      "high_water": 267,
       "offered": 500000.0,
       "producers": 1,
-      "push_ops_per_sec": 6357456.834679968,
+      "push_ops_per_sec": 6732511.980336756,
       "rejected_full": 0
     },
     {
       "consumed": 1000000,
-      "high_water": 2550,
+      "high_water": 1968,
       "offered": 1000000.0,
       "producers": 2,
-      "push_ops_per_sec": 8388584.183821126,
+      "push_ops_per_sec": 5166194.701200446,
       "rejected_full": 0
     },
     {
       "consumed": 2000000,
-      "high_water": 239,
+      "high_water": 282,
       "offered": 2000000.0,
       "producers": 4,
-      "push_ops_per_sec": 6822676.116518836,
+      "push_ops_per_sec": 7034120.270028481,
       "rejected_full": 0
     }
   ],
   "record": [
     {
-      "bytes_written": 11630475,
+      "bytes_written": 11630540,
       "cpu_percent": {
-        "pipeline_thread": 0.5000324366041301,
-        "process_including_load_generator": 1.365868786895433,
-        "writer_thread": 0.36669045350969537
+        "pipeline_thread": 0.46669694191955163,
+        "process_including_load_generator": 1.3686746192164418,
+        "writer_thread": 0.3333549585139654
       },
       "dropped_at_shutdown": 0,
       "dropped_events": 0,
       "dropped_ingest": 0,
-      "duration_s": 29.99805393,
+      "duration_s": 29.99805386,
       "evidence": "verified",
       "expected_msgs_per_sec": 1036.0,
       "offered": 31080,
-      "offered_msgs_per_sec": 1036.0672086437576,
-      "peak_queue_depth": 3,
+      "offered_msgs_per_sec": 1036.0672110614046,
+      "peak_queue_depth": 2,
       "processed": 31080,
       "push_latency_us": {
-        "max": 5.96,
-        "p50": 0.57,
-        "p95": 0.84,
-        "p99": 1.23,
+        "max": 3.62,
+        "p50": 0.58,
+        "p95": 0.88,
+        "p99": 1.28,
         "samples": 1943
       },
       "queue_capacity": 65536,
       "received": 31080,
       "records_written": 31143,
       "rss_mb": {
-        "before": 10.734375,
-        "end": 26.48046875
+        "before": 10.73828125,
+        "end": 26.4140625
       },
       "scale": 1.0,
-      "stop_s": 0.012637263,
-      "write_mb_per_sec": 0.3877076502075613,
-      "writer_max_lag_ms": 13.72923
+      "stop_s": 0.015627331,
+      "write_mb_per_sec": 0.38770981791950154,
+      "writer_max_lag_ms": 13.798315
     },
     {
-      "bytes_written": 22870917,
+      "bytes_written": 22871098,
       "cpu_percent": {
-        "pipeline_thread": 0.833359638580333,
-        "process_including_load_generator": 2.1667948543705604,
-        "writer_thread": 0.633353325321053
+        "pipeline_thread": 0.8000252337025663,
+        "process_including_load_generator": 2.170472760854135,
+        "writer_thread": 0.6000189252769247
       },
       "dropped_at_shutdown": 0,
       "dropped_events": 0,
       "dropped_ingest": 0,
-      "duration_s": 29.999053041,
+      "duration_s": 29.999053766,
       "evidence": "verified",
       "expected_msgs_per_sec": 2072.0,
       "offered": 62160,
-      "offered_msgs_per_sec": 2072.06540536614,
+      "offered_msgs_per_sec": 2072.0653552896465,
       "peak_queue_depth": 3,
       "processed": 62160,
       "push_latency_us": {
-        "max": 6.54,
+        "max": 1.82,
         "p50": 0.51,
-        "p95": 0.7,
-        "p99": 1.09,
+        "p95": 0.69,
+        "p99": 1.01,
         "samples": 3885
       },
       "queue_capacity": 65536,
       "received": 62160,
       "records_written": 62223,
       "rss_mb": {
-        "before": 26.48046875,
-        "end": 42.51953125
+        "before": 26.4140625,
+        "end": 42.46484375
       },
       "scale": 2.0,
-      "stop_s": 0.012575323,
-      "write_mb_per_sec": 0.7623879650048317,
-      "writer_max_lag_ms": 11.894211
+      "stop_s": 0.014888189,
+      "write_mb_per_sec": 0.7623939801035123,
+      "writer_max_lag_ms": 11.752186
     },
     {
-      "bytes_written": 56660281,
+      "bytes_written": 56651041,
       "cpu_percent": {
-        "pipeline_thread": 1.7666870984029597,
-        "process_including_load_generator": 4.779165028051365,
-        "writer_thread": 1.3666824723494595
+        "pipeline_thread": 1.8333545376063565,
+        "process_including_load_generator": 4.801780419089855,
+        "writer_thread": 1.3666824734883747
       },
       "dropped_at_shutdown": 0,
       "dropped_events": 0,
       "dropped_ingest": 0,
-      "duration_s": 29.99965305,
+      "duration_s": 29.999653025,
       "evidence": "verified",
       "expected_msgs_per_sec": 5180.0,
       "offered": 155400,
-      "offered_msgs_per_sec": 5180.059907392829,
+      "offered_msgs_per_sec": 5180.059911709595,
       "peak_queue_depth": 4,
       "processed": 155400,
       "push_latency_us": {
-        "max": 8.47,
-        "p50": 0.5,
-        "p95": 0.63,
-        "p99": 0.92,
+        "max": 5.06,
+        "p50": 0.47,
+        "p95": 0.6,
+        "p99": 0.81,
         "samples": 9713
       },
       "queue_capacity": 65536,
       "received": 155400,
       "records_written": 155463,
       "rss_mb": {
-        "before": 42.51953125,
-        "end": 42.67578125
+        "before": 42.46484375,
+        "end": 42.6015625
       },
       "scale": 5.0,
-      "stop_s": 0.013117086,
-      "write_mb_per_sec": 1.8886978761242708,
-      "writer_max_lag_ms": 13.555771
+      "stop_s": 0.015039652,
+      "write_mb_per_sec": 1.8883898741358858,
+      "writer_max_lag_ms": 13.812224
     },
     {
-      "bytes_written": 113044639,
+      "bytes_written": 113041671,
       "cpu_percent": {
-        "pipeline_thread": 3.3000211266252517,
-        "process_including_load_generator": 8.819015113022177,
-        "writer_thread": 2.5333495517527185
+        "pipeline_thread": 3.2000205338917618,
+        "process_including_load_generator": 8.567925553119439,
+        "writer_thread": 2.4333489476468606
       },
       "dropped_at_shutdown": 0,
       "dropped_events": 0,
       "dropped_ingest": 0,
-      "duration_s": 29.999807941,
+      "duration_s": 29.999807496,
       "evidence": "verified",
       "expected_msgs_per_sec": 10360.0,
       "offered": 310800,
-      "offered_msgs_per_sec": 10360.066324799276,
+      "offered_msgs_per_sec": 10360.066478474579,
       "peak_queue_depth": 4,
       "processed": 310800,
       "push_latency_us": {
-        "max": 7.43,
-        "p50": 0.49,
-        "p95": 0.62,
-        "p99": 0.94,
+        "max": 9.07,
+        "p50": 0.47,
+        "p95": 0.58,
+        "p99": 0.74,
         "samples": 19425
       },
       "queue_capacity": 65536,
       "received": 310800,
       "records_written": 310863,
       "rss_mb": {
-        "before": 42.67578125,
-        "end": 42.9375
+        "before": 42.6015625,
+        "end": 42.87109375
       },
       "scale": 10.0,
-      "stop_s": 0.012959388,
-      "write_mb_per_sec": 3.76817875708813,
-      "writer_max_lag_ms": 13.625681
+      "stop_s": 0.015914621,
+      "write_mb_per_sec": 3.768079879014968,
+      "writer_max_lag_ms": 13.6604
     },
     {
-      "bytes_written": 225811699,
+      "bytes_written": 225804246,
       "cpu_percent": {
-        "pipeline_thread": 5.333341668279693,
-        "process_including_load_generator": 14.647314167073853,
-        "writer_thread": 4.233339949197006
+        "pipeline_thread": 5.366675097892134,
+        "process_including_load_generator": 14.506120753266723,
+        "writer_thread": 4.166673212649172
       },
       "dropped_at_shutdown": 0,
       "dropped_events": 0,
       "dropped_ingest": 0,
-      "duration_s": 29.999953116,
+      "duration_s": 29.999952869,
       "evidence": "verified",
       "expected_msgs_per_sec": 20720.0,
       "offered": 621600,
-      "offered_msgs_per_sec": 20720.032381266607,
-      "peak_queue_depth": 63,
+      "offered_msgs_per_sec": 20720.032551861805,
+      "peak_queue_depth": 6,
       "processed": 621600,
       "push_latency_us": {
-        "max": 9.119,
-        "p50": 0.36,
-        "p95": 0.55,
-        "p99": 0.909,
+        "max": 8.48,
+        "p50": 0.38,
+        "p95": 0.56,
+        "p99": 0.88,
         "samples": 38850
       },
       "queue_capacity": 65536,
       "received": 621600,
       "records_written": 621663,
       "rss_mb": {
-        "before": 42.9375,
-        "end": 43.55859375
+        "before": 42.87109375,
+        "end": 43.41796875
       },
       "scale": 20.0,
-      "stop_s": 0.014786027,
-      "write_mb_per_sec": 7.527068396635824,
-      "writer_max_lag_ms": 16.045712
+      "stop_s": 0.016123534,
+      "write_mb_per_sec": 7.5268200248851524,
+      "writer_max_lag_ms": 13.728155
     }
   ],
   "replay": [
     {
       "case": "nominal_motion",
-      "dispatches_per_sec": 260897.16019813105,
-      "ms_per_replay": 2.82486785,
-      "replay_x_realtime": 2123.9931630784076,
+      "dispatches_per_sec": 257775.52141613548,
+      "ms_per_replay": 2.85907675,
+      "replay_x_realtime": 2098.5795501992034,
       "runs": 20
     },
     {
       "case": "clean_stop",
-      "dispatches_per_sec": 257650.01061507655,
-      "ms_per_replay": 2.88763815,
-      "replay_x_realtime": 2079.0523902726527,
+      "dispatches_per_sec": 256389.80513496054,
+      "ms_per_replay": 2.90183145,
+      "replay_x_realtime": 2068.8834280847013,
       "runs": 20
     },
     {
       "case": "stale_command__twist_mux_legacy",
-      "dispatches_per_sec": 238245.78771961917,
-      "ms_per_replay": 2.9255501500000003,
-      "replay_x_realtime": 2050.896307485961,
+      "dispatches_per_sec": 235750.130702646,
+      "ms_per_replay": 2.9565200999999997,
+      "replay_x_realtime": 2029.412889836264,
       "runs": 20
     },
     {
       "case": "teleop_vs_stop__helix_arbiter",
-      "dispatches_per_sec": 238503.73791475839,
-      "ms_per_replay": 3.2074969,
-      "replay_x_realtime": 1871.7246454704289,
+      "dispatches_per_sec": 235806.80025198963,
+      "ms_per_replay": 3.2441812499999996,
+      "replay_x_realtime": 1850.5596744941424,
       "runs": 20
     }
   ],
   "schema": "blackboxrs.benchmark.v1",
   "serialize": {
-    "mb_per_sec": 916.2117098394913,
+    "mb_per_sec": 925.5251308595388,
     "mean_record_bytes": 426.073,
     "records": 200000.0,
-    "records_per_sec": 2150363.223765625
+    "records_per_sec": 2172221.968675647
   }
 }
