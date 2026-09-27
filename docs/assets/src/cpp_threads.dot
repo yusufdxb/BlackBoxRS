@@ -1,0 +1,18 @@
+digraph T {
+  graph [rankdir=LR, fontname="Helvetica", fontsize=11, nodesep=0.3, ranksep=0.5, pad=0.2];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, fillcolor="#f4f1ea", color="#5b5146"];
+  edge  [color="#5b5146", fontname="Helvetica", fontsize=9];
+  subgraph cluster_exec { label="ROS executor thread"; fontname="Helvetica"; style="rounded"; color="#3d5a78";
+    cb [label="subscription callback\nstamp mono/wall/ros + DDS times\ndecimation decision\ntry_push (never blocks)"];
+    tm [label="timers\ngraph snapshot, marker drain"]; }
+  iq [label="IngestQueue\nbounded, control reserve", shape=cylinder, fillcolor="#fbf7ef"];
+  subgraph cluster_pipe { label="pipeline jthread"; fontname="Helvetica"; style="rounded"; color="#5b5146";
+    pd [label="introspection decode\nfield extraction\nrecord build"];
+    fc [label="FlightCore\nring + triggers + health tick"]; }
+  wq [label="WriteQueue\nbounded", shape=cylinder, fillcolor="#fbf7ef"];
+  subgraph cluster_w { label="writer jthread"; fontname="Helvetica"; style="rounded"; color="#5b5146";
+    w [label="append JSONL\nCRC-32C chunk, streamed SHA-256\nfsync cadence, finalize + rename"]; }
+  cb -> iq; tm -> iq; iq -> pd -> fc -> wq -> w;
+  st [label="stop_token\n1 stop intake  2 drain to deadline\n3 finalize  4 join", shape=note, fillcolor="#f6e3dc", color="#9a3b22"];
+  st -> pd [style=dashed]; st -> w [style=dashed];
+}

@@ -1,0 +1,42 @@
+digraph G {
+  graph [rankdir=TB, fontname="Helvetica", fontsize=11, nodesep=0.35, ranksep=0.45, bgcolor="white", pad=0.2];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, fillcolor="#f4f1ea", color="#5b5146"];
+  edge  [color="#5b5146", fontname="Helvetica", fontsize=9];
+
+  ros [label="ROS 2 / GO2 telemetry\n(DDS, read-only QoS BEST_EFFORT)", fillcolor="#e8eef4", color="#3d5a78"];
+
+  subgraph cluster_ros {
+    label="ros2/blackboxrs_ros (rclcpp)"; fontname="Helvetica"; fontsize=10; color="#3d5a78"; style="rounded";
+    rec  [label="blackboxrs_recorder\nGenericSubscription + message_info"];
+    mon  [label="blackboxrs_monitor\npassive online invariants"];
+    rep  [label="blackboxrs_replay\noffline; /blackboxrs/replay/* only"];
+    pre  [label="preflight\nGO / NO-GO, never commands"];
+    guard[label="PublishGuard\nforbidden motion topics", fillcolor="#f6e3dc", color="#9a3b22"];
+  }
+
+  subgraph cluster_core {
+    label="cpp/ blackboxrs_core (C++20, no ROS)"; fontname="Helvetica"; fontsize=10; color="#5b5146"; style="rounded";
+    q    [label="BoundedQueue\nreject-newest, counted"];
+    dec  [label="decode + typed Event\n(Numeric states, time domains)"];
+    fc   [label="FlightCore\nring, triggers, incidents"];
+    ew   [label="EvidenceWriter\nJSONL + CRC-32C chunks + SHA-256"];
+    rd   [label="EvidenceReader\nstrict validation"];
+    flt  [label="FaultPipeline\n16 typed injectors"];
+    sut  [label="SUT\nhelix_arbiter / twist_mux_legacy / observed"];
+    det  [label="Detectors + Invariants\nPASS / FAIL / INCOMPLETE / NOT_EXERCISED"];
+    ver  [label="Verdict + causal Timeline"];
+  }
+
+  ev  [label="flight bundle\nmanifest.json, records.jsonl, integrity.json", shape=folder, fillcolor="#fbf7ef"];
+  py  [label="Python analysis, reports,\nReplay Lab (reference oracle)", fillcolor="#eef0e6", color="#5d6b3a"];
+  diag[label="/diagnostics\n/blackboxrs/status", fillcolor="#e8eef4", color="#3d5a78"];
+
+  ros -> rec; ros -> mon; ros -> pre;
+  rec -> q -> dec -> fc -> ew -> ev;
+  mon -> dec [style=dashed, label="same decode"];
+  mon -> det [style=dashed];
+  ev -> rd -> flt -> sut -> det -> ver;
+  rep -> rd [style=dashed];
+  ev -> py;
+  mon -> guard; rep -> guard; guard -> diag;
+}
