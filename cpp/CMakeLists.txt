@@ -64,7 +64,8 @@ add_library(blackboxrs_core
 add_library(blackboxrs::core ALIAS blackboxrs_core)
 add_dependencies(blackboxrs_core blackboxrs_build_info)
 target_compile_features(blackboxrs_core PUBLIC cxx_std_20)
-set_target_properties(blackboxrs_core PROPERTIES CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+set_target_properties(blackboxrs_core PROPERTIES CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON
+                                                 EXPORT_NAME core)
 target_include_directories(blackboxrs_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

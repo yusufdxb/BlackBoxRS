@@ -1,0 +1,11 @@
+# Capture profile for the ROS integration tests (standard message types only).
+profile: ros_test
+buffer: {pre_trigger_sec: 1.0, post_trigger_sec: 0.5}
+sampling: {graph_poll_sec: 0.2, system_sample_hz: 2.0, health_tick_sec: 0.05}
+topics:
+  - {name: /bbrs_test/nav, type: geometry_msgs/msg/Twist, role: cmd_vel_source}
+  - {name: /bbrs_test/cmd_out, type: geometry_msgs/msg/Twist, role: cmd_vel_out}
+  - {name: /bbrs_test/odom, type: nav_msgs/msg/Odometry, role: odometry, stale_after_sec: 0.5,
+     expected_hz: 50.0, fields: [header.stamp, pose.pose.position, twist.twist.linear]}
+  - {name: /bbrs_test/text, type: std_msgs/msg/String, role: other}
+  - {name: /bbrs_test/missing_type, type: not_a_pkg/msg/Nope, role: other}
