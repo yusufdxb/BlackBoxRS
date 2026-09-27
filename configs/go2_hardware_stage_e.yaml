@@ -1,0 +1,63 @@
+# BlackBoxRS C++ runtime: HELIX Stage E evidence capture (gate H4).
+#
+# NOT VALIDATED ON HARDWARE. This is the candidate configuration for the
+# passive gates in docs/CPP_HARDWARE_VALIDATION.md. Every number here is a
+# starting value to be checked against the H1 measurements, not a claim.
+#
+# Passive by construction: the recorder only subscribes (BEST_EFFORT,
+# VOLATILE). It publishes diagnostics to /diagnostics and /blackboxrs/status
+# and nothing else; motion and control topics are always forbidden.
+schema: blackboxrs.runtime.v1
+description: HELIX Stage E capture around the hold trigger (gate H4).
+
+# go2_helix leaves /cmd_vel alone: HELIX preflight C6 requires the GO2 sport
+# sink to be its only subscriber. /cmd_vel is reconstructed from
+# ArbiterStatus.out_* instead.
+profile: ../blackboxrs/flight/profiles/go2_helix.yaml
+
+capture:
+  mode: triggered           # bundles around HELIX hold, recovery STOP and arbiter forced-zero (H4)
+  evidence_dir: ~/blackboxrs_evidence
+  hard_disk_floor_mb: 256   # refuse to open evidence below this
+
+queues:
+  # At the measured 1x load (~1036 msg/s, see docs/CPP_BENCHMARKS.md) 16384
+  # items hold ~16 s of traffic if the pipeline stalls completely; the worst
+  # case memory is one serialized message per slot (LowState ~1 KiB).
+  ingest_capacity: 16384
+  control_reserve: 256
+  writer_capacity: 16384
+  drain_deadline_s: 3.0
+
+writer:
+  fsync_every_s: 1.0
+  chunk_records: 1024
+  chunk_bytes: 1048576
+
+subscription:
+  depth: 200
+
+monitor:
+  enabled: true
+  stop_grace_s: 0.05
+  fresh_grace_s: 0.05
+  command_sources:
+    /nav/cmd_vel: 0.5
+    /teleop/cmd_vel: 0.5
+  findings_file: ~/blackboxrs_evidence/online_findings.jsonl
+
+diagnostics:
+  publish: true
+  period_s: 1.0
+
+safety:
+  forbidden_publish_topics: []    # added to the built-in list, never replacing it
+  forbidden_publish_prefixes: []
+
+ros:
+  namespace: /blackbox
+  expect_rmw: rmw_cyclonedds_cpp  # measured on the payload (field notes)
+
+preflight:
+  listen_s: 5.0
+  min_rate_fraction: 0.5

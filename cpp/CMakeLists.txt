@@ -52,6 +52,7 @@ add_library(blackboxrs_core
   src/recorder/recorder.cpp
   src/recorder/system_sampler.cpp
   src/evidence/integrity_record.cpp
+  src/runtime_config.cpp
   src/replay/faults.cpp
   src/replay/sut.cpp
   src/replay/monitors.cpp
