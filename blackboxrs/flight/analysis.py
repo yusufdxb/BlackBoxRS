@@ -242,28 +242,40 @@ def _topic_stats(topic: str, recs: list[dict[str, Any]], status: dict[str, Any],
 
 
 def _seq_loss(recs: list[dict[str, Any]], *, with_epoch: bool) -> dict[str, Any]:
+    """Loss, duplicates, reordering and restarts from the publisher's own counter.
+
+    ``lost`` counts sequence numbers inside a publisher run (one epoch, or
+    until a restart) that never arrived. A number that arrives late is not
+    lost: it is counted in ``reordered``. A number that arrives again is a
+    duplicate.
+    """
     lost = dup = back = restarts = 0
-    prev: tuple[int, int] | None = None
+    top: tuple[int, int] | None = None    # (epoch, highest seq in the current run)
+    seen: set[int] = set()
+
+    def run_lost() -> int:
+        return (max(seen) - min(seen) + 1 - len(seen)) if seen else 0
+
     for r in recs:
         d = r.get("data") or {}
         seq = d.get("seq")
         if not isinstance(seq, int):
             continue
         ep = d.get("epoch") if with_epoch else 0
-        if prev is not None:
-            pe, ps = prev
-            if ep != pe:
+        if top is not None:
+            te, ts = top
+            if ep != te or (not with_epoch and seq < ts and ts - seq >= 1000):
                 restarts += 1
-            elif seq == ps:
+                lost += run_lost()
+                seen, top = set(), None
+            elif seq in seen:
                 dup += 1
-            elif seq < ps:
-                if with_epoch or ps - seq < 1000:
-                    back += 1
-                else:
-                    restarts += 1
-            else:
-                lost += seq - ps - 1
-        prev = (ep, seq) if prev is None or ep != prev[0] or seq >= prev[1] else prev
+                continue
+            elif seq < ts:
+                back += 1
+        seen.add(seq)
+        top = (ep, seq) if top is None else (top[0], max(top[1], seq))
+    lost += run_lost()
     return {"lost": lost, "duplicates": dup, "reordered": back, "publisher_restarts": restarts,
             "method": "gaps in the publisher's own sequence counter"}
 
