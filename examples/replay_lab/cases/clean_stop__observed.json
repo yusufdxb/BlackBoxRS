@@ -1,0 +1,22 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "clean_stop__observed",
+  "regression": "Same STOP judged on the recorded arbiter output (/cmd_vel and ArbiterStatus) instead of the model.",
+  "initial_conditions": "As nominal_motion, but at t=3.0 s an injected benign HELIX fault is diagnosed, STOP_AND_HOLD is accepted and /helix/hold asserts (epoch/seq ordered, 10 Hz); /nav/cmd_vel keeps commanding 0.15 m/s throughout.",
+  "injected_fault": "none",
+  "evidence": "../evidence/clean_stop",
+  "sut": {
+    "mode": "observed"
+  },
+  "faults": [],
+  "expect": {
+    "verdict": "PASS",
+    "invariants": {
+      "stop_dominance": "PASS",
+      "consistent_state": "PASS",
+      "fresh_output": "PASS",
+      "finite_output": "PASS"
+    },
+    "detections": []
+  }
+}

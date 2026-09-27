@@ -1,0 +1,57 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "teleop_vs_stop__twist_mux_legacy",
+  "regression": "Higher-priority teleop overriding STOP: HELIX at priority 100 sits below teleop at 200, so a live joystick stream defeats STOP_AND_HOLD (HELIX docs/MOTION_ARBITRATION.md, table row 5).",
+  "initial_conditions": "As nominal_motion, but at t=3.0 s an injected benign HELIX fault is diagnosed, STOP_AND_HOLD is accepted and /helix/hold asserts (epoch/seq ordered, 10 Hz); /nav/cmd_vel keeps commanding 0.15 m/s throughout.",
+  "injected_fault": "An operator teleop stream commands 0.4 m/s from t=3.5 to 4.5 s (then releases with one zero twist) while the hold is asserted.",
+  "evidence": "../evidence/clean_stop",
+  "sut": {
+    "mode": "reference",
+    "preset": "twist_mux_legacy"
+  },
+  "faults": [
+    {
+      "kind": "inject_stream",
+      "topic": "/teleop/cmd_vel",
+      "data": {
+        "linear": {
+          "x": 0.4,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "angular": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "final_data": {
+        "linear": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "angular": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "from_s": 3.5,
+      "to_s": 4.5,
+      "rate_hz": 20
+    }
+  ],
+  "expect": {
+    "verdict": "FAIL",
+    "invariants": {
+      "stop_dominance": "FAIL",
+      "fresh_output": "PASS",
+      "finite_output": "PASS"
+    },
+    "detections": [],
+    "info": [
+      "motion_request_while_held"
+    ]
+  }
+}

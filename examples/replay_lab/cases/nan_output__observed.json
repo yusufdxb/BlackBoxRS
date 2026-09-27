@@ -1,0 +1,27 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "nan_output__observed",
+  "regression": "NaN reaching the robot-facing output of recorded evidence is an invariant violation, not just a detection.",
+  "initial_conditions": "Synthetic GO2 + HELIX run (6.5 s): /nav/cmd_vel at 20 Hz commands 0 m/s, then 0.15 m/s from t=2 s; HELIX hold published at 10 Hz, never asserted; odometry and lowstate at 20 Hz from the robot host, whose clock is 1.734 s ahead of the payload.",
+  "injected_fault": "The recorded /cmd_vel output carries NaN linear.x for 0.1 s from t=3.0 s.",
+  "evidence": "../evidence/nominal_motion",
+  "sut": {
+    "mode": "observed"
+  },
+  "faults": [
+    {
+      "kind": "nan",
+      "topic": "/cmd_vel",
+      "field": "linear.x",
+      "from_s": 3.0,
+      "to_s": 3.1
+    }
+  ],
+  "expect": {
+    "verdict": "FAIL",
+    "invariants": {
+      "finite_output": "FAIL"
+    },
+    "detections": []
+  }
+}

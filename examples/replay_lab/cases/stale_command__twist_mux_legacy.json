@@ -1,0 +1,28 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "stale_command__twist_mux_legacy",
+  "regression": "Command continuing after its freshness window: twist_mux publishes nothing when every input is stale and the consumer keeps its last command (HELIX docs/MOTION_ARBITRATION.md, table rows 1-3).",
+  "initial_conditions": "Synthetic GO2 + HELIX run (6.5 s): /nav/cmd_vel at 20 Hz commands 0 m/s, then 0.15 m/s from t=2 s; HELIX hold published at 10 Hz, never asserted; odometry and lowstate at 20 Hz from the robot host, whose clock is 1.734 s ahead of the payload.",
+  "injected_fault": "/nav/cmd_vel stops at t=4.0 s while its last command is 0.15 m/s.",
+  "evidence": "../evidence/nominal_motion",
+  "sut": {
+    "mode": "reference",
+    "preset": "twist_mux_legacy"
+  },
+  "faults": [
+    {
+      "kind": "drop",
+      "topic": "/nav/cmd_vel",
+      "from_s": 4.0
+    }
+  ],
+  "expect": {
+    "verdict": "FAIL",
+    "invariants": {
+      "fresh_output": "FAIL"
+    },
+    "detections": [
+      "command_source_stale"
+    ]
+  }
+}

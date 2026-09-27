@@ -1,0 +1,25 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "nominal_motion",
+  "regression": "A nominal replay must not produce an incident. The constant robot clock offset is reported as info only.",
+  "initial_conditions": "No fault. Baseline for false positives.",
+  "injected_fault": "none",
+  "evidence": "../evidence/nominal_motion",
+  "sut": {
+    "mode": "reference",
+    "preset": "helix_arbiter"
+  },
+  "faults": [],
+  "expect": {
+    "verdict": "PASS",
+    "invariants": {
+      "finite_output": "PASS",
+      "fresh_output": "PASS",
+      "stop_dominance": "NOT_EXERCISED"
+    },
+    "detections": [],
+    "info": [
+      "clock_offset"
+    ]
+  }
+}

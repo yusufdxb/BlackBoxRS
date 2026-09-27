@@ -1,0 +1,937 @@
+{
+  "bundle_id": "inc_20260910T002643.015420Z_recovery_action_stop",
+  "chain": {
+    "arbiter_forced_zero": {
+      "data": {
+        "hold_active": true,
+        "hold_fault_id": "rate_hz/utlidar_helix_injected",
+        "out_angular_z": 0.0,
+        "out_linear_x": 0.0,
+        "out_linear_y": 0.0,
+        "reason": "HELIX_HOLD",
+        "rejected_total": 0,
+        "selected_source": "",
+        "seq": 61,
+        "sink_subscribers": 1,
+        "stamp": 1789000003.014
+      },
+      "evidence": {
+        "dds_rx_ns": 1789000003014400000,
+        "dds_src_ns": 1789000003013999872,
+        "pub_stamp_domain": "helix_payload_wall",
+        "pub_stamp_s": 1789000003.014,
+        "seq": 347,
+        "t_mono_ns": 5003015614093,
+        "t_ros_ns": 1789000003015613952,
+        "t_wall_ns": 1789000003015613952,
+        "topic": "/helix/arbiter/status"
+      },
+      "status": "observed"
+    },
+    "cmd_vel_zero": {
+      "data": {
+        "angular": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "linear": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "evidence": {
+        "dds_rx_ns": 1789000003014599936,
+        "dds_src_ns": 1789000003014200064,
+        "pub_stamp_domain": null,
+        "pub_stamp_s": null,
+        "seq": 349,
+        "t_mono_ns": 5003015642656,
+        "t_ros_ns": 1789000003015642624,
+        "t_wall_ns": 1789000003015642624,
+        "topic": "/cmd_vel"
+      },
+      "status": "observed"
+    },
+    "diagnosis": {
+      "data": {
+        "confidence": 0.9,
+        "fault_id": "rate_hz/utlidar_helix_injected",
+        "reasoning": "R1 anomaly",
+        "rule_matched": "R1",
+        "suggested_action": "STOP_AND_HOLD"
+      },
+      "evidence": {
+        "dds_rx_ns": 1789000003012499968,
+        "dds_src_ns": 1789000003012100096,
+        "pub_stamp_domain": null,
+        "pub_stamp_s": null,
+        "seq": 344,
+        "t_mono_ns": 5003014996859,
+        "t_ros_ns": 1789000003014996736,
+        "t_wall_ns": 1789000003014996736,
+        "topic": "/helix/recovery_hints"
+      },
+      "note": "HELIX diagnosis output is the RecoveryHint; same record as recovery_hint",
+      "status": "observed"
+    },
+    "fault": {
+      "data": {
+        "context_keys": [],
+        "context_values": [],
+        "detail": "injected benign fault (synthetic)",
+        "fault_type": "ANOMALY",
+        "node_name": "rate_hz/utlidar_helix_injected",
+        "severity": 2,
+        "timestamp": 1789000003.011
+      },
+      "evidence": {
+        "dds_rx_ns": 1789000003011399936,
+        "dds_src_ns": 1789000003010999808,
+        "pub_stamp_domain": "helix_payload_wall",
+        "pub_stamp_s": 1789000003.011,
+        "seq": 343,
+        "t_mono_ns": 5003012428113,
+        "t_ros_ns": 1789000003012428032,
+        "t_wall_ns": 1789000003012428032,
+        "topic": "/helix/faults"
+      },
+      "status": "observed"
+    },
+    "helix_hold": {
+      "data": {
+        "asserted_stamp": 1789000003.0134,
+        "epoch": 1788999900000000000,
+        "fault_id": "rate_hz/utlidar_helix_injected",
+        "hold": true,
+        "reason": "STOP_AND_HOLD R1",
+        "seq": 32,
+        "stamp": 1789000003.0134
+      },
+      "detail": {
+        "asserted_stamp": 1789000003.0134,
+        "observed_edge": true,
+        "reason": "STOP_AND_HOLD R1"
+      },
+      "evidence": {
+        "dds_rx_ns": 1789000003013799936,
+        "dds_src_ns": 1789000003013400064,
+        "pub_stamp_domain": "helix_payload_wall",
+        "pub_stamp_s": 1789000003.0134,
+        "seq": 350,
+        "t_mono_ns": 5003015707930,
+        "t_ros_ns": 1789000003015707904,
+        "t_wall_ns": 1789000003015707904,
+        "topic": "/helix/hold"
+      },
+      "status": "observed"
+    },
+    "odometry_stopped": {
+      "evidence": {
+        "dds_rx_ns": 1789000003452500224,
+        "dds_src_ns": 1789000005184000000,
+        "pub_stamp_domain": "robot_clock",
+        "pub_stamp_s": 1789000005.184,
+        "seq": 396,
+        "t_mono_ns": 5003452544503,
+        "t_ros_ns": 1789000003452544512,
+        "t_wall_ns": 1789000003452544512,
+        "topic": "/utlidar/robot_odom"
+      },
+      "status": "observed"
+    },
+    "recovery_action": {
+      "data": {
+        "action": "STOP_AND_HOLD",
+        "fault_id": "rate_hz/utlidar_helix_injected",
+        "reason": "accepted",
+        "status": "ACCEPTED",
+        "timestamp": 1789000003.0128999
+      },
+      "evidence": {
+        "dds_rx_ns": 1789000003013299968,
+        "dds_src_ns": 1789000003012900096,
+        "pub_stamp_domain": "helix_payload_wall",
+        "pub_stamp_s": 1789000003.0128999,
+        "seq": 345,
+        "t_mono_ns": 5003015420176,
+        "t_ros_ns": 1789000003015420160,
+        "t_wall_ns": 1789000003015420160,
+        "topic": "/helix/recovery_actions"
+      },
+      "status": "observed"
+    },
+    "recovery_hint": {
+      "data": {
+        "confidence": 0.9,
+        "fault_id": "rate_hz/utlidar_helix_injected",
+        "reasoning": "R1 anomaly",
+        "rule_matched": "R1",
+        "suggested_action": "STOP_AND_HOLD"
+      },
+      "evidence": {
+        "dds_rx_ns": 1789000003012499968,
+        "dds_src_ns": 1789000003012100096,
+        "pub_stamp_domain": null,
+        "pub_stamp_s": null,
+        "seq": 344,
+        "t_mono_ns": 5003014996859,
+        "t_ros_ns": 1789000003014996736,
+        "t_wall_ns": 1789000003014996736,
+        "topic": "/helix/recovery_hints"
+      },
+      "status": "observed"
+    },
+    "sport_response": {
+      "status": "topic_not_in_profile"
+    },
+    "sport_stopmove_request": {
+      "status": "topic_not_in_profile"
+    }
+  },
+  "chain_order": [
+    "fault",
+    "diagnosis",
+    "recovery_hint",
+    "recovery_action",
+    "helix_hold",
+    "arbiter_forced_zero",
+    "cmd_vel_zero",
+    "sport_stopmove_request",
+    "sport_response",
+    "odometry_stopped"
+  ],
+  "data_quality": {
+    "bundle_status": "complete",
+    "clock_jumps": [],
+    "clock_warnings": [
+      "robot clock differs from recorder receipt by -1.732 s (median); robot stamps are never compared with payload or recorder clocks"
+    ],
+    "duplicates": {},
+    "first_write_error": null,
+    "out_of_order_stamps": {},
+    "pre_window": {
+      "available_s": 3.015420176,
+      "evicted_by_cap_in_window": 0,
+      "requested_s": 10.0
+    },
+    "publisher_sequence_lost": {},
+    "recorder_message_lost": 0,
+    "recorder_ring_evicted_in_window": 0,
+    "synthetic": true,
+    "topics_with_gaps": {},
+    "writer_errors": 0
+  },
+  "helix": {
+    "arbiter": {
+      "hold_active": true,
+      "hold_fault_id": "rate_hz/utlidar_helix_injected",
+      "out_angular_z": 0.0,
+      "out_linear_x": 0.0,
+      "out_linear_y": 0.0,
+      "reason": "HELIX_HOLD",
+      "rejected_total": 0,
+      "selected_source": "",
+      "seq": 61,
+      "sink_subscribers": 1,
+      "stamp": 1789000003.014
+    },
+    "diagnosis": {
+      "confidence": 0.9,
+      "fault_id": "rate_hz/utlidar_helix_injected",
+      "reasoning": "R1 anomaly",
+      "rule_matched": "R1",
+      "suggested_action": "STOP_AND_HOLD"
+    },
+    "fault": {
+      "context_keys": [],
+      "context_values": [],
+      "detail": "injected benign fault (synthetic)",
+      "fault_type": "ANOMALY",
+      "node_name": "rate_hz/utlidar_helix_injected",
+      "severity": 2,
+      "timestamp": 1789000003.011
+    },
+    "fault_id": "rate_hz/utlidar_helix_injected",
+    "hold": {
+      "asserted_stamp": 1789000003.0134,
+      "epoch": 1788999900000000000,
+      "fault_id": "rate_hz/utlidar_helix_injected",
+      "hold": true,
+      "reason": "STOP_AND_HOLD R1",
+      "seq": 32,
+      "stamp": 1789000003.0134
+    },
+    "note": null,
+    "recovery_action": {
+      "action": "STOP_AND_HOLD",
+      "fault_id": "rate_hz/utlidar_helix_injected",
+      "reason": "accepted",
+      "status": "ACCEPTED",
+      "timestamp": 1789000003.0128999
+    },
+    "recovery_hint": {
+      "confidence": 0.9,
+      "fault_id": "rate_hz/utlidar_helix_injected",
+      "reasoning": "R1 anomaly",
+      "rule_matched": "R1",
+      "suggested_action": "STOP_AND_HOLD"
+    }
+  },
+  "key_spans": [
+    {
+      "basis": "emission",
+      "clock_domain": "publisher host wall clock (DDS source timestamps); both roles declared co-hosted in the profile",
+      "from": "fault",
+      "to": "helix_hold",
+      "value_s": 0.0024
+    },
+    {
+      "basis": "emission",
+      "clock_domain": "publisher host wall clock (DDS source timestamps); both roles declared co-hosted in the profile",
+      "from": "helix_hold",
+      "to": "cmd_vel_zero",
+      "value_s": 0.0008
+    },
+    {
+      "basis": "emission",
+      "clock_domain": "publisher host wall clock (DDS source timestamps); both roles declared co-hosted in the profile",
+      "from": "fault",
+      "to": "cmd_vel_zero",
+      "value_s": 0.0032
+    },
+    {
+      "basis": "emission (offset-mapped)",
+      "caveat": "hold and odometry are published on different computers (payload vs GO2) with different clocks",
+      "clock_domain": "emission times on one clock: hold DDS source time and the stopped sample's robot stamp, each mapped to the recorder wall clock by its median receipt offset (robust to recorder stalls; assumes each offset is constant over the window and the two median transport delays are similar)",
+      "from": "helix_hold",
+      "receipt_uncertainty_s": 0.053173,
+      "receipt_value_s": 0.436837,
+      "to": "odometry_stopped",
+      "uncertainty_s": 0.051622,
+      "value_s": 0.437278
+    }
+  ],
+  "motion": {
+    "chain_horizon_s": 1.5,
+    "final_twist": {
+      "angular": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "linear": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    "hold_released": false,
+    "input_twist": {
+      "angular": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "linear": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "topic": "/nav/cmd_vel"
+    },
+    "move_requests_while_held": null,
+    "nonzero_outputs_while_held": 0,
+    "odometry": {
+      "already_stopped_at_hold": false,
+      "hold_receipt_excess_delay_s": 0.000486,
+      "median_period_s": 0.050183,
+      "moving_threshold_mps": 0.05,
+      "odom_age_at_fault_s": 0.009317,
+      "odom_age_at_hold_s": 0.012597,
+      "odom_coverage_after_hold_s": 2.987711,
+      "odom_receipt_stall_s": 0.002504,
+      "receipt_jitter_p95_s": 0.0,
+      "robot_clock_offset_basis": "median(recorder receipt wall time - odometry header stamp); includes transport delay",
+      "robot_clock_offset_s": -1.7315,
+      "robot_clock_stop_duration_s": 0.4,
+      "samples": 121,
+      "speed_at_fault_mps": 0.148731,
+      "speed_at_hold_mps": 0.148731,
+      "speed_time_base": "robot header stamps",
+      "status": "stopped",
+      "stop_distance_basis": "straight-line odometry pose displacement from the first sample after the hold to the stopped sample",
+      "stop_distance_m": 0.024455,
+      "stop_latency_clock_domain": "emission times on one clock: hold DDS source time and the stopped sample's robot stamp, each mapped to the recorder wall clock by its median receipt offset (robust to recorder stalls; assumes each offset is constant over the window and the two median transport delays are similar)",
+      "stop_latency_mapped_s": 0.437278,
+      "stop_latency_mapped_uncertainty_s": 0.051622,
+      "stop_latency_receipt_s": 0.436837,
+      "stop_latency_receipt_uncertainty_s": 0.053173,
+      "stop_latency_s": 0.437278,
+      "stop_latency_uncertainty_basis": "one odometry period + p95 deviation of the robot offset + p95 deviation of the payload receipt delay",
+      "stop_latency_uncertainty_s": 0.051622,
+      "stopped_sample": {
+        "dds_rx_ns": 1789000003452500224,
+        "dds_src_ns": 1789000005184000000,
+        "pub_stamp_domain": "robot_clock",
+        "pub_stamp_s": 1789000005.184,
+        "seq": 396,
+        "t_mono_ns": 5003452544503,
+        "t_ros_ns": 1789000003452544512,
+        "t_wall_ns": 1789000003452544512,
+        "topic": "/utlidar/robot_odom"
+      }
+    },
+    "outputs_source": "/cmd_vel",
+    "sport_response": null,
+    "stopmove_request_id": null
+  },
+  "nodes": {
+    "appeared": [],
+    "disappeared": [],
+    "publishers_on_profiled_topics": [
+      "<synthetic>"
+    ]
+  },
+  "profile": {
+    "name": "replay_lab_fixture",
+    "post_trigger_sec": 3.0,
+    "pre_trigger_sec": 10.0,
+    "sha256": "53e62296f5cd4c569d7fb7ed0503cf852a904c4399f938780c55612e8c6439f7"
+  },
+  "provenance": {
+    "blackboxrs_git_dirty": null,
+    "blackboxrs_git_sha": null,
+    "blackboxrs_version": "fixture",
+    "experiment": "replay-lab golden evidence (synthetic)",
+    "experiment_repos": [],
+    "hostname": "synthetic",
+    "note": "GENERATED traffic; odometry is a first-order lag model, not a GO2",
+    "platform": "synthetic",
+    "profile_name": "replay_lab_fixture",
+    "rmw_implementation": "rmw_cyclonedds_cpp",
+    "ros_distro": "humble",
+    "session_id": "replay_lab_fixture",
+    "synthetic": true
+  },
+  "recorder_receipt_delay": {
+    "max_s": 0.003397,
+    "n": 428,
+    "p05_s": 0.000522,
+    "p50_s": 0.001822,
+    "p95_abs_dev_s": 0.001439,
+    "p95_s": 0.003262,
+    "spread_min_max_s": 0.002996,
+    "spread_p05_p95_s": 0.002739
+  },
+  "resources": {
+    "available": true,
+    "cpu_percent": {
+      "after": {
+        "max": 18.6,
+        "mean": 17.54,
+        "min": 16.47,
+        "n": 2
+      },
+      "before": {
+        "max": 24.99,
+        "mean": 22.83,
+        "min": 20.0,
+        "n": 7
+      },
+      "during": {
+        "max": 18.25,
+        "mean": 16.19,
+        "min": 15.11,
+        "n": 4
+      }
+    },
+    "gpu_backend": "synthetic",
+    "gpu_load_percent": {
+      "after": {
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "n": 2
+      },
+      "before": {
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "n": 7
+      },
+      "during": {
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "n": 4
+      }
+    },
+    "gpu_temp_c": {
+      "after": {
+        "max": 45.0,
+        "mean": 45.0,
+        "min": 45.0,
+        "n": 2
+      },
+      "before": {
+        "max": 45.0,
+        "mean": 45.0,
+        "min": 45.0,
+        "n": 7
+      },
+      "during": {
+        "max": 45.0,
+        "mean": 45.0,
+        "min": 45.0,
+        "n": 4
+      }
+    },
+    "mem_percent": {
+      "after": {
+        "max": 41.0,
+        "mean": 41.0,
+        "min": 41.0,
+        "n": 2
+      },
+      "before": {
+        "max": 41.0,
+        "mean": 41.0,
+        "min": 41.0,
+        "n": 7
+      },
+      "during": {
+        "max": 41.0,
+        "mean": 41.0,
+        "min": 41.0,
+        "n": 4
+      }
+    },
+    "recorder_cpu_percent": {
+      "after": {
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "n": 2
+      },
+      "before": {
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "n": 7
+      },
+      "during": {
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "n": 4
+      }
+    },
+    "recorder_rss_mb": {
+      "after": {
+        "max": 60.0,
+        "mean": 60.0,
+        "min": 60.0,
+        "n": 2
+      },
+      "before": {
+        "max": 60.0,
+        "mean": 60.0,
+        "min": 60.0,
+        "n": 7
+      },
+      "during": {
+        "max": 60.0,
+        "mean": 60.0,
+        "min": 60.0,
+        "n": 4
+      }
+    },
+    "samples": 13,
+    "thermal_max_c": {
+      "cpu-thermal:thermal_zone0": 48.0
+    }
+  },
+  "schema": "blackboxrs.flight.report.v1",
+  "secondary_triggers": [
+    {
+      "hold_fault_id": "rate_hz/utlidar_helix_injected",
+      "reason": "HELIX_HOLD",
+      "record_seq": 347,
+      "role": "secondary",
+      "seq": 348,
+      "t_mono_ns": 5003015614093,
+      "t_wall_ns": 1789000003015613952,
+      "topic": "/helix/arbiter/status",
+      "type": "arbiter_forced_zero"
+    },
+    {
+      "fault_id": "rate_hz/utlidar_helix_injected",
+      "observed_edge": true,
+      "reason": "STOP_AND_HOLD R1",
+      "record_seq": 350,
+      "role": "secondary",
+      "seq": 351,
+      "t_mono_ns": 5003015707930,
+      "t_wall_ns": 1789000003015707904,
+      "topic": "/helix/hold",
+      "type": "helix_hold_asserted"
+    }
+  ],
+  "stage_intervals": [
+    {
+      "basis": "emission",
+      "clock_domain": "publisher host wall clock (DDS source timestamps); both roles declared co-hosted in the profile",
+      "from": "fault",
+      "to": "recovery_hint",
+      "value_s": 0.0011
+    },
+    {
+      "basis": "emission",
+      "clock_domain": "publisher host wall clock (DDS source timestamps); both roles declared co-hosted in the profile",
+      "from": "recovery_hint",
+      "to": "recovery_action",
+      "value_s": 0.0008
+    },
+    {
+      "basis": "emission",
+      "clock_domain": "publisher host wall clock (DDS source timestamps); both roles declared co-hosted in the profile",
+      "from": "recovery_action",
+      "to": "helix_hold",
+      "value_s": 0.0005
+    },
+    {
+      "basis": "emission",
+      "clock_domain": "publisher host wall clock (DDS source timestamps); both roles declared co-hosted in the profile",
+      "from": "helix_hold",
+      "to": "arbiter_forced_zero",
+      "value_s": 0.0006
+    },
+    {
+      "basis": "emission",
+      "clock_domain": "publisher host wall clock (DDS source timestamps); both roles declared co-hosted in the profile",
+      "from": "arbiter_forced_zero",
+      "to": "cmd_vel_zero",
+      "value_s": 0.0002
+    }
+  ],
+  "status": "complete",
+  "synthetic": true,
+  "timing_methodology": {
+    "emission": "DDS source timestamps, or embedded publisher stamps, compared only within one declared clock domain",
+    "never": "receipt times are never presented as emission times; robot clock is never compared with the payload or recorder clock",
+    "receipt": "recorder DDS reception time (wall) or recorder monotonic callback time; used only when emission times are not comparable; labelled"
+  },
+  "topics": {
+    "/cmd_vel": {
+      "availability": "subscribed",
+      "count": 121,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.249652,
+      "gaps": [],
+      "graph_types": [
+        "geometry_msgs/msg/Twist"
+      ],
+      "max_gap_s": 0.059558,
+      "median_interval_s": 0.04993,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 20.165,
+        "before": 6.0,
+        "during": 20.5
+      },
+      "role": "cmd_vel_out",
+      "stored": 121
+    },
+    "/helix/arbiter/status": {
+      "availability": "subscribed",
+      "count": 121,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.5,
+      "gaps": [],
+      "graph_types": [
+        "helix_msgs/msg/ArbiterStatus"
+      ],
+      "max_gap_s": 0.059918,
+      "median_interval_s": 0.050214,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 19.157,
+        "before": 6.0,
+        "during": 20.5
+      },
+      "role": "arbiter_status",
+      "sequence": {
+        "duplicates": 0,
+        "lost": 0,
+        "method": "gaps in the publisher's own sequence counter",
+        "publisher_restarts": 0,
+        "reordered": 0
+      },
+      "stored": 121
+    },
+    "/helix/faults": {
+      "availability": "subscribed",
+      "count": 1,
+      "duplicates": 0,
+      "graph_types": [
+        "helix_msgs/msg/FaultEvent"
+      ],
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 0.0,
+        "before": 0.1,
+        "during": 0.0
+      },
+      "role": "helix_fault",
+      "stored": 1
+    },
+    "/helix/hold": {
+      "availability": "subscribed",
+      "count": 62,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.5,
+      "gaps": [],
+      "graph_types": [
+        "helix_msgs/msg/HelixHold"
+      ],
+      "max_gap_s": 0.102435,
+      "median_interval_s": 0.100146,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 10.083,
+        "before": 3.1,
+        "during": 10.5
+      },
+      "role": "helix_hold",
+      "sequence": {
+        "duplicates": 0,
+        "lost": 0,
+        "method": "gaps in the publisher's own sequence counter",
+        "publisher_restarts": 0,
+        "reordered": 0
+      },
+      "stored": 62
+    },
+    "/helix/recovery_actions": {
+      "availability": "subscribed",
+      "count": 1,
+      "duplicates": 0,
+      "graph_types": [
+        "helix_msgs/msg/RecoveryAction"
+      ],
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 0.0,
+        "before": 0.0,
+        "during": 0.5
+      },
+      "role": "recovery_action",
+      "stored": 1
+    },
+    "/helix/recovery_hints": {
+      "availability": "subscribed",
+      "count": 1,
+      "duplicates": 0,
+      "graph_types": [
+        "helix_msgs/msg/RecoveryHint"
+      ],
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 0.0,
+        "before": 0.1,
+        "during": 0.0
+      },
+      "role": "recovery_hint",
+      "stored": 1
+    },
+    "/lowstate": {
+      "availability": "subscribed",
+      "count": 121,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.5,
+      "gaps": [],
+      "graph_types": [
+        "unitree_go/msg/LowState"
+      ],
+      "max_gap_s": 0.052665,
+      "median_interval_s": 0.050033,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 20.165,
+        "before": 6.1,
+        "during": 20.0
+      },
+      "role": "go2_state",
+      "stored": 121
+    },
+    "/nav/cmd_vel": {
+      "availability": "subscribed",
+      "count": 121,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.250132,
+      "gaps": [],
+      "graph_types": [
+        "geometry_msgs/msg/Twist"
+      ],
+      "max_gap_s": 0.052534,
+      "median_interval_s": 0.050026,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 20.165,
+        "before": 6.1,
+        "during": 20.0
+      },
+      "role": "cmd_vel_source",
+      "stored": 121
+    },
+    "/teleop/cmd_vel": {
+      "availability": "absent",
+      "availability_reason": "not on graph (synthetic run)",
+      "count": 0,
+      "graph_types": null,
+      "publishers": null,
+      "role": "cmd_vel_source",
+      "stored": 0
+    },
+    "/utlidar/robot_odom": {
+      "availability": "subscribed",
+      "count": 121,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.5,
+      "gaps": [],
+      "graph_types": [
+        "nav_msgs/msg/Odometry"
+      ],
+      "max_gap_s": 0.052687,
+      "median_interval_s": 0.050183,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 20.165,
+        "before": 6.1,
+        "during": 20.0
+      },
+      "role": "odometry",
+      "stored": 121
+    }
+  },
+  "trigger": {
+    "action": "STOP_AND_HOLD",
+    "fault_id": "rate_hz/utlidar_helix_injected",
+    "record_seq": 345,
+    "role": "primary",
+    "seq": 346,
+    "status": "ACCEPTED",
+    "t_mono_ns": 5003015420176,
+    "t_wall_ns": 1789000003015420160,
+    "topic": "/helix/recovery_actions",
+    "type": "recovery_action_stop"
+  },
+  "verdicts": [
+    {
+      "criterion": "fault, hint, action, hold, arbiter zero, output zero all observed",
+      "evidence": {
+        "missing": []
+      },
+      "id": "full_chain",
+      "note": "SYNTHETIC bundle: verdict exercises the pipeline, not hardware",
+      "result": "PASS",
+      "source": "HELIX docs/HW_MOTION_TEST.md stage E pass criteria"
+    },
+    {
+      "criterion": "0 nonzero /cmd_vel outputs while held",
+      "evidence": 0,
+      "id": "zero_nonzero_while_held",
+      "note": "SYNTHETIC bundle: verdict exercises the pipeline, not hardware",
+      "result": "PASS",
+      "source": "HELIX docs/HW_MOTION_TEST.md stage E pass criteria"
+    },
+    {
+      "criterion": "no Move (1008) request sent while held",
+      "evidence": null,
+      "id": "no_move_while_held",
+      "note": "SYNTHETIC bundle: verdict exercises the pipeline, not hardware",
+      "result": "INCOMPLETE",
+      "source": "HELIX docs/HW_MOTION_TEST.md stage E pass criteria"
+    },
+    {
+      "criterion": "StopMove reached the robot and was answered with code 0",
+      "evidence": {
+        "request_id": null,
+        "request_stage": "topic_not_in_profile",
+        "response": null,
+        "response_stage": "topic_not_in_profile"
+      },
+      "id": "stopmove_acknowledged",
+      "note": "SYNTHETIC bundle: verdict exercises the pipeline, not hardware",
+      "result": "INCOMPLETE",
+      "source": "HELIX docs/HW_MOTION_TEST.md stage E pass criteria"
+    },
+    {
+      "criterion": "robot moving (> 0.05 m/s) when the fault was raised",
+      "evidence": {
+        "odom_age_at_fault_s": 0.009317,
+        "speed_at_fault_mps": 0.148731
+      },
+      "id": "moving_at_fault",
+      "note": "SYNTHETIC bundle: verdict exercises the pipeline, not hardware",
+      "result": "PASS",
+      "source": "HELIX docs/HW_MOTION_TEST.md stage E pass criteria"
+    },
+    {
+      "criterion": "robot physically stopped (< 0.03 m/s) within 1.5 s of the hold",
+      "evidence": {
+        "reason": null,
+        "status": "stopped",
+        "stop_latency_s": 0.437278,
+        "uncertainty_s": 0.051622
+      },
+      "id": "stopped_within_deadline",
+      "note": "SYNTHETIC bundle: verdict exercises the pipeline, not hardware",
+      "result": "PASS",
+      "source": "HELIX docs/HW_MOTION_TEST.md stage E pass criteria"
+    }
+  ],
+  "window": {
+    "first_t_mono_ns": 5000000000000,
+    "last_t_mono_ns": 5006007229750,
+    "messages": 670,
+    "records": 688,
+    "seconds_after_trigger": 2.992,
+    "seconds_before_trigger": 3.015
+  }
+}

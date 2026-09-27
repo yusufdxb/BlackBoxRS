@@ -1,0 +1,29 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "contradictory_state__observed",
+  "regression": "Contradictory motion + stop state in the arbiter's own status report. Only reachable in recorded evidence: the reference model cannot produce it by construction.",
+  "initial_conditions": "As nominal_motion, but at t=3.0 s an injected benign HELIX fault is diagnosed, STOP_AND_HOLD is accepted and /helix/hold asserts (epoch/seq ordered, 10 Hz); /nav/cmd_vel keeps commanding 0.15 m/s throughout.",
+  "injected_fault": "The recorded ArbiterStatus reports out_linear_x=0.15 for 0.2 s while it also reports hold_active=true.",
+  "evidence": "../evidence/clean_stop",
+  "sut": {
+    "mode": "observed"
+  },
+  "faults": [
+    {
+      "kind": "set_value",
+      "topic": "/helix/arbiter/status",
+      "field": "out_linear_x",
+      "value": 0.15,
+      "from_s": 3.5,
+      "to_s": 3.7
+    }
+  ],
+  "expect": {
+    "verdict": "FAIL",
+    "invariants": {
+      "consistent_state": "FAIL",
+      "stop_dominance": "PASS"
+    },
+    "detections": []
+  }
+}

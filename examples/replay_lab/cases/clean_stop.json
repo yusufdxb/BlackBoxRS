@@ -1,0 +1,26 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "clean_stop",
+  "regression": "Clean STOP: the hold forces the robot-facing command to zero while navigation keeps asking for motion.",
+  "initial_conditions": "As nominal_motion, but at t=3.0 s an injected benign HELIX fault is diagnosed, STOP_AND_HOLD is accepted and /helix/hold asserts (epoch/seq ordered, 10 Hz); /nav/cmd_vel keeps commanding 0.15 m/s throughout.",
+  "injected_fault": "none",
+  "evidence": "../evidence/clean_stop",
+  "sut": {
+    "mode": "reference",
+    "preset": "helix_arbiter"
+  },
+  "faults": [],
+  "expect": {
+    "verdict": "PASS",
+    "invariants": {
+      "stop_dominance": "PASS",
+      "fresh_output": "PASS",
+      "finite_output": "PASS"
+    },
+    "detections": [],
+    "info": [
+      "motion_request_while_held",
+      "recorder_trigger:helix_hold_asserted"
+    ]
+  }
+}

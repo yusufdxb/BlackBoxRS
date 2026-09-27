@@ -1,0 +1,53 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "legitimate_inactivity__teleop",
+  "regression": "Legitimate inactivity: an event topic that ends on a zero command and stays silent is not stale telemetry and not a stale command.",
+  "initial_conditions": "Synthetic GO2 + HELIX run (6.5 s): /nav/cmd_vel at 20 Hz commands 0 m/s, then 0.15 m/s from t=2 s; HELIX hold published at 10 Hz, never asserted; odometry and lowstate at 20 Hz from the robot host, whose clock is 1.734 s ahead of the payload.",
+  "injected_fault": "An operator drives at 0.1 m/s from t=0.5 to 1.5 s, releases the stick (one zero twist) and is silent for the rest of the run.",
+  "evidence": "../evidence/nominal_motion",
+  "sut": {
+    "mode": "reference",
+    "preset": "helix_arbiter"
+  },
+  "faults": [
+    {
+      "kind": "inject_stream",
+      "topic": "/teleop/cmd_vel",
+      "data": {
+        "linear": {
+          "x": 0.1,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "angular": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "final_data": {
+        "linear": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "angular": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "from_s": 0.5,
+      "to_s": 1.5,
+      "rate_hz": 20
+    }
+  ],
+  "expect": {
+    "verdict": "PASS",
+    "invariants": {
+      "fresh_output": "PASS",
+      "finite_output": "PASS"
+    },
+    "detections": []
+  }
+}

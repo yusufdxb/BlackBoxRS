@@ -1,0 +1,28 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "stop_loses_arbitration__twist_mux_legacy",
+  "regression": "STOP path losing arbitration: on the twist_mux path STOP is a zero-twist input with a 0.5 s timeout; when it goes quiet the next input (navigation) wins again (HELIX docs/MOTION_ARBITRATION.md, table rows 5-6).",
+  "initial_conditions": "As nominal_motion, but at t=3.0 s an injected benign HELIX fault is diagnosed, STOP_AND_HOLD is accepted and /helix/hold asserts (epoch/seq ordered, 10 Hz); /nav/cmd_vel keeps commanding 0.15 m/s throughout.",
+  "injected_fault": "/helix/hold stops arriving at t=3.5 s, 0.5 s after it asserted; its last message still says hold=true.",
+  "evidence": "../evidence/clean_stop",
+  "sut": {
+    "mode": "reference",
+    "preset": "twist_mux_legacy"
+  },
+  "faults": [
+    {
+      "kind": "drop",
+      "topic": "/helix/hold",
+      "from_s": 3.5
+    }
+  ],
+  "expect": {
+    "verdict": "FAIL",
+    "invariants": {
+      "stop_dominance": "FAIL"
+    },
+    "detections": [
+      "stale_telemetry"
+    ]
+  }
+}

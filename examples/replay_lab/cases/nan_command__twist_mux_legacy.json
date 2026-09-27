@@ -1,0 +1,30 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "nan_command__twist_mux_legacy",
+  "regression": "NaN command propagation: twist_mux forwards NaN (HELIX docs/MOTION_ARBITRATION.md, table row 4: 8 NaN twists forwarded).",
+  "initial_conditions": "Synthetic GO2 + HELIX run (6.5 s): /nav/cmd_vel at 20 Hz commands 0 m/s, then 0.15 m/s from t=2 s; HELIX hold published at 10 Hz, never asserted; odometry and lowstate at 20 Hz from the robot host, whose clock is 1.734 s ahead of the payload.",
+  "injected_fault": "linear.x on /nav/cmd_vel is NaN for 0.5 s from t=3.0 s.",
+  "evidence": "../evidence/nominal_motion",
+  "sut": {
+    "mode": "reference",
+    "preset": "twist_mux_legacy"
+  },
+  "faults": [
+    {
+      "kind": "nan",
+      "topic": "/nav/cmd_vel",
+      "field": "linear.x",
+      "from_s": 3.0,
+      "to_s": 3.5
+    }
+  ],
+  "expect": {
+    "verdict": "FAIL",
+    "invariants": {
+      "finite_output": "FAIL"
+    },
+    "detections": [
+      "nonfinite_input"
+    ]
+  }
+}

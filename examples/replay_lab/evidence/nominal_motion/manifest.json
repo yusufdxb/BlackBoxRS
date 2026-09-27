@@ -1,0 +1,259 @@
+{
+  "bundle_id": "inc_20260910T002643.000000Z_manual_marker",
+  "finalized_wall_ns": 1789000006000000000,
+  "pre_window": {
+    "available_s": 3.0,
+    "evicted_by_cap_in_window": 0,
+    "requested_s": 10.0
+  },
+  "profile": {
+    "co_hosted_roles": [
+      "arbiter_status",
+      "cmd_vel_out",
+      "cmd_vel_source",
+      "helix_fault",
+      "helix_hold",
+      "recovery_action",
+      "recovery_hint"
+    ],
+    "name": "replay_lab_fixture",
+    "post_trigger_sec": 3.0,
+    "pre_trigger_sec": 10.0,
+    "sha256": "53e62296f5cd4c569d7fb7ed0503cf852a904c4399f938780c55612e8c6439f7",
+    "source": "examples/replay_lab/fixture_profile.yaml",
+    "stop_criteria": {
+      "moving_speed_mps": 0.05,
+      "pose_speed_baseline_sec": 0.05,
+      "stop_deadline_sec": 1.5,
+      "stopped_speed_mps": 0.03
+    },
+    "text": "# Flight-recorder profile for the Replay Lab golden evidence.\n#\n# A reduced go2 profile: the HELIX motion-arbitration topics plus two GO2\n# periodic telemetry topics (odometry and lowstate, both from the robot\n# host), so a replay can tell one silent topic from a whole host going\n# silent. Rates are lowered to 20 Hz to keep the committed bundles small;\n# that is a fixture choice, not a GO2 measurement (the GO2 publishes\n# robot_odom at ~150 Hz and lowstate at ~500 Hz, docs/go2_field_notes.md).\n\nprofile: replay_lab_fixture\nschema_version: 1\ndescription: >-\n  Reduced GO2 + HELIX profile for the Replay Lab golden evidence (synthetic).\n\nbuffer:\n  pre_trigger_sec: 10.0\n  post_trigger_sec: 3.0\n\nsampling:\n  graph_poll_sec: 0.5\n  system_sample_hz: 2.0\n  health_tick_sec: 0.25\n\nco_hosted_roles:\n  - helix_fault\n  - recovery_hint\n  - recovery_action\n  - helix_hold\n  - arbiter_status\n  - cmd_vel_out\n  - cmd_vel_source\n\nexpected_nodes:\n  - /helix_arbiter\n  - /helix_recovery_node\n\ntopics:\n  - name: /nav/cmd_vel\n    type: geometry_msgs/msg/Twist\n    role: cmd_vel_source\n  - name: /teleop/cmd_vel\n    type: geometry_msgs/msg/Twist\n    role: cmd_vel_source\n  - name: /cmd_vel\n    type: geometry_msgs/msg/Twist\n    role: cmd_vel_out\n  - name: /helix/faults\n    type: helix_msgs/msg/FaultEvent\n    role: helix_fault\n  - name: /helix/recovery_hints\n    type: helix_msgs/msg/RecoveryHint\n    role: recovery_hint\n  - name: /helix/recovery_actions\n    type: helix_msgs/msg/RecoveryAction\n    role: recovery_action\n  - name: /helix/hold\n    type: helix_msgs/msg/HelixHold\n    role: helix_hold\n    stale_after_sec: 0.5\n  - name: /helix/arbiter/status\n    type: helix_msgs/msg/ArbiterStatus\n    role: arbiter_status\n    stale_after_sec: 0.5\n  - name: /utlidar/robot_odom\n    type: nav_msgs/msg/Odometry\n    role: odometry\n    stale_after_sec: 0.5\n    frame_ids: {header.frame_id: odom, child_frame_id: base_link}\n  - name: /lowstate\n    type: unitree_go/msg/LowState\n    role: go2_state\n    stale_after_sec: 0.5\n",
+    "topics": [
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/nav/cmd_vel",
+        "required": false,
+        "role": "cmd_vel_source",
+        "stale_after_sec": null,
+        "store_max_hz": null,
+        "type": "geometry_msgs/msg/Twist"
+      },
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/teleop/cmd_vel",
+        "required": false,
+        "role": "cmd_vel_source",
+        "stale_after_sec": null,
+        "store_max_hz": null,
+        "type": "geometry_msgs/msg/Twist"
+      },
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/cmd_vel",
+        "required": false,
+        "role": "cmd_vel_out",
+        "stale_after_sec": null,
+        "store_max_hz": null,
+        "type": "geometry_msgs/msg/Twist"
+      },
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/helix/faults",
+        "required": false,
+        "role": "helix_fault",
+        "stale_after_sec": null,
+        "store_max_hz": null,
+        "type": "helix_msgs/msg/FaultEvent"
+      },
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/helix/recovery_hints",
+        "required": false,
+        "role": "recovery_hint",
+        "stale_after_sec": null,
+        "store_max_hz": null,
+        "type": "helix_msgs/msg/RecoveryHint"
+      },
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/helix/recovery_actions",
+        "required": false,
+        "role": "recovery_action",
+        "stale_after_sec": null,
+        "store_max_hz": null,
+        "type": "helix_msgs/msg/RecoveryAction"
+      },
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/helix/hold",
+        "required": false,
+        "role": "helix_hold",
+        "stale_after_sec": 0.5,
+        "store_max_hz": null,
+        "type": "helix_msgs/msg/HelixHold"
+      },
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/helix/arbiter/status",
+        "required": false,
+        "role": "arbiter_status",
+        "stale_after_sec": 0.5,
+        "store_max_hz": null,
+        "type": "helix_msgs/msg/ArbiterStatus"
+      },
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/utlidar/robot_odom",
+        "required": false,
+        "role": "odometry",
+        "stale_after_sec": 0.5,
+        "store_max_hz": null,
+        "type": "nav_msgs/msg/Odometry"
+      },
+      {
+        "expected_hz": null,
+        "fields": [],
+        "name": "/lowstate",
+        "required": false,
+        "role": "go2_state",
+        "stale_after_sec": 0.5,
+        "store_max_hz": null,
+        "type": "unitree_go/msg/LowState"
+      }
+    ]
+  },
+  "recorder_stats": {
+    "incidents_opened": 1,
+    "incidents_skipped": 0,
+    "records_in": 676,
+    "ring_bytes": 318792,
+    "ring_evicted_by_cap": 0,
+    "ring_evicted_by_cap_in_window": 0,
+    "ring_records": 676,
+    "skip_reasons": {},
+    "triggers_attached": 0,
+    "triggers_fired": 1,
+    "triggers_suppressed_limit": 0
+  },
+  "schema": "blackboxrs.flight.manifest.v1",
+  "session": {
+    "blackboxrs_git_dirty": null,
+    "blackboxrs_git_sha": null,
+    "blackboxrs_version": "fixture",
+    "experiment": "replay-lab golden evidence (synthetic)",
+    "experiment_repos": [],
+    "hostname": "synthetic",
+    "note": "GENERATED traffic; odometry is a first-order lag model, not a GO2",
+    "platform": "synthetic",
+    "profile_name": "replay_lab_fixture",
+    "rmw_implementation": "rmw_cyclonedds_cpp",
+    "ros_distro": "humble",
+    "session_id": "replay_lab_fixture",
+    "synthetic": true
+  },
+  "status": "complete",
+  "topic_status": {
+    "/cmd_vel": {
+      "graph_types": [
+        "geometry_msgs/msg/Twist"
+      ],
+      "message_lost": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "status": "subscribed"
+    },
+    "/helix/arbiter/status": {
+      "graph_types": [
+        "helix_msgs/msg/ArbiterStatus"
+      ],
+      "message_lost": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "status": "subscribed"
+    },
+    "/helix/faults": {
+      "reason": "not on graph (synthetic run)",
+      "status": "absent"
+    },
+    "/helix/hold": {
+      "graph_types": [
+        "helix_msgs/msg/HelixHold"
+      ],
+      "message_lost": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "status": "subscribed"
+    },
+    "/helix/recovery_actions": {
+      "reason": "not on graph (synthetic run)",
+      "status": "absent"
+    },
+    "/helix/recovery_hints": {
+      "reason": "not on graph (synthetic run)",
+      "status": "absent"
+    },
+    "/lowstate": {
+      "graph_types": [
+        "unitree_go/msg/LowState"
+      ],
+      "message_lost": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "status": "subscribed"
+    },
+    "/nav/cmd_vel": {
+      "graph_types": [
+        "geometry_msgs/msg/Twist"
+      ],
+      "message_lost": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "status": "subscribed"
+    },
+    "/teleop/cmd_vel": {
+      "reason": "not on graph (synthetic run)",
+      "status": "absent"
+    },
+    "/utlidar/robot_odom": {
+      "graph_types": [
+        "nav_msgs/msg/Odometry"
+      ],
+      "message_lost": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "status": "subscribed"
+    }
+  },
+  "triggers": [
+    {
+      "note": "operator marker (synthetic)",
+      "record_seq": 338,
+      "role": "primary",
+      "seq": 339,
+      "source": "synthetic",
+      "t_mono_ns": 5003000000000,
+      "t_wall_ns": 1789000003000000000,
+      "type": "manual_marker"
+    }
+  ],
+  "writer": {
+    "first_write_error": null,
+    "records_written": 677,
+    "write_errors": 0
+  }
+}

@@ -1,0 +1,515 @@
+{
+  "bundle_id": "inc_20260910T002643.000000Z_manual_marker",
+  "chain": {
+    "arbiter_forced_zero": {
+      "status": "not_observed"
+    },
+    "cmd_vel_zero": {
+      "status": "not_observed"
+    },
+    "diagnosis": {
+      "status": "not_observed"
+    },
+    "fault": {
+      "status": "not_observed"
+    },
+    "helix_hold": {
+      "status": "not_observed"
+    },
+    "odometry_stopped": {
+      "reason": "no HELIX hold observed to time a stop from",
+      "status": "not_observed"
+    },
+    "recovery_action": {
+      "status": "not_observed"
+    },
+    "recovery_hint": {
+      "status": "not_observed"
+    },
+    "sport_response": {
+      "status": "not_observed"
+    },
+    "sport_stopmove_request": {
+      "status": "not_observed"
+    }
+  },
+  "chain_order": [
+    "fault",
+    "diagnosis",
+    "recovery_hint",
+    "recovery_action",
+    "helix_hold",
+    "arbiter_forced_zero",
+    "cmd_vel_zero",
+    "sport_stopmove_request",
+    "sport_response",
+    "odometry_stopped"
+  ],
+  "data_quality": {
+    "bundle_status": "complete",
+    "clock_jumps": [],
+    "clock_warnings": [
+      "robot clock differs from recorder receipt by -1.732 s (median); robot stamps are never compared with payload or recorder clocks"
+    ],
+    "duplicates": {},
+    "first_write_error": null,
+    "out_of_order_stamps": {},
+    "pre_window": {
+      "available_s": 3.0,
+      "evicted_by_cap_in_window": 0,
+      "requested_s": 10.0
+    },
+    "publisher_sequence_lost": {},
+    "recorder_message_lost": 0,
+    "recorder_ring_evicted_in_window": 0,
+    "synthetic": true,
+    "topics_with_gaps": {},
+    "writer_errors": 0
+  },
+  "helix": {
+    "arbiter": null,
+    "diagnosis": null,
+    "fault": null,
+    "fault_id": null,
+    "hold": null,
+    "note": "no HELIX STOP_AND_HOLD or hold assertion in bundle",
+    "recovery_action": null,
+    "recovery_hint": null
+  },
+  "key_spans": [],
+  "motion": {
+    "chain_horizon_s": null,
+    "final_twist": {
+      "angular": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "linear": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    "hold_released": null,
+    "input_twist": {
+      "angular": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "linear": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "topic": "/nav/cmd_vel"
+    },
+    "move_requests_while_held": null,
+    "nonzero_outputs_while_held": null,
+    "odometry": {
+      "median_period_s": 0.050178,
+      "reason": "no HELIX hold observed to time a stop from",
+      "receipt_jitter_p95_s": 0.0,
+      "robot_clock_offset_basis": "median(recorder receipt wall time - odometry header stamp); includes transport delay",
+      "robot_clock_offset_s": -1.7315,
+      "samples": 120,
+      "speed_time_base": "robot header stamps",
+      "status": "not_applicable"
+    },
+    "outputs_source": "/cmd_vel",
+    "sport_response": null,
+    "stopmove_request_id": null
+  },
+  "nodes": {
+    "appeared": [],
+    "disappeared": [],
+    "publishers_on_profiled_topics": [
+      "<synthetic>"
+    ]
+  },
+  "profile": {
+    "name": "replay_lab_fixture",
+    "post_trigger_sec": 3.0,
+    "pre_trigger_sec": 10.0,
+    "sha256": "53e62296f5cd4c569d7fb7ed0503cf852a904c4399f938780c55612e8c6439f7"
+  },
+  "provenance": {
+    "blackboxrs_git_dirty": null,
+    "blackboxrs_git_sha": null,
+    "blackboxrs_version": "fixture",
+    "experiment": "replay-lab golden evidence (synthetic)",
+    "experiment_repos": [],
+    "hostname": "synthetic",
+    "note": "GENERATED traffic; odometry is a first-order lag model, not a GO2",
+    "platform": "synthetic",
+    "profile_name": "replay_lab_fixture",
+    "rmw_implementation": "rmw_cyclonedds_cpp",
+    "ros_distro": "humble",
+    "session_id": "replay_lab_fixture",
+    "synthetic": true
+  },
+  "recorder_receipt_delay": {
+    "max_s": 0.003389,
+    "n": 420,
+    "p05_s": 0.000522,
+    "p50_s": 0.001778,
+    "p95_abs_dev_s": 0.001495,
+    "p95_s": 0.003273,
+    "spread_min_max_s": 0.002989,
+    "spread_p05_p95_s": 0.002751
+  },
+  "resources": {
+    "available": true,
+    "cpu_percent": {
+      "after": {
+        "max": 18.6,
+        "mean": 16.76,
+        "min": 15.21,
+        "n": 3
+      },
+      "before": {
+        "max": 24.99,
+        "mean": 23.19,
+        "min": 20.0,
+        "n": 6
+      },
+      "during": {
+        "max": 20.71,
+        "mean": 17.57,
+        "min": 15.11,
+        "n": 4
+      }
+    },
+    "gpu_backend": "synthetic",
+    "gpu_load_percent": {
+      "after": {
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "n": 3
+      },
+      "before": {
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "n": 6
+      },
+      "during": {
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "n": 4
+      }
+    },
+    "gpu_temp_c": {
+      "after": {
+        "max": 45.0,
+        "mean": 45.0,
+        "min": 45.0,
+        "n": 3
+      },
+      "before": {
+        "max": 45.0,
+        "mean": 45.0,
+        "min": 45.0,
+        "n": 6
+      },
+      "during": {
+        "max": 45.0,
+        "mean": 45.0,
+        "min": 45.0,
+        "n": 4
+      }
+    },
+    "mem_percent": {
+      "after": {
+        "max": 41.0,
+        "mean": 41.0,
+        "min": 41.0,
+        "n": 3
+      },
+      "before": {
+        "max": 41.0,
+        "mean": 41.0,
+        "min": 41.0,
+        "n": 6
+      },
+      "during": {
+        "max": 41.0,
+        "mean": 41.0,
+        "min": 41.0,
+        "n": 4
+      }
+    },
+    "recorder_cpu_percent": {
+      "after": {
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "n": 3
+      },
+      "before": {
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "n": 6
+      },
+      "during": {
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "n": 4
+      }
+    },
+    "recorder_rss_mb": {
+      "after": {
+        "max": 60.0,
+        "mean": 60.0,
+        "min": 60.0,
+        "n": 3
+      },
+      "before": {
+        "max": 60.0,
+        "mean": 60.0,
+        "min": 60.0,
+        "n": 6
+      },
+      "during": {
+        "max": 60.0,
+        "mean": 60.0,
+        "min": 60.0,
+        "n": 4
+      }
+    },
+    "samples": 13,
+    "thermal_max_c": {
+      "cpu-thermal:thermal_zone0": 48.0
+    }
+  },
+  "schema": "blackboxrs.flight.report.v1",
+  "secondary_triggers": [],
+  "stage_intervals": [],
+  "status": "complete",
+  "synthetic": true,
+  "timing_methodology": {
+    "emission": "DDS source timestamps, or embedded publisher stamps, compared only within one declared clock domain",
+    "never": "receipt times are never presented as emission times; robot clock is never compared with the payload or recorder clock",
+    "receipt": "recorder DDS reception time (wall) or recorder monotonic callback time; used only when emission times are not comparable; labelled"
+  },
+  "topics": {
+    "/cmd_vel": {
+      "availability": "subscribed",
+      "count": 120,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.249844,
+      "gaps": [],
+      "graph_types": [
+        "geometry_msgs/msg/Twist"
+      ],
+      "max_gap_s": 0.052866,
+      "median_interval_s": 0.049969,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 20.0,
+        "before": 6.0,
+        "during": 20.0
+      },
+      "role": "cmd_vel_out",
+      "stored": 120
+    },
+    "/helix/arbiter/status": {
+      "availability": "subscribed",
+      "count": 120,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.5,
+      "gaps": [],
+      "graph_types": [
+        "helix_msgs/msg/ArbiterStatus"
+      ],
+      "max_gap_s": 0.05271,
+      "median_interval_s": 0.050069,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 20.0,
+        "before": 6.0,
+        "during": 20.0
+      },
+      "role": "arbiter_status",
+      "sequence": {
+        "duplicates": 0,
+        "lost": 0,
+        "method": "gaps in the publisher's own sequence counter",
+        "publisher_restarts": 0,
+        "reordered": 0
+      },
+      "stored": 120
+    },
+    "/helix/faults": {
+      "availability": "absent",
+      "availability_reason": "not on graph (synthetic run)",
+      "count": 0,
+      "graph_types": null,
+      "publishers": null,
+      "role": "helix_fault",
+      "stored": 0
+    },
+    "/helix/hold": {
+      "availability": "subscribed",
+      "count": 60,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.5,
+      "gaps": [],
+      "graph_types": [
+        "helix_msgs/msg/HelixHold"
+      ],
+      "max_gap_s": 0.102353,
+      "median_interval_s": 0.099973,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 10.0,
+        "before": 3.0,
+        "during": 10.0
+      },
+      "role": "helix_hold",
+      "sequence": {
+        "duplicates": 0,
+        "lost": 0,
+        "method": "gaps in the publisher's own sequence counter",
+        "publisher_restarts": 0,
+        "reordered": 0
+      },
+      "stored": 60
+    },
+    "/helix/recovery_actions": {
+      "availability": "absent",
+      "availability_reason": "not on graph (synthetic run)",
+      "count": 0,
+      "graph_types": null,
+      "publishers": null,
+      "role": "recovery_action",
+      "stored": 0
+    },
+    "/helix/recovery_hints": {
+      "availability": "absent",
+      "availability_reason": "not on graph (synthetic run)",
+      "count": 0,
+      "graph_types": null,
+      "publishers": null,
+      "role": "recovery_hint",
+      "stored": 0
+    },
+    "/lowstate": {
+      "availability": "subscribed",
+      "count": 120,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.5,
+      "gaps": [],
+      "graph_types": [
+        "unitree_go/msg/LowState"
+      ],
+      "max_gap_s": 0.052665,
+      "median_interval_s": 0.050049,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 20.0,
+        "before": 6.0,
+        "during": 20.0
+      },
+      "role": "go2_state",
+      "stored": 120
+    },
+    "/nav/cmd_vel": {
+      "availability": "subscribed",
+      "count": 120,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.249441,
+      "gaps": [],
+      "graph_types": [
+        "geometry_msgs/msg/Twist"
+      ],
+      "max_gap_s": 0.052534,
+      "median_interval_s": 0.049888,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 20.0,
+        "before": 6.0,
+        "during": 20.0
+      },
+      "role": "cmd_vel_source",
+      "stored": 120
+    },
+    "/teleop/cmd_vel": {
+      "availability": "absent",
+      "availability_reason": "not on graph (synthetic run)",
+      "count": 0,
+      "graph_types": null,
+      "publishers": null,
+      "role": "cmd_vel_source",
+      "stored": 0
+    },
+    "/utlidar/robot_odom": {
+      "availability": "subscribed",
+      "count": 120,
+      "duplicates": 0,
+      "gap_count": 0,
+      "gap_threshold_s": 0.5,
+      "gaps": [],
+      "graph_types": [
+        "nav_msgs/msg/Odometry"
+      ],
+      "max_gap_s": 0.052687,
+      "median_interval_s": 0.050178,
+      "out_of_order_stamps": 0,
+      "publishers": [
+        "<synthetic>"
+      ],
+      "rate_hz": {
+        "after": 20.0,
+        "before": 6.0,
+        "during": 20.0
+      },
+      "role": "odometry",
+      "stored": 120
+    }
+  },
+  "trigger": {
+    "note": "operator marker (synthetic)",
+    "record_seq": 338,
+    "role": "primary",
+    "seq": 339,
+    "source": "synthetic",
+    "t_mono_ns": 5003000000000,
+    "t_wall_ns": 1789000003000000000,
+    "type": "manual_marker"
+  },
+  "verdicts": [],
+  "window": {
+    "first_t_mono_ns": 5000000000000,
+    "last_t_mono_ns": 5006000000000,
+    "messages": 660,
+    "records": 677,
+    "seconds_after_trigger": 3.0,
+    "seconds_before_trigger": 3.0
+  }
+}

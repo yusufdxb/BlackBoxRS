@@ -1,0 +1,30 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "timestamp_jump__robot_clock",
+  "regression": "Timestamp jump: a clock step on one host is detected per topic against its own receipt baseline and does not change any arbitration decision.",
+  "initial_conditions": "Synthetic GO2 + HELIX run (6.5 s): /nav/cmd_vel at 20 Hz commands 0 m/s, then 0.15 m/s from t=2 s; HELIX hold published at 10 Hz, never asserted; odometry and lowstate at 20 Hz from the robot host, whose clock is 1.734 s ahead of the payload.",
+  "injected_fault": "The robot host's clock steps 2.0 s forward at t=3.0 s (odometry and lowstate stamps).",
+  "evidence": "../evidence/nominal_motion",
+  "sut": {
+    "mode": "reference",
+    "preset": "helix_arbiter"
+  },
+  "faults": [
+    {
+      "kind": "timestamp_jump",
+      "host": "robot",
+      "at_s": 3.0,
+      "jump_s": 2.0
+    }
+  ],
+  "expect": {
+    "verdict": "DETECTED",
+    "invariants": {
+      "fresh_output": "PASS",
+      "finite_output": "PASS"
+    },
+    "detections": [
+      "stamp_ahead"
+    ]
+  }
+}

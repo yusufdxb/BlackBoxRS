@@ -1,0 +1,72 @@
+# Flight-recorder profile for the Replay Lab golden evidence.
+#
+# A reduced go2 profile: the HELIX motion-arbitration topics plus two GO2
+# periodic telemetry topics (odometry and lowstate, both from the robot
+# host), so a replay can tell one silent topic from a whole host going
+# silent. Rates are lowered to 20 Hz to keep the committed bundles small;
+# that is a fixture choice, not a GO2 measurement (the GO2 publishes
+# robot_odom at ~150 Hz and lowstate at ~500 Hz, docs/go2_field_notes.md).
+
+profile: replay_lab_fixture
+schema_version: 1
+description: >-
+  Reduced GO2 + HELIX profile for the Replay Lab golden evidence (synthetic).
+
+buffer:
+  pre_trigger_sec: 10.0
+  post_trigger_sec: 3.0
+
+sampling:
+  graph_poll_sec: 0.5
+  system_sample_hz: 2.0
+  health_tick_sec: 0.25
+
+co_hosted_roles:
+  - helix_fault
+  - recovery_hint
+  - recovery_action
+  - helix_hold
+  - arbiter_status
+  - cmd_vel_out
+  - cmd_vel_source
+
+expected_nodes:
+  - /helix_arbiter
+  - /helix_recovery_node
+
+topics:
+  - name: /nav/cmd_vel
+    type: geometry_msgs/msg/Twist
+    role: cmd_vel_source
+  - name: /teleop/cmd_vel
+    type: geometry_msgs/msg/Twist
+    role: cmd_vel_source
+  - name: /cmd_vel
+    type: geometry_msgs/msg/Twist
+    role: cmd_vel_out
+  - name: /helix/faults
+    type: helix_msgs/msg/FaultEvent
+    role: helix_fault
+  - name: /helix/recovery_hints
+    type: helix_msgs/msg/RecoveryHint
+    role: recovery_hint
+  - name: /helix/recovery_actions
+    type: helix_msgs/msg/RecoveryAction
+    role: recovery_action
+  - name: /helix/hold
+    type: helix_msgs/msg/HelixHold
+    role: helix_hold
+    stale_after_sec: 0.5
+  - name: /helix/arbiter/status
+    type: helix_msgs/msg/ArbiterStatus
+    role: arbiter_status
+    stale_after_sec: 0.5
+  - name: /utlidar/robot_odom
+    type: nav_msgs/msg/Odometry
+    role: odometry
+    stale_after_sec: 0.5
+    frame_ids: {header.frame_id: odom, child_frame_id: base_link}
+  - name: /lowstate
+    type: unitree_go/msg/LowState
+    role: go2_state
+    stale_after_sec: 0.5

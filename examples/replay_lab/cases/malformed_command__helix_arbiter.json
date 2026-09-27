@@ -1,0 +1,32 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "malformed_command__helix_arbiter",
+  "regression": "Malformed numeric payload: a non-number in a velocity field is rejected like NaN, never coerced.",
+  "initial_conditions": "Synthetic GO2 + HELIX run (6.5 s): /nav/cmd_vel at 20 Hz commands 0 m/s, then 0.15 m/s from t=2 s; HELIX hold published at 10 Hz, never asserted; odometry and lowstate at 20 Hz from the robot host, whose clock is 1.734 s ahead of the payload.",
+  "injected_fault": "linear.x on /nav/cmd_vel is the string \"fast\" for 0.2 s from t=3.0 s.",
+  "evidence": "../evidence/nominal_motion",
+  "sut": {
+    "mode": "reference",
+    "preset": "helix_arbiter"
+  },
+  "faults": [
+    {
+      "kind": "malformed",
+      "topic": "/nav/cmd_vel",
+      "field": "linear.x",
+      "value": "fast",
+      "from_s": 3.0,
+      "to_s": 3.2
+    }
+  ],
+  "expect": {
+    "verdict": "DETECTED",
+    "invariants": {
+      "finite_output": "PASS",
+      "fresh_output": "PASS"
+    },
+    "detections": [
+      "malformed_input"
+    ]
+  }
+}

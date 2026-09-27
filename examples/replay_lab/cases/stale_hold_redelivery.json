@@ -1,0 +1,31 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "stale_hold_redelivery",
+  "regression": "Stale message: a re-delivered old RESUME must not release the hold (P8); both the arbiter model and the stop oracle order hold states by (epoch, seq). The re-delivered sample is also a duplicate delivery (same DDS source time and payload).",
+  "initial_conditions": "As nominal_motion, but at t=3.0 s an injected benign HELIX fault is diagnosed, STOP_AND_HOLD is accepted and /helix/hold asserts (epoch/seq ordered, 10 Hz); /nav/cmd_vel keeps commanding 0.15 m/s throughout.",
+  "injected_fault": "At t=4.0 s, while held, a 2 s old hold message saying hold=false is delivered again.",
+  "evidence": "../evidence/clean_stop",
+  "sut": {
+    "mode": "reference",
+    "preset": "helix_arbiter"
+  },
+  "faults": [
+    {
+      "kind": "stale_redelivery",
+      "topic": "/helix/hold",
+      "at_s": 4.0,
+      "age_s": 2.0
+    }
+  ],
+  "expect": {
+    "verdict": "DETECTED",
+    "invariants": {
+      "stop_dominance": "PASS"
+    },
+    "detections": [
+      "duplicate_messages",
+      "out_of_order_stamps",
+      "stamp_behind"
+    ]
+  }
+}

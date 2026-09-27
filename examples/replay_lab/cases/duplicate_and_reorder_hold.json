@@ -1,0 +1,37 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "duplicate_and_reorder_hold",
+  "regression": "Duplicated and out-of-order delivery of the safety state: the arbiter drops older (epoch, seq) states (P8), the hold holds, and the flight analyzer reports the transport faults.",
+  "initial_conditions": "As nominal_motion, but at t=3.0 s an injected benign HELIX fault is diagnosed, STOP_AND_HOLD is accepted and /helix/hold asserts (epoch/seq ordered, 10 Hz); /nav/cmd_vel keeps commanding 0.15 m/s throughout.",
+  "injected_fault": "Hold messages are delivered twice between t=1 and 2 s, and in swapped pairs between t=4 and 5 s while held.",
+  "evidence": "../evidence/clean_stop",
+  "sut": {
+    "mode": "reference",
+    "preset": "helix_arbiter"
+  },
+  "faults": [
+    {
+      "kind": "duplicate",
+      "topic": "/helix/hold",
+      "from_s": 1.0,
+      "to_s": 2.0
+    },
+    {
+      "kind": "reorder",
+      "topic": "/helix/hold",
+      "from_s": 4.0,
+      "to_s": 5.0
+    }
+  ],
+  "expect": {
+    "verdict": "DETECTED",
+    "invariants": {
+      "stop_dominance": "PASS"
+    },
+    "detections": [
+      "duplicate_messages",
+      "out_of_order_stamps",
+      "sequence_reordered"
+    ]
+  }
+}

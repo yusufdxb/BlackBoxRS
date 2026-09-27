@@ -1,0 +1,29 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "telemetry_dropout__odometry",
+  "regression": "Stale telemetry on one topic, told apart from transport loss because the host's other periodic topic is alive.",
+  "initial_conditions": "Synthetic GO2 + HELIX run (6.5 s): /nav/cmd_vel at 20 Hz commands 0 m/s, then 0.15 m/s from t=2 s; HELIX hold published at 10 Hz, never asserted; odometry and lowstate at 20 Hz from the robot host, whose clock is 1.734 s ahead of the payload.",
+  "injected_fault": "Odometry is silent for 1.5 s from t=3.0 s; lowstate from the same host keeps arriving.",
+  "evidence": "../evidence/nominal_motion",
+  "sut": {
+    "mode": "reference",
+    "preset": "helix_arbiter"
+  },
+  "faults": [
+    {
+      "kind": "gap",
+      "topic": "/utlidar/robot_odom",
+      "from_s": 3.0,
+      "to_s": 4.5
+    }
+  ],
+  "expect": {
+    "verdict": "DETECTED",
+    "invariants": {
+      "fresh_output": "PASS"
+    },
+    "detections": [
+      "stale_telemetry"
+    ]
+  }
+}
