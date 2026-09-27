@@ -71,6 +71,42 @@ class _MemSink:
         pass
 
 
+class RecordFeeder:
+    """Stream recorded records back into a :class:`FlightCore`.
+
+    Messages and system samples are re-ingested as recorded. Graph records
+    are rebuilt into full node sets (a diff alone does not give the node
+    set, so diffs before the first full snapshot are skipped) and passed to
+    ``FlightCore.graph`` so node-disappearance triggers fire as they did
+    live. Markers go through ``FlightCore.mark``. Records of other kinds
+    (triggers, health, clock jumps) are outputs of the core, not inputs, and
+    are ignored. Used by ``retrigger`` and by the replay lab.
+    """
+
+    def __init__(self, core: FlightCore) -> None:
+        self.core = core
+        self.nodes: set[str] | None = None
+
+    def feed(self, r: dict[str, Any]) -> None:
+        kind = r.get("kind")
+        t = r.get("t_mono_ns")
+        if kind == "msg" or kind == "sys":
+            self.core.ingest({k: v for k, v in r.items() if k != "seq"})
+        elif kind == "graph":
+            if r.get("full"):
+                self.nodes = set(r.get("nodes") or [])
+            elif self.nodes is None:
+                return  # no full snapshot yet: a diff alone does not give the node set
+            else:
+                self.nodes = ((self.nodes - set(r.get("nodes_gone") or []))
+                              | set(r.get("nodes_new") or []))
+            self.core.graph(t, r["t_wall_ns"], sorted(self.nodes), {},
+                            r.get("publishers") or {})
+        elif kind == "marker":
+            self.core.mark(t, r["t_wall_ns"], note=r.get("note", ""),
+                           source=r.get("source", ""))
+
+
 def retrigger(path: str | Path) -> dict[str, Any]:
     manifest, records, _ = load_bundle(path)
     text = (manifest.get("profile") or {}).get("text")
@@ -85,10 +121,9 @@ def retrigger(path: str | Path) -> dict[str, Any]:
 
     core = FlightCore(profile, factory)
     tick_ns = int(profile.sampling.health_tick_sec * _NS)
-    nodes: set[str] | None = None
+    feeder = RecordFeeder(core)
     next_tick = None
     for r in sorted(records, key=lambda x: x.get("seq", 0)):
-        kind = r.get("kind")
         t = r.get("t_mono_ns")
         if t is not None:
             if next_tick is None:
@@ -96,18 +131,7 @@ def retrigger(path: str | Path) -> dict[str, Any]:
             while next_tick <= t:
                 core.tick(next_tick, r["t_wall_ns"] - (t - next_tick))
                 next_tick += tick_ns
-        if kind == "msg" or kind == "sys":
-            core.ingest({k: v for k, v in r.items() if k != "seq"})
-        elif kind == "graph":
-            if r.get("full"):
-                nodes = set(r.get("nodes") or [])
-            elif nodes is None:
-                continue  # no full snapshot yet: a diff alone does not give the node set
-            else:
-                nodes = (nodes - set(r.get("nodes_gone") or [])) | set(r.get("nodes_new") or [])
-            core.graph(t, r["t_wall_ns"], sorted(nodes), {}, r.get("publishers") or {})
-        elif kind == "marker":
-            core.mark(t, r["t_wall_ns"], note=r.get("note", ""), source=r.get("source", ""))
+        feeder.feed(r)
     fired = [tr for s in sinks for tr in s.triggers]
     recorded = [t for t in manifest.get("triggers") or [] if t.get("role") != "note"]
     prim = recorded[0] if recorded else None
