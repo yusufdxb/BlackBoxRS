@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -149,13 +150,28 @@ def _flag(raw: Any, default: bool) -> tuple[bool, dict[str, Any]]:
     raise ProfileError(f"trigger value must be bool or mapping, got {raw!r}")
 
 
-def _positive(name: str, value: Any) -> float:
+# Upper bound for every positive profile value. Seconds become integer
+# nanoseconds (tripled for the hard close), so 1e9 s keeps every derived time
+# far from int64 overflow in the C++ recorder; no rate or count needs more.
+# Same bound as cpp/src/profile.cpp.
+MAX_POSITIVE = 1e9
+
+# Roles whose decoded content fires triggers: never decimated (a decimated
+# message is not decoded, so a hold could be missed).
+TRIGGER_ROLES = frozenset({"helix_hold", "recovery_action", "arbiter_status"})
+
+
+def _positive(name: str, value: Any, maximum: float = MAX_POSITIVE) -> float:
     try:
         v = float(value)
     except (TypeError, ValueError) as exc:
         raise ProfileError(f"{name} must be a number, got {value!r}") from exc
+    if not math.isfinite(v):
+        raise ProfileError(f"{name} must be finite, got {v}")
     if v <= 0:
         raise ProfileError(f"{name} must be > 0, got {v}")
+    if v > maximum:
+        raise ProfileError(f"{name} must be <= {maximum}, got {v}")
     return v
 
 
@@ -189,6 +205,9 @@ def parse_profile(raw: dict[str, Any], *, source: str, text: str) -> FlightProfi
         role = str(t.get("role", "other"))
         if role not in KNOWN_ROLES:
             raise ProfileError(f"topic {name}: unknown role {role!r}")
+        if t.get("store_max_hz") is not None and role in TRIGGER_ROLES:
+            raise ProfileError(f"topic {name}: store_max_hz is not allowed on a {role} topic "
+                               "(its messages drive triggers)")
         topics.append(TopicSpec(
             name=name,
             type=str(t["type"]),
@@ -212,7 +231,8 @@ def parse_profile(raw: dict[str, Any], *, source: str, text: str) -> FlightProfi
         pre_trigger_sec=_positive("buffer.pre_trigger_sec", b.get("pre_trigger_sec", 10.0)),
         post_trigger_sec=_positive("buffer.post_trigger_sec", b.get("post_trigger_sec", 15.0)),
         max_records=int(_positive("buffer.max_records", b.get("max_records", 400_000))),
-        max_bytes=int(_positive("buffer.max_bytes", b.get("max_bytes", 256 * 1024 * 1024))),
+        max_bytes=int(_positive("buffer.max_bytes", b.get("max_bytes", 256 * 1024 * 1024),
+                                1e12)),
     )
     s = raw.get("sampling") or {}
     sampling = SamplingSpec(

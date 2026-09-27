@@ -17,6 +17,8 @@ evidence would be misleading:
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,11 +28,14 @@ from blackboxrs.flight.profile import FlightProfile, ProfileError, profile_from_
 from blackboxrs.lab.values import digest
 
 # Bundle statuses that mean the evidence is not complete: still capturing,
-# killed before finalization, unreadable, a write error (the recorder could not
-# put every record on disk), or messages lost before the recorder core
-# (written by the C++ recorder when its ingest queue overflowed).
-INCOMPLETE_STATUSES = ("capturing", "interrupted_unfinalized", "unknown", "write_failed",
-                       "complete_with_loss")
+# stopped before its post-trigger window ended, killed before finalization,
+# unreadable, a write error (the recorder could not put every record on disk),
+# messages lost before the recorder core (C++ recorder: ingest queue, DDS or
+# shutdown), or a recorder pipeline that failed mid-capture.
+INCOMPLETE_STATUSES = ("capturing", "interrupted", "interrupted_unfinalized", "unknown",
+                       "write_failed", "complete_with_loss", "pipeline_failed")
+
+INTEGRITY_SCHEMA = "blackboxrs.integrity.v1"
 
 # Record kinds that are inputs to a replay. Trigger, health and clock_jump
 # records are outputs the recorder derived live; the replay derives its own.
@@ -111,6 +116,40 @@ def validate_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(records, key=lambda r: r["seq"])
 
 
+def _integrity_problems(p: Path) -> list[str]:
+    """What disagrees with integrity.json, when the bundle has one (C++ recorder).
+
+    Same checks and messages as the C++ reader (cpp/src/evidence/bundle.cpp).
+    """
+    ipath = p / "integrity.json"
+    if not ipath.exists():
+        return []
+    try:
+        j = json.loads(ipath.read_bytes())
+    except (OSError, ValueError):
+        j = None
+
+    def num(k: str) -> bool:
+        return _is_int(j.get(k)) and j[k] >= 0
+
+    if (not isinstance(j, dict) or j.get("schema") != INTEGRITY_SCHEMA or not num("records")
+            or not num("bytes") or not isinstance(j.get("sha256"), str)
+            or not isinstance(j.get("complete"), bool)):
+        return ["integrity.json unreadable"]
+    out = []
+    if not j["complete"]:
+        out.append("integrity.json marks the capture incomplete")
+    data = (p / "records.jsonl").read_bytes()
+    lines = data.count(b"\n")
+    if len(data) != j["bytes"]:
+        out.append(f"records.jsonl is {len(data)} bytes, integrity.json says {j['bytes']}")
+    if lines != j["records"]:
+        out.append(f"records.jsonl has {lines} lines, integrity.json says {j['records']}")
+    if hashlib.sha256(data).hexdigest() != j["sha256"]:
+        out.append("records.jsonl sha256 does not match integrity.json")
+    return out
+
+
 def load_evidence(path: str | Path, *, allow_partial: bool = False,
                   label: str | None = None) -> Evidence:
     """Load and validate a bundle. ``label`` is what results call it (default: the path)."""
@@ -131,6 +170,7 @@ def load_evidence(path: str | Path, *, allow_partial: bool = False,
         problems.append(f"{info['torn_lines']} torn record line(s)")
     if manifest.get("status") in INCOMPLETE_STATUSES:
         problems.append(f"bundle status is {manifest.get('status')!r}")
+    problems.extend(_integrity_problems(p))
     if problems and not allow_partial:
         raise EvidenceError(f"{path}: incomplete evidence ({'; '.join(problems)}); "
                             "pass allow_partial to replay it anyway")

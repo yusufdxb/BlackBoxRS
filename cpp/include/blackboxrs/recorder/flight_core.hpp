@@ -133,8 +133,10 @@ class FlightCore {
              const Json& topics, const std::map<std::string, std::vector<std::string>>& publishers);
   // Periodic: staleness checks and incident closing.
   void tick(MonoTime t_mono, WallTime t_wall);
-  // Close any open incident as interrupted.
-  void shutdown(const std::string& reason = "recorder_stopped");
+  // Close any open incident: as interrupted (triggered mode, post window cut
+  // short) or complete (continuous mode), or with `status` when given (the
+  // recorder passes "pipeline_failed" when its pipeline died).
+  void shutdown(const std::string& reason = "recorder_stopped", const std::string& status = "");
 
   [[nodiscard]] bool incident_open() const noexcept { return open_.has_value(); }
   [[nodiscard]] const CoreStats& stats() const noexcept { return stats_; }

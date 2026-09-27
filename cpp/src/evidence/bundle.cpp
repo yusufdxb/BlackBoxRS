@@ -5,6 +5,7 @@
 #include <set>
 #include <sstream>
 
+#include "blackboxrs/evidence/integrity_record.hpp"
 #include "blackboxrs/integrity.hpp"
 #include "blackboxrs/payload.hpp"
 
@@ -35,6 +36,62 @@ bool is_int(const Json& r, const char* key) {
 bool nonempty_string(const Json& r, const char* key) {
   const auto it = r.find(key);
   return it != r.end() && it->is_string() && !it->get_ref<const std::string&>().empty();
+}
+
+// When the bundle carries integrity.json (C++ recorder), what disagrees with
+// it. Same checks and messages as Python lab/evidence.py _integrity_problems.
+std::vector<std::string> integrity_problems(const fs::path& dir) {
+  std::vector<std::string> out;
+  const fs::path ipath = dir / "integrity.json";
+  if (!fs::exists(ipath)) {
+    return out;  // a Python-recorded bundle: nothing to check against
+  }
+  std::ifstream in(ipath, std::ios::binary);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  const Json j = Json::parse(ss.str(), nullptr, /*allow_exceptions=*/false);
+  const auto num = [&](const char* k) {
+    return j.is_object() && j.contains(k) && j[k].is_number_unsigned();
+  };
+  if (!j.is_object() || j.value("schema", std::string()) != kIntegritySchema || !num("records") ||
+      !num("bytes") || !j.contains("sha256") || !j["sha256"].is_string() ||
+      !j.contains("complete") || !j["complete"].is_boolean()) {
+    out.emplace_back("integrity.json unreadable");
+    return out;
+  }
+  if (!j["complete"].get<bool>()) {
+    out.emplace_back("integrity.json marks the capture incomplete");
+  }
+  std::ifstream rf(dir / "records.jsonl", std::ios::binary);
+  Sha256 h;
+  std::uint64_t bytes = 0;
+  std::uint64_t lines = 0;
+  std::vector<char> buf(1U << 16U);
+  while (rf) {
+    rf.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+    const auto n = static_cast<std::size_t>(rf.gcount());
+    if (n == 0) {
+      break;
+    }
+    const std::string_view chunk(buf.data(), n);
+    h.update(chunk);
+    bytes += n;
+    lines += static_cast<std::uint64_t>(std::count(chunk.begin(), chunk.end(), '\n'));
+  }
+  const auto want_bytes = j["bytes"].get<std::uint64_t>();
+  const auto want_records = j["records"].get<std::uint64_t>();
+  if (bytes != want_bytes) {
+    out.push_back("records.jsonl is " + std::to_string(bytes) + " bytes, integrity.json says " +
+                  std::to_string(want_bytes));
+  }
+  if (lines != want_records) {
+    out.push_back("records.jsonl has " + std::to_string(lines) + " lines, integrity.json says " +
+                  std::to_string(want_records));
+  }
+  if (h.finish_hex() != j["sha256"].get<std::string>()) {
+    out.emplace_back("records.jsonl sha256 does not match integrity.json");
+  }
+  return out;
 }
 
 }  // namespace
@@ -140,9 +197,13 @@ Evidence load_evidence(const fs::path& dir, bool allow_partial, const std::strin
   }
   const std::string status = b.manifest.value("status", std::string());
   // Same list as Python lab/evidence.py INCOMPLETE_STATUSES.
-  if (status == "capturing" || status == "interrupted_unfinalized" || status == "unknown" ||
-      status == "write_failed" || status == "complete_with_loss") {
+  if (status == "capturing" || status == "interrupted" || status == "interrupted_unfinalized" ||
+      status == "unknown" || status == "write_failed" || status == "complete_with_loss" ||
+      status == "pipeline_failed") {
     problems.push_back("bundle status is '" + status + "'");
+  }
+  for (auto& p : integrity_problems(dir)) {
+    problems.push_back(std::move(p));
   }
   if (!problems.empty() && !allow_partial) {
     std::string joined;

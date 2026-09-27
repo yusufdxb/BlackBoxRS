@@ -216,7 +216,7 @@ new safety number.
 | Recorder RSS above `preflight.max_recorder_rss_mb` (500 MB), or rising for the whole of H1 | profile budget | abort |
 | Any message dropped at the ingest queue on a HELIX, command or odometry topic | recorder metrics | abort H3/H4: the evidence would be incomplete |
 | Ingest queue high-water keeps rising (queue never drains) | recorder metrics | abort |
-| Any evidence write error, `write_failed` or `complete_with_loss` bundle, disk below the floor | writer | abort |
+| Any evidence write error, a `write_failed`, `complete_with_loss` or `pipeline_failed` bundle, recorder state `failed`, disk below the floor | writer, recorder | abort |
 | Wall clock before 2025, or a `clock_jump` record | preflight P3, recorder | abort, fix the clock |
 | `/lowstate` rate drops by more than 10 % with the recorder running, or HELIX preflight goes NO-GO | field-note rate, HELIX | abort: the recorder degrades ROS |
 | The recorder crashes, restarts, or exits non-zero | process | abort |

@@ -14,12 +14,23 @@
 // Shutdown (stop()):
 //   1. close the ingest queue: no new messages are accepted;
 //   2. the pipeline drains what is queued until the queue is empty or the
-//      drain deadline passes; anything left is counted as dropped at shutdown;
+//      drain deadline passes; anything left is counted as dropped at shutdown
+//      (messages, and separately graph snapshots and markers);
 //   3. FlightCore closes the open incident (interrupted in triggered mode,
 //      complete in continuous mode, complete_with_loss if messages were lost);
 //   4. the writer drains its queue and finalizes every bundle (integrity
 //      record, manifest, rename, fsync);
 //   5. both threads are joined. Nothing is detached.
+//
+// Failure: an exception on the pipeline thread (or a continuous capture that
+// cannot open its bundle because the disk is below the floor) puts the
+// recorder in state "failed": the ingest queue closes, everything not yet
+// processed is counted as dropped, and the open bundle closes with status
+// "pipeline_failed", which every reader treats as incomplete evidence.
+//
+// Loss accounting: a message lost before the core (full ingest queue, DDS
+// message_lost, dropped at shutdown) is entered in a LossLedger at its
+// arrival time; a bundle reports the losses inside its own window.
 #pragma once
 
 #include <atomic>
@@ -40,6 +51,7 @@
 #include "blackboxrs/recorder/bounded_queue.hpp"
 #include "blackboxrs/recorder/evidence_writer.hpp"
 #include "blackboxrs/recorder/flight_core.hpp"
+#include "blackboxrs/recorder/loss_ledger.hpp"
 #include "blackboxrs/recorder/system_sampler.hpp"
 
 namespace blackboxrs::recorder {
@@ -132,7 +144,10 @@ struct RecorderMetrics {
   std::uint64_t received = 0;
   std::uint64_t dropped_ingest = 0;
   std::uint64_t dropped_at_shutdown = 0;
+  std::uint64_t dropped_dds = 0;  // DDS message_lost events on profile topics
   std::uint64_t rejected_after_stop = 0;
+  std::uint64_t control_rejected = 0;             // graph snapshots / markers refused (queue full)
+  std::uint64_t control_dropped_at_shutdown = 0;  // graph snapshots / markers never processed
   std::uint64_t decoded = 0;
   std::uint64_t decode_errors = 0;
   std::uint64_t decimated = 0;
@@ -178,8 +193,10 @@ class Recorder {
   void handle(IngestItem& item);
   void handle_message(MessageArrival& m);
   void periodic(bool force);
+  void process(std::vector<IngestItem>& batch);
+  void account_unprocessed(std::vector<IngestItem>& items);
+  void fail(std::vector<IngestItem>& batch, const std::string& what) noexcept;
   [[nodiscard]] Json topic_status_json() const;  // pipeline thread
-  [[nodiscard]] std::uint64_t total_dropped() const noexcept;
 
   const Profile profile_;
   const RecorderConfig config_;
@@ -188,6 +205,8 @@ class Recorder {
   std::vector<std::atomic<std::uint64_t>> received_;
   std::vector<std::atomic<std::uint64_t>> dropped_;
   std::atomic<std::uint64_t> rejected_after_stop_{0};
+  std::atomic<std::uint64_t> control_rejected_{0};
+  LossLedger loss_;
   BoundedQueue<IngestItem> ingest_;
   EvidenceWriter writer_;
   // Pipeline-thread state.
@@ -198,6 +217,9 @@ class Recorder {
   std::vector<std::optional<std::int64_t>> last_stored_;
   std::map<std::string, Json> topic_status_;
   std::vector<std::uint64_t> decode_errors_;
+  std::map<std::string, std::uint64_t> dds_lost_seen_;  // last message_lost count per topic
+  std::optional<std::int64_t> last_msg_mono_;  // arrival time of the last message processed
+  std::size_t batch_done_ = 0;                 // items of the current batch processed
   std::chrono::steady_clock::time_point next_tick_;
   std::chrono::steady_clock::time_point next_sample_;
   std::chrono::steady_clock::time_point next_session_file_;
@@ -207,6 +229,8 @@ class Recorder {
   std::atomic<std::uint64_t> decimated_{0};
   std::atomic<std::uint64_t> processed_{0};
   std::atomic<std::uint64_t> dropped_at_shutdown_{0};
+  std::atomic<std::uint64_t> dropped_dds_{0};
+  std::atomic<std::uint64_t> control_dropped_at_shutdown_{0};
   std::atomic<int> state_{0};
   std::atomic<int> pipeline_tid_{0};  // 0 recording, 1 draining, 2 stopped, 3 failed
   mutable std::mutex snapshot_mu_;

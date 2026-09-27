@@ -153,6 +153,17 @@ void RecorderNode::poll_graph() {
 }
 
 void RecorderNode::poll_graph_once() {
+  // A failed pipeline records nothing more: end the process (exit code 1)
+  // rather than keep a recorder alive that only looks healthy.
+  if (recorder_->metrics().state == "failed") {
+    if (!failure_reported_) {
+      failure_reported_ = true;
+      RCLCPP_FATAL(get_logger(), "recorder failed: %s; shutting down",
+                   recorder_->metrics().fatal_error.c_str());
+      rclcpp::shutdown();
+    }
+    return;
+  }
   auto snap = graph_->probe(*this);
   for (std::size_t i = 0; i < cfg_.profile.topics.size(); ++i) {
     snap.topic_status[cfg_.profile.topics[i].name]["message_lost"] = message_lost_[i]->load();
@@ -173,9 +184,17 @@ void RecorderNode::publish_diagnostics() {
   if (m.state == "failed" || m.writer.write_errors != 0 || m.writer.bundles_failed != 0) {
     st.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
     st.message = m.fatal_error.empty() ? "evidence write errors" : m.fatal_error;
-  } else if (m.dropped_ingest != 0) {
+  } else if (m.core.value("incidents_skipped", 0) != 0) {
+    // Triggered mode: an incident that should have been captured was not.
+    st.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
+    st.message =
+        "incident(s) not captured: " +
+        m.core["skip_reasons"].dump(-1, ' ', false, blackboxrs::Json::error_handler_t::replace);
+  } else if (m.dropped_ingest != 0 || m.dropped_dds != 0 || m.control_rejected != 0) {
     st.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
-    st.message = "messages dropped at the ingest queue";
+    st.message = m.dropped_ingest != 0 ? "messages dropped at the ingest queue"
+                 : m.dropped_dds != 0  ? "messages lost in DDS (message_lost)"
+                                       : "graph snapshots or markers refused (queue full)";
   } else {
     st.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
     st.message = "recording";
@@ -190,6 +209,8 @@ void RecorderNode::publish_diagnostics() {
   kv("received", std::to_string(m.received));
   kv("processed", std::to_string(m.processed));
   kv("dropped_ingest", std::to_string(m.dropped_ingest));
+  kv("dropped_dds", std::to_string(m.dropped_dds));
+  kv("incidents_skipped", std::to_string(m.core.value("incidents_skipped", 0)));
   kv("queue_depth", std::to_string(m.ingest.depth));
   kv("queue_high_water", std::to_string(m.ingest.high_water));
   kv("records_written", std::to_string(m.writer.records_written));
@@ -199,7 +220,7 @@ void RecorderNode::publish_diagnostics() {
   arr.status.push_back(st);
   diag_pub_->publish(arr);
   std_msgs::msg::String s;
-  s.data = m.to_json().dump();
+  s.data = m.to_json().dump(-1, ' ', false, blackboxrs::Json::error_handler_t::replace);
   status_pub_->publish(s);
 }
 

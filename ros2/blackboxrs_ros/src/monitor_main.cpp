@@ -158,12 +158,16 @@ class MonitorNode final : public rclcpp::Node {
       ++decode_errors_;
       return;
     }
+    if (cfg_.command_sources.count(spec.name) != 0U) {
+      source_seen_ = true;
+    }
     e.body = std::move(m);
     sut_->on_event(e, e.t);
     for (rp::Monitor* mon : monitors_) {
       mon->on_event(e, batch_);
     }
     if (auto pub = sut_->take_publication(e.t)) {
+      output_seen_ = output_seen_ || pub->robot_raw.has_value();
       for (rp::Monitor* mon : monitors_) {
         mon->on_decision(*pub, batch_);
       }
@@ -214,6 +218,28 @@ class MonitorNode final : public rclcpp::Node {
     batch_.clear();
   }
 
+  // Why an invariant cannot be judged (yet), as the offline replay gates it:
+  // missing inputs are INCOMPLETE, never a quiet PASS.
+  [[nodiscard]] std::optional<std::string> incomplete_reason(const std::string& name) const {
+    const bool output_invariant =
+        name == "finite_output" || name == "fresh_output" || name == "stop_dominance";
+    if (output_invariant && !sut_->available()) {
+      return "no arbitration output topic (/cmd_vel or ArbiterStatus) is monitored: outputs are "
+             "not judged";
+    }
+    if (output_invariant && !output_seen_) {
+      return "no arbitration output message received yet: outputs are not judged";
+    }
+    if (name == "fresh_output" && !source_seen_) {
+      return "no message on any command source yet: the arbitration path is not exercised";
+    }
+    if (name == "stop_dominance" && stop_->hold_ever_asserted() &&
+        stop_->invariants().front()->checks == 0) {
+      return "a hold was asserted but no robot-facing command has been judged against it";
+    }
+    return std::nullopt;
+  }
+
   void publish_diagnostics() {
     diagnostic_msgs::msg::DiagnosticArray arr;
     arr.header.stamp = now();
@@ -221,7 +247,12 @@ class MonitorNode final : public rclcpp::Node {
       for (const rp::InvariantState* inv : mon->invariants()) {
         diagnostic_msgs::msg::DiagnosticStatus st;
         st.name = "blackboxrs: invariant " + inv->name;
-        const auto status = inv->status();
+        auto status = inv->status();
+        const auto why =
+            status == rp::InvariantStatus::fail ? std::nullopt : incomplete_reason(inv->name);
+        if (why) {
+          status = rp::InvariantStatus::incomplete;
+        }
         st.level =
             status == rp::InvariantStatus::fail   ? diagnostic_msgs::msg::DiagnosticStatus::ERROR
             : status == rp::InvariantStatus::pass ? diagnostic_msgs::msg::DiagnosticStatus::OK
@@ -235,6 +266,11 @@ class MonitorNode final : public rclcpp::Node {
         kv.key = "violations";
         kv.value = std::to_string(inv->violations);
         st.values.push_back(kv);
+        if (why) {
+          kv.key = "incomplete_reason";
+          kv.value = *why;
+          st.values.push_back(kv);
+        }
         arr.status.push_back(st);
       }
     }
@@ -270,6 +306,8 @@ class MonitorNode final : public rclcpp::Node {
   std::uint64_t findings_ = 0;
   std::uint64_t decode_errors_ = 0;
   std::uint64_t monitor_errors_ = 0;
+  bool source_seen_ = false;
+  bool output_seen_ = false;
 };
 
 }  // namespace blackboxrs_ros

@@ -75,3 +75,20 @@ def test_corruption_is_detected(cpp_bundle, tmp_path):
     (b / "records.jsonl").write_bytes(bytes(data))
     out = run_cpp("validate", str(b), "--json", check_codes=(1,))
     assert json.loads(out.stdout)["status"] == "invalid"
+
+
+def test_tampered_records_are_refused_with_the_same_message(cpp_bundle, tmp_path):
+    import shutil
+
+    from blackboxrs.lab.evidence import EvidenceError, load_evidence
+
+    b = tmp_path / "b"
+    shutil.copytree(cpp_bundle, b)
+    with open(b / "records.jsonl", "ab") as f:
+        f.write(b"\n")
+    with pytest.raises(EvidenceError) as py:
+        load_evidence(b)
+    out = run_cpp("replay", str(b), check_codes=(5,))
+    assert out.returncode == 5
+    assert out.stderr.strip() == f"error: {py.value}"
+    assert "sha256 does not match integrity.json" in out.stderr

@@ -3,8 +3,9 @@
 // SIGINT/SIGTERM (rclcpp's handlers) stop the executor; the node then stops
 // taking data, drains, finalizes its bundles and joins its threads before
 // the process exits. SIGUSR1 adds an operator marker. Exit code 0 when every
-// bundle was finalized, 1 when evidence could not be written completely, 5
-// when the configuration is invalid (nothing is subscribed then).
+// bundle was finalized, 1 when evidence could not be written completely (the
+// pipeline failed, a write failed, or an incident was skipped for lack of
+// disk), 5 when the configuration is invalid (nothing is subscribed then).
 
 #include <csignal>
 #include <iostream>
@@ -44,8 +45,10 @@ int main(int argc, char** argv) {
     exec.remove_node(node);
     node->stop("signal");
     const auto m = node->metrics();
-    rc =
-        (m.state == "failed" || m.writer.bundles_failed != 0 || m.writer.write_errors != 0) ? 1 : 0;
+    rc = (m.state == "failed" || m.writer.bundles_failed != 0 || m.writer.write_errors != 0 ||
+          m.core.value("incidents_skipped", 0) != 0)
+             ? 1
+             : 0;
   }
   rclcpp::shutdown();
   return rc;

@@ -259,6 +259,11 @@ void StopDominance::on_decision(const Decision& d, Findings& out) {
   if (act == nullptr || !act->assert_t() || count_ns(d.t) < *act->assert_t() + grace_ns_) {
     return;
   }
+  // Nothing published yet: there is no robot-facing command to check.
+  // Counting it would let "no output" pass as "stop held".
+  if (!d.robot_raw) {
+    return;
+  }
   inv_.exercised = true;
   ++inv_.checks;
   if (!nonzero(d.robot_raw)) {

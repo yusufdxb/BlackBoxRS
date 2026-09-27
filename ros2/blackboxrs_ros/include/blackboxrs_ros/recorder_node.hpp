@@ -70,6 +70,7 @@ class RecorderNode final : public rclcpp::Node {
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   bool stopped_ = false;
+  bool failure_reported_ = false;
 };
 
 }  // namespace blackboxrs_ros

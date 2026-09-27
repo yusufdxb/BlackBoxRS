@@ -69,6 +69,22 @@ def test_non_positive_window_rejected():
                            "buffer": {"pre_trigger_sec": 0}})
 
 
+@pytest.mark.parametrize("value, err", [
+    (float("nan"), "finite"), (float("inf"), "finite"), (1e10, "<= 1000000000.0"),
+    (-1.0, "> 0")])
+def test_window_must_be_finite_and_bounded(value, err):
+    with pytest.raises(ProfileError, match=err):
+        profile_from_dict({"topics": [{"name": "/x", "type": "a/msg/B"}],
+                           "buffer": {"post_trigger_sec": value}})
+
+
+@pytest.mark.parametrize("role", ["helix_hold", "recovery_action", "arbiter_status"])
+def test_trigger_roles_cannot_be_decimated(role):
+    with pytest.raises(ProfileError, match="store_max_hz is not allowed"):
+        profile_from_dict({"topics": [{"name": "/x", "type": "a/msg/B", "role": role,
+                                       "store_max_hz": 5}]})
+
+
 def test_unknown_profile_name():
     with pytest.raises(ProfileError, match="not found"):
         load_profile("no_such_profile_xyz")

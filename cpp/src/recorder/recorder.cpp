@@ -47,6 +47,8 @@ Json RecorderMetrics::to_json() const {
             {"bundles_opened", writer.bundles_opened},
             {"bundles_finalized", writer.bundles_finalized},
             {"bundles_failed", writer.bundles_failed},
+            {"ops_dropped_stalled", writer.ops_dropped_stalled},
+            {"dir_sync_errors", writer.dir_sync_errors},
             {"last_lag_ms", static_cast<double>(writer.last_lag_ns) / 1e6},
             {"max_lag_ms", static_cast<double>(writer.max_lag_ns) / 1e6},
             {"queue_depth", writer.queue.depth},
@@ -56,7 +58,10 @@ Json RecorderMetrics::to_json() const {
           {"received", received},
           {"dropped_ingest", dropped_ingest},
           {"dropped_at_shutdown", dropped_at_shutdown},
+          {"dropped_dds", dropped_dds},
           {"rejected_after_stop", rejected_after_stop},
+          {"control_rejected", control_rejected},
+          {"control_dropped_at_shutdown", control_dropped_at_shutdown},
           {"decoded", decoded},
           {"decode_errors", decode_errors},
           {"decimated", decimated},
@@ -100,8 +105,9 @@ Recorder::Recorder(Profile profile, RecorderConfig config, std::unique_ptr<Messa
   core_ = std::make_unique<FlightCore>(
       profile_,
       [this] {
-        return writer_.make_sink([this] { return topic_status_json(); },
-                                 [this] { return total_dropped(); });
+        return writer_.make_sink(
+            [this] { return topic_status_json(); },
+            [this](std::int64_t from, std::int64_t to) { return loss_.between(from, to); });
       },
       [session_dir, floor_mb]() -> std::pair<bool, std::string> {
         std::error_code ec;
@@ -145,13 +151,22 @@ PushResult Recorder::on_message(MessageArrival&& m) noexcept {
   if (m.topic >= received_.size()) {
     return PushResult::full;  // not a profile topic: a programming error, counted nowhere
   }
+  // Counted before the push so that received >= processed at every instant;
+  // taken back if the recorder had already stopped (never received then).
   received_[m.topic].fetch_add(1, std::memory_order_relaxed);
   const std::uint32_t topic = m.topic;
+  const std::int64_t t = count_ns(m.t_mono);
   IngestItem item(std::move(m));
   const PushResult r = ingest_.try_push(item, Lane::data);
   if (r == PushResult::full) {
     dropped_[topic].fetch_add(1, std::memory_order_relaxed);
+    try {
+      loss_.record(t);
+    } catch (...) {
+      // Out of memory in the ledger: the drop is still in the counters.
+    }
   } else if (r == PushResult::closed) {
+    received_[topic].fetch_sub(1, std::memory_order_relaxed);
     rejected_after_stop_.fetch_add(1, std::memory_order_relaxed);
   }
   return r;
@@ -159,21 +174,17 @@ PushResult Recorder::on_message(MessageArrival&& m) noexcept {
 
 void Recorder::on_graph(GraphSnapshot g) noexcept {
   IngestItem item(std::move(g));
-  (void)ingest_.try_push(item, Lane::control);
+  if (ingest_.try_push(item, Lane::control) == PushResult::full) {
+    control_rejected_.fetch_add(1, std::memory_order_relaxed);
+  }
 }
 
 void Recorder::mark(std::string note, std::string source) noexcept {
   IngestItem item(MarkerRequest{clock_domain::Mono::now(), clock_domain::Wall::now(),
                                 std::move(note), std::move(source)});
-  (void)ingest_.try_push(item, Lane::control);
-}
-
-std::uint64_t Recorder::total_dropped() const noexcept {
-  std::uint64_t n = 0;
-  for (const auto& d : dropped_) {
-    n += d.load(std::memory_order_relaxed);
+  if (ingest_.try_push(item, Lane::control) == PushResult::full) {
+    control_rejected_.fetch_add(1, std::memory_order_relaxed);
   }
-  return n + dropped_at_shutdown_.load(std::memory_order_relaxed);
 }
 
 Json Recorder::topic_status_json() const {
@@ -189,6 +200,28 @@ Json Recorder::topic_status_json() const {
   return out;
 }
 
+void Recorder::process(std::vector<IngestItem>& batch) {
+  for (batch_done_ = 0; batch_done_ < batch.size(); ++batch_done_) {
+    handle(batch[batch_done_]);
+  }
+}
+
+void Recorder::account_unprocessed(std::vector<IngestItem>& items) {
+  std::uint64_t msgs = 0;
+  std::uint64_t control = 0;
+  for (const auto& item : items) {
+    if (const auto* m = std::get_if<MessageArrival>(&item)) {
+      ++msgs;
+      loss_.record(count_ns(m->t_mono));
+    } else {
+      ++control;
+    }
+  }
+  dropped_at_shutdown_.fetch_add(msgs);
+  control_dropped_at_shutdown_.fetch_add(control);
+  items.clear();
+}
+
 void Recorder::run(std::stop_token stop) {
   pipeline_tid_.store(static_cast<int>(::gettid()));
   std::vector<IngestItem> batch;
@@ -198,9 +231,7 @@ void Recorder::run(std::stop_token stop) {
       batch.clear();
       const auto deadline = std::min({next_tick_, next_sample_, next_session_file_});
       ingest_.pop_batch(batch, config_.batch, deadline, stop);
-      for (IngestItem& item : batch) {
-        handle(item);
-      }
+      process(batch);
       periodic(false);
     }
     // Drain: stop was requested and the queue is closed.
@@ -211,18 +242,11 @@ void Recorder::run(std::stop_token stop) {
       if (ingest_.pop_batch(batch, config_.batch, SteadyClock::now(), std::stop_token{}) == 0) {
         break;
       }
-      for (IngestItem& item : batch) {
-        handle(item);
-      }
+      process(batch);
     }
     batch.clear();
-    const std::size_t left = ingest_.drain(batch);
-    std::uint64_t left_msgs = 0;
-    for (const auto& item : batch) {
-      left_msgs += std::holds_alternative<MessageArrival>(item) ? 1U : 0U;
-    }
-    dropped_at_shutdown_.store(left_msgs);
-    (void)left;
+    (void)ingest_.drain(batch);
+    account_unprocessed(batch);
     std::string reason;
     {
       std::lock_guard lock(snapshot_mu_);
@@ -232,18 +256,43 @@ void Recorder::run(std::stop_token stop) {
     periodic(true);
     state_.store(2);
   } catch (const std::exception& exc) {
-    // Never let an exception escape the thread: record it, stop taking data,
-    // close what can still be closed.
-    {
-      std::lock_guard lock(snapshot_mu_);
-      fatal_error_ = std::string("pipeline: ") + exc.what();
-    }
-    state_.store(3);
+    fail(batch, exc.what());
+  } catch (...) {
+    fail(batch, "non-standard exception");
+  }
+}
+
+void Recorder::fail(std::vector<IngestItem>& batch, const std::string& what) noexcept {
+  // Never let an exception escape the thread: record it, stop taking data,
+  // count everything not processed as lost, and close the open bundle as
+  // pipeline_failed so no reader takes it for complete evidence.
+  try {
+    std::lock_guard lock(snapshot_mu_);
+    fatal_error_ = "pipeline: " + what;
+  } catch (...) {
+  }
+  state_.store(3);
+  try {
     ingest_.close();
-    try {
-      core_->shutdown("pipeline_failed");
-    } catch (...) {
+    // The item that threw was not processed either.
+    if (batch_done_ < batch.size()) {
+      batch.erase(batch.begin(), batch.begin() + static_cast<std::ptrdiff_t>(batch_done_));
+    } else {
+      batch.clear();
     }
+    (void)ingest_.drain(batch);
+    account_unprocessed(batch);
+  } catch (...) {
+  }
+  try {
+    core_->shutdown("pipeline_failed", "pipeline_failed");
+  } catch (...) {
+  }
+  try {
+    std::lock_guard lock(snapshot_mu_);
+    core_snapshot_ = core_->stats_json();
+    core_snapshot_["incident_open"] = core_->incident_open();
+  } catch (...) {
   }
 }
 
@@ -256,6 +305,18 @@ void Recorder::handle(IngestItem& item) {
       if (it == topic_status_.end()) {
         continue;
       }
+      // DDS message_lost is cumulative per subscription: enter what is new
+      // in the loss ledger at this snapshot's time.
+      if (const auto lost = st.find("message_lost");
+          lost != st.end() && lost->is_number_unsigned()) {
+        const auto n = lost->get<std::uint64_t>();
+        auto& seen = dds_lost_seen_[topic];
+        if (n > seen) {
+          loss_.record(count_ns(g->t_mono), n - seen);
+          dropped_dds_.fetch_add(n - seen);
+          seen = n;
+        }
+      }
       for (const auto& [k, v] : st.items()) {
         it->second[k] = v;
       }
@@ -263,6 +324,13 @@ void Recorder::handle(IngestItem& item) {
     core_->graph(g->t_mono, g->t_wall, g->nodes, g->topics, g->publishers);
   } else if (auto* mk = std::get_if<MarkerRequest>(&item)) {
     core_->mark(mk->t_mono, mk->t_wall, mk->note, mk->source);
+  }
+  // A continuous capture exists to record everything; if its one bundle
+  // could not open (disk below the floor), the recorder has failed.
+  if (config_.continuous && !core_->incident_open() && core_->stats().incidents_skipped != 0) {
+    const auto& reasons = core_->stats().skip_reasons;
+    throw std::runtime_error("continuous capture could not open its bundle: " +
+                             (reasons.empty() ? std::string("unknown") : reasons.begin()->first));
   }
 }
 
@@ -284,8 +352,12 @@ void Recorder::handle_message(MessageArrival& m) {
     DecodeResult r;
     try {
       r = decoder_->decode(m.topic, *m.payload);
+    } catch (const std::bad_alloc&) {
+      throw;  // not a bad message: the process is out of memory
     } catch (const std::exception& exc) {
       r.error = exc.what();
+    } catch (...) {
+      r.error = "decoder threw a non-standard exception";
     }
     if (r.data) {
       data = std::move(*r.data);
@@ -310,6 +382,7 @@ void Recorder::handle_message(MessageArrival& m) {
   }
   // The payload handle is released here, before the record is built.
   m.payload.reset();
+  last_msg_mono_ = count_ns(m.t_mono);
   core_->ingest(make_msg_record(spec.name, spec.role, spec.type, std::move(data), stored, m.t_mono,
                                 m.t_wall, m.t_ros, m.src, m.rx));
   processed_.fetch_add(1, std::memory_order_relaxed);
@@ -341,7 +414,18 @@ void Recorder::periodic(bool force) {
     next_tick_ = now + std::chrono::duration_cast<SteadyClock::duration>(
                            std::chrono::duration<double>(profile_.sampling.health_tick_sec));
     if (!force) {
-      core_->tick(clock_domain::Mono::now(), clock_domain::Wall::now());
+      // Staleness is judged at the time of the data processed so far. With
+      // a backlog in the ingest queue, "now" would call a topic stale whose
+      // newer messages are merely still queued.
+      const MonoTime mono_now = clock_domain::Mono::now();
+      const WallTime wall_now = clock_domain::Wall::now();
+      if (last_msg_mono_ && ingest_.stats().depth != 0) {
+        const std::int64_t behind = count_ns(mono_now) - *last_msg_mono_;
+        core_->tick(mono_ns(*last_msg_mono_),
+                    wall_now - std::chrono::nanoseconds(std::max<std::int64_t>(behind, 0)));
+      } else {
+        core_->tick(mono_now, wall_now);
+      }
     }
     std::lock_guard lock(snapshot_mu_);
     core_snapshot_ = core_->stats_json();
@@ -391,7 +475,10 @@ RecorderMetrics Recorder::metrics() const {
     m.topics.push_back(std::move(t));
   }
   m.dropped_at_shutdown = dropped_at_shutdown_.load();
+  m.dropped_dds = dropped_dds_.load();
   m.rejected_after_stop = rejected_after_stop_.load();
+  m.control_rejected = control_rejected_.load();
+  m.control_dropped_at_shutdown = control_dropped_at_shutdown_.load();
   m.decoded = decoded_.load();
   m.decode_errors = decode_error_total_.load();
   m.decimated = decimated_.load();

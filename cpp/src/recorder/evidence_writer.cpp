@@ -120,6 +120,33 @@ std::int64_t now_mono_ns() {
   return count_ns(clock_domain::Mono::now());
 }
 
+// A manifest or a state file as text. Strings from the robot (a hold reason,
+// a decode error, an operator note) may hold invalid UTF-8: it is replaced
+// by U+FFFD instead of throwing, as the record writer does.
+std::string dump_text(const Json& j) {
+  return j.dump(2, ' ', false, Json::error_handler_t::replace) + "\n";
+}
+
+// OrderedJson to Json. The dump cannot throw (invalid UTF-8 is replaced, a
+// non-finite number becomes null), so neither can the parse.
+Json plain(const OrderedJson& j) {
+  return Json::parse(j.dump(-1, ' ', false, OrderedJson::error_handler_t::replace));
+}
+
+// The bundle an operation belongs to (nullptr for session-level operations).
+template <class Variant>
+const std::string* bundle_of(const Variant& op) {
+  return std::visit(
+      [](const auto& o) -> const std::string* {
+        if constexpr (requires { o.bundle_id; }) {
+          return &o.bundle_id;
+        } else {
+          return nullptr;
+        }
+      },
+      op);
+}
+
 // {"kind": "trigger", **trigger} as one JSON line (Python-compatible floats).
 std::string trigger_line(const OrderedJson& trigger) {
   OrderedJson r = OrderedJson::object();
@@ -176,41 +203,53 @@ struct EvidenceWriter::Bundle {
 
 class EvidenceWriter::Sink final : public IncidentSink {
  public:
-  Sink(EvidenceWriter& w, std::function<Json()> topic_status, std::function<std::uint64_t()> loss)
+  Sink(EvidenceWriter& w, std::function<Json()> topic_status, LossBetween loss)
       : w_(w), topic_status_(std::move(topic_status)), loss_(std::move(loss)) {}
 
   std::string open(const Trigger& primary, std::vector<RecordPtr> pre,
                    const PreWindow& window) override {
     id_ = bundle_id_for(primary);
-    loss_at_open_ = loss_ ? loss_() : 0;
+    // Everything that could have belonged in this bundle: its pre-trigger
+    // window, the ring's extra second, and whatever arrived while the trigger
+    // waited in the ingest queue.
+    loss_from_ = count_ns(primary.t_mono) - static_cast<std::int64_t>(window.requested_s * 1e9) -
+                 1'000'000'000;
     const Json pw = {{"requested_s", window.requested_s},
                      {"available_s", window.available_s},
                      {"evicted_by_cap_in_window", window.evicted_by_cap_in_window}};
-    w_.enqueue(OpOpen{id_, primary.to_json(), std::move(pre), pw,
-                      topic_status_ ? topic_status_() : Json::object()});
+    submit(OpOpen{id_, primary.to_json(), std::move(pre), pw,
+                  topic_status_ ? topic_status_() : Json::object()});
     return id_;
   }
-  void append(const RecordPtr& record) override { w_.enqueue(OpAppend{id_, record}); }
-  void add_trigger(const Trigger& trigger) override {
-    w_.enqueue(OpTrigger{id_, trigger.to_json()});
-  }
+  void append(const RecordPtr& record) override { submit(OpAppend{id_, record}); }
+  void add_trigger(const Trigger& trigger) override { submit(OpTrigger{id_, trigger.to_json()}); }
   std::optional<std::string> close(const std::string& status, const Json& stats) override {
-    const std::uint64_t lost = (loss_ ? loss_() : 0) - loss_at_open_;
+    const std::uint64_t lost = loss_ ? loss_(loss_from_, now_mono_ns()) : 0;
     Json s = stats;
     s["messages_lost_before_core_during_bundle"] = lost;
-    // A bundle that is otherwise complete but lost messages at the recorder's
-    // ingest queue says so in its status, so it is never read as complete.
+    s["writer_ops_dropped_stalled"] = dropped_;
+    // A bundle that is otherwise complete but lost messages before the core
+    // (ingest queue, DDS, shutdown) says so in its status, so it is never
+    // read as complete.
     const std::string final_status =
         status == "complete" && lost != 0 ? "complete_with_loss" : status;
-    w_.enqueue(OpClose{id_, final_status, s, topic_status_ ? topic_status_() : Json::object()});
+    (void)w_.enqueue(
+        OpClose{id_, final_status, s, topic_status_ ? topic_status_() : Json::object()});
     return (w_.options_.session_dir / id_).string();
   }
 
  private:
+  void submit(Op op) {
+    if (!w_.enqueue(std::move(op))) {
+      ++dropped_;
+    }
+  }
+
   EvidenceWriter& w_;
   std::function<Json()> topic_status_;
-  std::function<std::uint64_t()> loss_;
-  std::uint64_t loss_at_open_ = 0;
+  LossBetween loss_;
+  std::int64_t loss_from_ = 0;
+  std::uint64_t dropped_ = 0;
   std::string id_;
 };
 
@@ -229,7 +268,7 @@ EvidenceWriter::~EvidenceWriter() {
 }
 
 std::unique_ptr<IncidentSink> EvidenceWriter::make_sink(std::function<Json()> topic_status,
-                                                        std::function<std::uint64_t()> loss) {
+                                                        LossBetween loss) {
   return std::make_unique<Sink>(*this, std::move(topic_status), std::move(loss));
 }
 
@@ -237,13 +276,36 @@ void EvidenceWriter::write_session_file(Json session_state) {
   enqueue(OpSession{std::move(session_state)});
 }
 
-void EvidenceWriter::enqueue(Op op) {
+bool EvidenceWriter::enqueue(Op op) {
   // Back-pressure, not loss: the pipeline waits here when the disk is slow,
-  // and the ingest queue in front of it counts what it cannot take.
-  if (queue_.push_wait(op, std::stop_token{}) != PushResult::ok) {
-    // Only after finish(): nothing can be written any more. Count it.
-    records_unwritten_.fetch_add(std::holds_alternative<OpAppend>(op) ? 1U : 0U);
+  // and the ingest queue in front of it counts what it cannot take. The wait
+  // is bounded so a stuck writer cannot freeze the pipeline; once stalled,
+  // later operations are offered without waiting until one gets through.
+  // A close always gets the full wait: it is once per bundle and carries
+  // the bundle's final status.
+  const bool is_close = std::holds_alternative<OpClose>(op);
+  const auto deadline = stalled_.load(std::memory_order_relaxed) && !is_close
+                            ? Clock::now()
+                            : Clock::now() + options_.stall_timeout;
+  const PushResult r = queue_.push_wait_until(op, deadline);
+  if (r == PushResult::ok) {
+    stalled_.store(false, std::memory_order_relaxed);
+    return true;
   }
+  if (r == PushResult::full) {
+    stalled_.store(true, std::memory_order_relaxed);
+    ops_dropped_stalled_.fetch_add(1);
+  }
+  // Stalled, or after finish(): this operation will never be written.
+  records_unwritten_.fetch_add(std::holds_alternative<OpAppend>(op) ? 1U : 0U);
+  if (r == PushResult::full) {
+    const std::string* id = bundle_of(op);
+    if (id != nullptr) {
+      std::lock_guard lock(stall_mu_);
+      ++stall_drops_[*id];
+    }
+  }
+  return false;
 }
 
 void EvidenceWriter::finish() {
@@ -266,18 +328,28 @@ void EvidenceWriter::run(std::stop_token stop) {
         queue_.pop_batch(batch, 512, Clock::now() + std::chrono::milliseconds(200), stop);
     for (Op& op : batch) {
       try {
+        if (options_.before_op) {
+          options_.before_op();
+        }
         handle(op);
       } catch (const std::exception& exc) {
         // A bug or an unexpected library error must not take the evidence
-        // thread down silently: count it against the bundle and keep going.
+        // thread down silently: count it against its bundle (whatever the
+        // operation was) so that bundle can only close as write_failed.
         write_errors_.fetch_add(1);
-        if (const auto* a = std::get_if<OpAppend>(&op)) {
+        const std::string* id = bundle_of(op);
+        if (std::holds_alternative<OpAppend>(op)) {
           records_unwritten_.fetch_add(1);
-          if (auto it = open_.find(a->bundle_id); it != open_.end()) {
+        }
+        if (id != nullptr) {
+          if (auto it = open_.find(*id); it != open_.end()) {
             ++it->second->write_errors;
-            it->second->first_error = it->second->first_error.empty()
-                                          ? std::string("internal: ") + exc.what()
-                                          : it->second->first_error;
+            if (std::holds_alternative<OpAppend>(op)) {
+              ++it->second->unwritten;
+            }
+            if (it->second->first_error.empty()) {
+              it->second->first_error = std::string("internal: ") + exc.what();
+            }
           }
         }
       }
@@ -305,7 +377,14 @@ void EvidenceWriter::run(std::stop_token stop) {
   }
   for (const auto& id : ids) {
     Op close = OpClose{id, "interrupted", Json::object(), Json::object()};
-    handle(close);
+    try {
+      handle(close);
+    } catch (const std::exception&) {
+      // The bundle keeps its .partial name: never final, never complete.
+      write_errors_.fetch_add(1);
+      bundles_failed_.fetch_add(1);
+      open_.erase(id);
+    }
   }
 }
 
@@ -399,11 +478,22 @@ void EvidenceWriter::handle(Op& op) {
                         {"sha256", b.integrity.sha256},
                         {"complete", b.integrity.complete}};
     }
-    return m.dump(2) + "\n";
+    return dump_text(m);
   };
 
   if (auto* o = std::get_if<OpOpen>(&op)) {
-    auto b = std::make_unique<Bundle>();
+    // Registered first, so an exception below is attributed to this bundle.
+    auto [slot, inserted] = open_.emplace(o->bundle_id, std::make_unique<Bundle>());
+    if (!inserted) {
+      // Same id as a bundle still open: FlightCore opens one at a time, so a
+      // bug. Keep the open one; count this one as failed.
+      write_errors_.fetch_add(1);
+      bundles_failed_.fetch_add(1);
+      records_unwritten_.fetch_add(o->pre.size() + 1);
+      return;
+    }
+    Bundle* b = slot->second.get();
+    b->id = o->bundle_id;  // FlightCore and the sink know it by this name
     std::string id = o->bundle_id;
     // Two incidents in one microsecond of one type: keep both, never overwrite.
     for (int k = 2; fs::exists(options_.session_dir / id) ||
@@ -411,12 +501,11 @@ void EvidenceWriter::handle(Op& op) {
          ++k) {
       id = o->bundle_id + "_" + std::to_string(k);
     }
-    b->id = o->bundle_id;  // FlightCore and the sink know it by this name
     b->final_dir = options_.session_dir / id;
     b->partial_dir = options_.session_dir / (id + ".partial");
     b->pre_window = o->pre_window;
     b->topic_status = o->topic_status;
-    b->triggers.push_back(Json::parse(o->trigger.dump()));
+    b->triggers.push_back(plain(o->trigger));
     bundles_opened_.fetch_add(1);
     std::error_code ec;
     fs::create_directories(b->partial_dir, ec);
@@ -445,7 +534,6 @@ void EvidenceWriter::handle(Op& op) {
       }
       b->last_sync = Clock::now();
     }
-    open_.emplace(o->bundle_id, std::move(b));
     return;
   }
   if (auto* a = std::get_if<OpAppend>(&op)) {
@@ -462,7 +550,7 @@ void EvidenceWriter::handle(Op& op) {
     if (it == open_.end()) {
       return;
     }
-    it->second->triggers.push_back(Json::parse(t->trigger.dump()));
+    it->second->triggers.push_back(plain(t->trigger));
     write_line(*it->second, trigger_line(t->trigger), t->trigger.value("seq", std::int64_t{0}),
                std::nullopt);
     return;
@@ -473,6 +561,23 @@ void EvidenceWriter::handle(Op& op) {
       return;
     }
     Bundle& b = *it->second;
+    std::uint64_t dropped = 0;
+    {
+      std::lock_guard lock(stall_mu_);
+      if (auto s = stall_drops_.find(c->bundle_id); s != stall_drops_.end()) {
+        dropped = s->second;
+        stall_drops_.erase(s);
+      }
+    }
+    if (dropped != 0) {
+      b.unwritten += dropped;
+      ++b.write_errors;
+      write_errors_.fetch_add(1);
+      if (b.first_error.empty()) {
+        b.first_error = "writer stalled: " + std::to_string(dropped) +
+                        " operations not handed over within the stall timeout";
+      }
+    }
     if (!c->topic_status.empty()) {
       b.topic_status = c->topic_status;
     }
@@ -496,8 +601,8 @@ void EvidenceWriter::handle(Op& op) {
     if (b.failed()) {
       status = "write_failed";
     }
-    if (auto ec = write_file_atomic(b.partial_dir / "integrity.json",
-                                    b.integrity.to_json().dump(2) + "\n");
+    if (auto ec =
+            write_file_atomic(b.partial_dir / "integrity.json", dump_text(b.integrity.to_json()));
         ec) {
       fail(b, "write integrity.json", ec);
       status = "write_failed";
@@ -509,9 +614,24 @@ void EvidenceWriter::handle(Op& op) {
       status = "write_failed";
     }
     // Only evidence that reached the disk intact gets the final name.
+    // The bundle directory's entries (integrity.json, manifest.json) are
+    // made durable before the rename that declares the bundle final.
+    if (status != "write_failed") {
+      if (auto ec = fsync_dir(b.partial_dir); ec) {
+        fail(b, "fsync bundle directory", ec);
+        status = "write_failed";
+        (void)write_file_atomic(b.partial_dir / "manifest.json",
+                                manifest(b, status, c->recorder_stats));
+      }
+    }
     if (status != "write_failed") {
       if (::rename(b.partial_dir.c_str(), b.final_dir.c_str()) == 0) {
-        (void)fsync_dir(options_.session_dir);
+        // The rename happened; if its directory sync fails the bundle is
+        // final but a power loss could still undo the rename. Counted.
+        if (auto ec = fsync_dir(options_.session_dir); ec) {
+          dir_sync_errors_.fetch_add(1);
+          write_errors_.fetch_add(1);
+        }
         bundles_finalized_.fetch_add(1);
         std::lock_guard lock(finalized_mu_);
         finalized_.push_back(b.final_dir.string());
@@ -529,7 +649,7 @@ void EvidenceWriter::handle(Op& op) {
     std::error_code ec;
     fs::create_directories(options_.session_dir, ec);
     if (!ec) {
-      (void)write_file_atomic(options_.session_dir / "session.json", s->state.dump(2) + "\n");
+      (void)write_file_atomic(options_.session_dir / "session.json", dump_text(s->state));
     }
   }
 }
@@ -543,6 +663,8 @@ WriterStats EvidenceWriter::stats() const {
   s.bundles_opened = bundles_opened_.load();
   s.bundles_finalized = bundles_finalized_.load();
   s.bundles_failed = bundles_failed_.load();
+  s.ops_dropped_stalled = ops_dropped_stalled_.load();
+  s.dir_sync_errors = dir_sync_errors_.load();
   s.last_lag_ns = last_lag_ns_.load();
   s.max_lag_ns = max_lag_ns_.load();
   s.queue = queue_.stats();

@@ -100,6 +100,28 @@ class BoundedQueue {
     return PushResult::ok;
   }
 
+  // Like push_wait, but gives up at `deadline` (returns Full, item intact).
+  // For hand-offs that must not hang when the consumer is stuck.
+  [[nodiscard]] PushResult push_wait_until(T& item,
+                                           std::chrono::steady_clock::time_point deadline) {
+    {
+      std::unique_lock lock(mu_);
+      space_cv_.wait_until(lock, std::stop_token{}, deadline,
+                           [&] { return closed_ || count_ < capacity_; });
+      if (closed_) {
+        ++stats_.rejected_closed;
+        return PushResult::closed;
+      }
+      if (count_ >= capacity_) {
+        ++stats_.rejected_full_control;
+        return PushResult::full;
+      }
+      put(std::move(item));
+    }
+    cv_.notify_one();
+    return PushResult::ok;
+  }
+
   // Move up to `max` items into `out`. Waits until at least one item is
   // available, the deadline passes, the queue is closed, or `stop` is
   // requested. Returns the number of items moved; 0 with closed() true and an

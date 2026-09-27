@@ -98,6 +98,9 @@ class StopDominance final : public Monitor {
   void finish(ReplayTime t_end, Findings& out) override;
   [[nodiscard]] std::vector<const InvariantState*> invariants() const override { return {&inv_}; }
   [[nodiscard]] std::int64_t ignored_older() const noexcept { return delivered_.ignored_older(); }
+  [[nodiscard]] bool hold_ever_asserted() const noexcept {
+    return delivered_.ever_asserted() || recorded_.ever_asserted();
+  }
 
  private:
   [[nodiscard]] const HoldTracker* active() const;

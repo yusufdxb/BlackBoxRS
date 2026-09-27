@@ -30,6 +30,22 @@ def test_stop_dominance_passes_zero_and_fails_nonzero_after_grace():
     assert m.inv.status() == "FAIL" and m.inv.violations == 2 and m.inv.episodes == 1
 
 
+def test_stop_dominance_does_not_count_a_decision_without_output():
+    """No published command is not evidence that the stop held."""
+    m = StopDominance({"/helix/hold"}, {NAV}, grace_s=0.0)
+    m.on_event(hold(1.0, True, 1, eseq=1))
+    assert m.on_decision(dec(1.1, None)) == []
+    assert m.inv.checks == 0 and not m.inv.exercised
+    m.finish(int(2 * NS))
+    assert m.inv.status() == "INCOMPLETE"
+    m = StopDominance({"/helix/hold"}, {NAV}, grace_s=0.0)
+    m.on_event(hold(1.0, True, 1, eseq=1))
+    assert m.on_decision(dec(1.1, None)) == []
+    assert m.on_decision(dec(1.2, (0.0, 0.0, 0.0))) == []
+    m.finish(int(2 * NS))
+    assert m.inv.checks == 1 and m.inv.status() == "PASS"
+
+
 def test_stop_dominance_nan_output_while_held_is_a_violation():
     m = StopDominance({"/helix/hold"}, set(), grace_s=0.0)
     m.on_event(hold(0.0, True, 1, eseq=1))

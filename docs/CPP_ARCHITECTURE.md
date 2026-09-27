@@ -211,8 +211,10 @@ typed view is decoded again from the changed payload.
   reserved share of capacity, so data overload cannot starve them.
 * Overflow policy: **reject newest, count it, never silently.** Every
   rejected item increments a per-topic `dropped_ingest` counter, which goes
-  into the manifest and the diagnostics. A bundle whose window overlaps a drop
-  is marked `evidence_complete: false` with the drop counts.
+  into the manifest and the diagnostics. A lost message (full queue, DDS
+  `message_lost`, dropped at shutdown) is also entered in a loss ledger at its
+  arrival time; a bundle whose window (pre-trigger window plus one second, to
+  close) contains a loss closes as `complete_with_loss` with the count.
 * The ROS callback only stamps clocks, decides store-rate decimation and
   moves the `shared_ptr<SerializedMessage>` into the queue. There is no copy of
   the payload by BlackBoxRS on the hot path. rmw has already copied it out of
@@ -227,8 +229,8 @@ typed view is decoded again from the changed payload.
 | Thread | Owner | Inputs | Outputs | Sync | Shutdown | On failure |
 |---|---|---|---|---|---|---|
 | ROS executor | node | DDS | `IngestQueue` | queue mutex | executor cancel | a callback never throws (try/catch, error counted) |
-| pipeline | `Recorder` (`std::jthread`) | `IngestQueue` | `WriteQueue`, metrics | queue mutex and cv, `stop_token` | stop requested: drain to the deadline, then count the rest as `dropped_at_shutdown` | an exception is caught at the thread boundary, recorded as a fatal pipeline error; the bundle is marked failed and the node reports ERROR |
-| writer | `EvidenceWriter` (`std::jthread`) | `WriteQueue` | files | queue mutex and cv | drains fully, then finalizes | an I/O error puts the bundle in `write_failed`; records keep being counted, never dropped silently |
+| pipeline | `Recorder` (`std::jthread`) | `IngestQueue` | `WriteQueue`, metrics | queue mutex and cv, `stop_token` | stop requested: drain to the deadline, then count the rest as `dropped_at_shutdown` | an exception is caught at the thread boundary: state `failed`, the queue closes, everything unprocessed is counted as dropped, the open bundle closes as `pipeline_failed`, and the node reports ERROR and exits 1 |
+| writer | `EvidenceWriter` (`std::jthread`) | `WriteQueue` | files | queue mutex and cv | drains fully, then finalizes | an I/O error or an exception puts that bundle in `write_failed`; a hand-off that waits longer than `stall_timeout` (2 s) is counted against its bundle, which then closes as `write_failed` ("writer stalled"); nothing is dropped silently |
 
 The monitor node runs detectors on its executor thread, because they are
 O(1) per event and must not reorder events. Diagnostics are published from
@@ -365,7 +367,46 @@ What the build changed relative to sections 1 to 8, and why.
   not reach the disk; the directory keeps its `.partial` name). Python
   Replay Lab used to accept `write_failed` evidence as finalized, a latent
   defect in the reference; both engines now treat both statuses as partial
-  (commit `7166acb`).
+  (commit `7166acb`). The hostile review added `pipeline_failed` (the
+  recorder pipeline died mid-capture) and `interrupted` (stopped before the
+  post-trigger window ended) to the same list.
+* **Integrity checked on load.** When a bundle has `integrity.json`, both
+  engines' evidence loaders check the byte count, line count, SHA-256 and
+  `complete` flag against `records.jsonl` before a replay, with identical
+  messages; a mismatch is refused like any incomplete status.
+* **Hostile-review fixes to the recorder.**
+  - Losses are attributed to a bundle by the arrival time of what was lost
+    (loss ledger, 100 ms buckets), not by a running total sampled when the
+    trigger was handled. Losses in the pre-trigger window or while the
+    trigger waited in the queue used to be missed.
+  - Staleness ticks use the arrival time of the newest processed message
+    while a backlog is queued. Ticks at "now" used to call a topic stale
+    whose newer messages were only queued.
+  - A continuous capture that cannot open its bundle (disk below the floor)
+    fails the recorder instead of running without recording. In triggered
+    mode a skipped incident is an ERROR diagnostic and makes the exit code 1.
+  - Strings from the robot with invalid UTF-8 are replaced (U+FFFD) in
+    manifests, as they already were in records; before, one such string
+    threw inside the writer.
+  - The bundle directory is fsynced before the rename that makes it final;
+    a failed fsync of the session directory after the rename is counted.
+  - Messages refused after stop are no longer counted as received; DDS
+    `message_lost` counts as loss; graph snapshots and markers that are
+    refused or never processed are counted.
+* **`stop_dominance` needs an output.** A decision with no robot-facing
+  command (nothing published yet) is not a check that the stop held; both
+  engines skip it, so a hold with no command after it is INCOMPLETE. The
+  online monitor applies the offline INCOMPLETE gates in its diagnostics
+  (no output observed, no command source seen, hold without a check).
+* **Held output (model assumption, not changed).** Between two recorded
+  output messages the `observed` system under test takes the last command
+  as still in effect at the robot, as a sink that keeps its last command
+  does. If the robot's own command timeout zeroes it earlier, a judged
+  nonzero output after a hold can be a false violation, never a false pass;
+  the assumption is stated here rather than guessed per robot.
+* **Profile bounds.** Every positive profile value must be finite and at
+  most 1e9 (1e12 for `max_bytes`), in both parsers; `store_max_hz` is
+  refused on trigger roles, whose decimated messages would not be decoded.
 * **`fresh_output` specification change.** Replaying the C++ recording of
   HELIX's off-robot rehearsal showed the invariant, in the Python reference
   and in the port, reporting a stale command when a navigation command

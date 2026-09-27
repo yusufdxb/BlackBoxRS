@@ -20,9 +20,11 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <filesystem>
 #include <fstream>
 #include <geometry_msgs/msg/twist.hpp>
+#include <map>
 #include <nav_msgs/msg/odometry.hpp>
 #include <random>
 #include <set>
@@ -344,6 +346,74 @@ TEST(MonitorExecutable, ReportsAStaleCommandForwardedToTheOutput) {
   }
   EXPECT_TRUE(kinds.count("stale_command_forwarded")) << std::ifstream(dir / "monitor.log").rdbuf();
   EXPECT_TRUE(kinds.count("command_source_stale"));
+  fs::remove_all(dir);
+}
+
+TEST(RecorderExecutable, ContinuousCaptureBelowTheDiskFloorFailsAndExitsOne) {
+  const fs::path dir = temp_dir();
+  const auto free_mb = fs::space(dir).available / (1024U * 1024U);
+  if (free_mb >= 1'000'000U) {
+    GTEST_SKIP() << "more than 1 TB free: the floor cannot be set above it";
+  }
+  const fs::path cfg = dir / "runtime.yaml";
+  std::ofstream(cfg) << "schema: blackboxrs.runtime.v1\n"
+                     << "profile: " << BLACKBOXRS_ROS_TEST_DIR << "/test_profile.yaml\n"
+                     << "capture: {mode: continuous, evidence_dir: " << (dir / "evidence").string()
+                     << ", hard_disk_floor_mb: 1000000}\n"
+                     << "ros: {namespace: /blackbox_test}\n"
+                     << "diagnostics: {publish: false}\n";
+  const pid_t pid = spawn(std::string(BLACKBOXRS_ROS_BIN_DIR) + "/recorder",
+                          {"--config", cfg.string()}, dir / "recorder.log");
+  auto probe = std::make_shared<rclcpp::Node>("bbrs_probe_floor");
+  wait_for_subscribers(*probe, "/bbrs_test/odom", 1);
+  Traffic traffic;
+  traffic.run(500ms);
+  // The pipeline fails on the first record; the node notices at its next
+  // graph poll and shuts itself down with exit code 1.
+  const int rc = wait_exit(pid, 30s);
+  std::stringstream log;
+  log << std::ifstream(dir / "recorder.log").rdbuf();
+  EXPECT_EQ(rc, 1) << log.str();
+  EXPECT_NE(log.str().find("disk_pressure"), std::string::npos) << log.str();
+  EXPECT_TRUE(bundles_in(dir / "evidence").empty());
+  fs::remove_all(dir);
+}
+
+TEST(MonitorExecutable, MissingInputsAreReportedIncompleteNotOk) {
+  const fs::path dir = temp_dir();
+  const std::string cfg = write_config(
+      dir, "monitor: {command_sources: {/bbrs_test/nav: 0.5}}\ndiagnostics: {period_s: 0.2}\n");
+  const pid_t pid = spawn(std::string(BLACKBOXRS_ROS_BIN_DIR) + "/monitor", {"--config", cfg},
+                          dir / "monitor.log");
+  auto probe = std::make_shared<rclcpp::Node>("bbrs_probe_monitor_diag");
+  std::map<std::string, std::pair<std::string, std::string>> seen;  // name -> (message, reason)
+  auto sub = probe->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
+      "/diagnostics", 10, [&seen](const diagnostic_msgs::msg::DiagnosticArray& a) {
+        for (const auto& st : a.status) {
+          std::string reason;
+          for (const auto& kv : st.values) {
+            if (kv.key == "incomplete_reason") reason = kv.value;
+          }
+          seen[st.name] = {st.message, reason};
+        }
+      });
+  const auto t0 = std::chrono::steady_clock::now();
+  while (seen.count("blackboxrs: invariant stop_dominance") == 0U &&
+         std::chrono::steady_clock::now() - t0 < 20s) {
+    rclcpp::spin_some(probe);
+    std::this_thread::sleep_for(20ms);
+  }
+  ::kill(pid, SIGINT);
+  EXPECT_EQ(wait_exit(pid, 20s), 0);
+  // No traffic at all: no output observed, no command source seen.
+  for (const char* inv : {"finite_output", "fresh_output", "stop_dominance"}) {
+    const auto it = seen.find(std::string("blackboxrs: invariant ") + inv);
+    ASSERT_NE(it, seen.end()) << inv << "\n" << std::ifstream(dir / "monitor.log").rdbuf();
+    EXPECT_EQ(it->second.first, "INCOMPLETE") << inv;
+    EXPECT_NE(it->second.second.find("no arbitration output message received yet"),
+              std::string::npos)
+        << inv << ": " << it->second.second;
+  }
   fs::remove_all(dir);
 }
 

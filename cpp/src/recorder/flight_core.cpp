@@ -280,7 +280,10 @@ void FlightCore::graph(MonoTime t_mono, WallTime t_wall, const std::vector<std::
     OrderedJson f = OrderedJson::object();
     f["full"] = true;
     f["nodes"] = std::vector<std::string>(now.begin(), now.end());
-    f["topics"] = topics.is_null() ? OrderedJson::object() : OrderedJson::parse(topics.dump());
+    f["topics"] =
+        topics.is_null()
+            ? OrderedJson::object()
+            : OrderedJson::parse(topics.dump(-1, ' ', false, Json::error_handler_t::replace));
     f["publishers"] = pubs;
     f["nodes_gone"] = gone;
     f["nodes_new"] = added;
@@ -421,7 +424,7 @@ void FlightCore::close(const std::string& status) {
   }
 }
 
-void FlightCore::shutdown(const std::string& reason) {
+void FlightCore::shutdown(const std::string& reason, const std::string& status) {
   if (!open_) {
     return;
   }
@@ -437,7 +440,7 @@ void FlightCore::shutdown(const std::string& reason) {
   open_->sink->add_trigger(t);
   // Stopping ends a continuous capture normally; a triggered incident whose
   // post-trigger window was cut short is interrupted.
-  close(options_.continuous ? "complete" : "interrupted");
+  close(!status.empty() ? status : options_.continuous ? "complete" : "interrupted");
 }
 
 Json FlightCore::stats_json() const {

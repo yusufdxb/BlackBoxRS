@@ -293,6 +293,10 @@ class StopDominance(Monitor):
         act = self._active()
         if act is None or act.assert_t is None or d.t_ns < act.assert_t + self.grace_ns:
             return []
+        # Nothing published yet: there is no robot-facing command to check.
+        # Counting it would let "no output" pass as "stop held".
+        if d.robot_raw is None:
+            return []
         self.inv.exercised = True
         self.inv.checks += 1
         if not _nonzero(d.robot_raw):

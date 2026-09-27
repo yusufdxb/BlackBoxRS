@@ -4,7 +4,11 @@
 // pipeline hands it operations (open, append, trigger, close) through a
 // bounded queue; the pipeline waits for space rather than dropping, so any
 // loss is taken, and counted, at the recorder's ingest queue with the topic
-// it belongs to.
+// it belongs to. The wait is bounded (stall_timeout): a writer stuck on a
+// dead disk must not freeze the pipeline, so an operation that cannot be
+// handed over in time is counted against its bundle as unwritten and the
+// bundle closes as write_failed ("writer stalled"). While the writer is
+// stalled, later operations are offered without waiting until one gets in.
 //
 // Per bundle, the writer:
 //   * creates <session>/<bundle_id>.partial with manifest.json (status
@@ -27,7 +31,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <variant>
@@ -46,6 +52,10 @@ struct WriterOptions {
   std::size_t chunk_records = 1024;
   std::size_t chunk_bytes = 1U << 20U;
   std::size_t queue_capacity = 65'536;
+  std::chrono::milliseconds stall_timeout{2000};
+  // Tests only: called on the writer thread before each operation (to
+  // simulate a slow or stuck disk). Empty in production.
+  std::function<void()> before_op;
 };
 
 // Everything the manifest states that does not change during a session.
@@ -64,7 +74,9 @@ struct WriterStats {
   std::uint64_t bundles_opened = 0;
   std::uint64_t bundles_finalized = 0;
   std::uint64_t bundles_failed = 0;
-  std::int64_t last_lag_ns = 0;  // monotonic now minus the record's t_mono, at write
+  std::uint64_t ops_dropped_stalled = 0;  // not handed over within stall_timeout
+  std::uint64_t dir_sync_errors = 0;      // fsync of a directory failed after a rename
+  std::int64_t last_lag_ns = 0;           // monotonic now minus the record's t_mono, at write
   std::int64_t max_lag_ns = 0;
   QueueStats queue;
 };
@@ -78,12 +90,16 @@ class EvidenceWriter {
   EvidenceWriter(EvidenceWriter&&) = delete;
   EvidenceWriter& operator=(EvidenceWriter&&) = delete;
 
+  // Messages lost before reaching the core whose arrival time lies in
+  // [from_mono_ns, to_mono_ns].
+  using LossBetween = std::function<std::uint64_t(std::int64_t, std::int64_t)>;
+
   // A FlightCore incident sink backed by this writer. `topic_status` and
   // `loss` are called on the FlightCore thread when the incident opens and
-  // closes; `loss` returns the running total of messages lost before
-  // reaching the core, so the sink can tell whether any fell inside its window.
+  // closes; the bundle's loss window runs from one second before its
+  // pre-trigger window to its close.
   [[nodiscard]] std::unique_ptr<IncidentSink> make_sink(std::function<Json()> topic_status,
-                                                        std::function<std::uint64_t()> loss);
+                                                        LossBetween loss);
 
   // Write session.json (atomically) on the writer thread.
   void write_session_file(Json session_state);
@@ -124,7 +140,8 @@ class EvidenceWriter {
   class Sink;
   struct Bundle;
 
-  void enqueue(Op op);
+  // False when the operation could not be handed over (writer stalled or finished).
+  bool enqueue(Op op);
   void run(std::stop_token stop);
   void handle(Op& op);
 
@@ -139,6 +156,14 @@ class EvidenceWriter {
   std::atomic<std::uint64_t> bundles_opened_{0};
   std::atomic<std::uint64_t> bundles_finalized_{0};
   std::atomic<std::uint64_t> bundles_failed_{0};
+  std::atomic<std::uint64_t> ops_dropped_stalled_{0};
+  std::atomic<std::uint64_t> dir_sync_errors_{0};
+  std::atomic<bool> stalled_{false};
+  // Per bundle: operations that never reached the writer thread. Written by
+  // the pipeline when a hand-off fails, read by the writer when it closes
+  // the bundle, so the count survives even if the close itself was lost.
+  std::mutex stall_mu_;
+  std::map<std::string, std::uint64_t> stall_drops_;
   std::atomic<std::int64_t> last_lag_ns_{0};
   std::atomic<std::int64_t> max_lag_ns_{0};
   mutable std::mutex finalized_mu_;

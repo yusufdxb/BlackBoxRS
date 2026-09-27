@@ -3,6 +3,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -13,26 +14,38 @@
 namespace blackboxrs {
 namespace {
 
-double positive(const std::string& name, const YAML::Node& n) {
+// Upper bound for every positive profile value. Seconds are converted to
+// int64 nanoseconds (and tripled for the hard close), so 1e9 s keeps every
+// derived time far from overflow; no rate or count needs more. Same bound as
+// Python flight/profile.py _positive.
+constexpr double kMaxPositive = 1e9;
+
+double positive(const std::string& name, const YAML::Node& n, double max = kMaxPositive) {
   double v = 0.0;
   try {
     v = n.as<double>();
   } catch (const YAML::Exception&) {
     throw ProfileError(name + " must be a number");
   }
+  if (!std::isfinite(v)) {
+    throw ProfileError(name + " must be finite");
+  }
   if (!(v > 0.0)) {
     throw ProfileError(name + " must be > 0");
+  }
+  if (v > max) {
+    throw ProfileError(name + " must be <= " + py_float_repr(max));
   }
   return v;
 }
 
-double positive_or(const YAML::Node& parent, const char* key, const std::string& label,
-                   double def) {
+double positive_or(const YAML::Node& parent, const char* key, const std::string& label, double def,
+                   double max = kMaxPositive) {
   const YAML::Node n = parent[key];
   if (!n || n.IsNull()) {
     return def;
   }
-  return positive(label, n);
+  return positive(label, n, max);
 }
 
 std::optional<double> optional_positive(const YAML::Node& parent, const char* key,
@@ -164,6 +177,14 @@ Profile parse_profile_text(const std::string& text) {
         spec.stale_after_sec =
             optional_positive(t, "stale_after_sec", spec.name + ".stale_after_sec");
         spec.store_max_hz = optional_positive(t, "store_max_hz", spec.name + ".store_max_hz");
+        // Decimated messages are not decoded, and trigger roles are judged on
+        // their decoded content: a decimated hold could be missed.
+        if (spec.store_max_hz &&
+            (spec.role == Role::helix_hold || spec.role == Role::recovery_action ||
+             spec.role == Role::arbiter_status)) {
+          throw ProfileError("topic " + spec.name + ": store_max_hz is not allowed on a " + role +
+                             " topic (its messages drive triggers)");
+        }
         spec.fields = string_list(t["fields"]);
         p.topics.push_back(std::move(spec));
         ++i;
@@ -178,7 +199,7 @@ Profile parse_profile_text(const std::string& text) {
     p.buffer.max_records =
         static_cast<std::int64_t>(positive_or(b, "max_records", "buffer.max_records", 400'000.0));
     p.buffer.max_bytes = static_cast<std::int64_t>(
-        positive_or(b, "max_bytes", "buffer.max_bytes", 256.0 * 1024 * 1024));
+        positive_or(b, "max_bytes", "buffer.max_bytes", 256.0 * 1024 * 1024, 1e12));
     const YAML::Node s = raw["sampling"] ? raw["sampling"] : YAML::Node(YAML::NodeType::Map);
     p.sampling.graph_poll_sec = positive_or(s, "graph_poll_sec", "sampling.graph_poll_sec", 0.5);
     p.sampling.system_sample_hz =

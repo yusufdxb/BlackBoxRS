@@ -340,7 +340,7 @@ TEST(Recorder, ConcurrentProducersAreFullyAccounted) {
   EXPECT_EQ(accounted(m), m.received);
 }
 
-TEST(Recorder, DiskFloorRefusesToOpenAndSaysSo) {
+TEST(Recorder, DiskFloorFailsAContinuousCapture) {
   testing::TempDir tmp;
   RecorderConfig cfg = config_for(tmp.path(), true);
   cfg.hard_disk_floor_mb = std::int64_t{1} << 40;  // more than any disk
@@ -350,6 +350,253 @@ TEST(Recorder, DiskFloorRefusesToOpenAndSaysSo) {
   const auto m = rec.metrics();
   EXPECT_EQ(m.core["incidents_skipped"], 1);
   EXPECT_TRUE(bundles_in(tmp.path()).empty());
+  EXPECT_EQ(m.state, "failed") << "a continuous capture that records nothing has failed";
+  EXPECT_NE(m.fatal_error.find("disk_pressure"), std::string::npos) << m.fatal_error;
+}
+
+TEST(Recorder, DiskFloorInTriggeredModeIsCountedNotFatal) {
+  testing::TempDir tmp;
+  RecorderConfig cfg = config_for(tmp.path(), false);
+  cfg.hard_disk_floor_mb = std::int64_t{1} << 40;
+  Recorder rec(parse_profile_text(kProfile), cfg, std::make_unique<JsonDecoder>());
+  rec.on_message(arrival(1, {{"hold", true}, {"epoch", 1}, {"seq", 1}, {"fault_id", "F1"}}));
+  rec.stop();
+  const auto m = rec.metrics();
+  EXPECT_EQ(m.state, "stopped");
+  EXPECT_EQ(m.core["incidents_skipped"], 1);
+  EXPECT_EQ(m.core["skip_reasons"].size(), 1U);
+}
+
+// A decoder that runs out of memory on the n-th message.
+class FailingDecoder final : public MessageDecoder {
+ public:
+  explicit FailingDecoder(int fail_at) : fail_at_(fail_at) {}
+  DecodeResult decode(std::size_t, const Payload& p) override {
+    if (++n_ == fail_at_) {
+      throw std::bad_alloc();
+    }
+    DecodeResult r;
+    r.data = std::optional<Json>(std::in_place, dynamic_cast<const JsonPayload&>(p).json());
+    return r;
+  }
+
+ private:
+  int fail_at_;
+  int n_ = 0;
+};
+
+TEST(Recorder, PipelineFailureClosesTheBundleAsPipelineFailed) {
+  testing::TempDir tmp;
+  RecorderMetrics m;
+  {
+    Recorder rec(parse_profile_text(kProfile), config_for(tmp.path(), true),
+                 std::make_unique<FailingDecoder>(100));
+    for (int i = 0; i < 300; ++i) {
+      rec.on_message(arrival(0, twist(0.1)));
+    }
+    std::this_thread::sleep_for(100ms);
+    rec.stop();
+    m = rec.metrics();
+  }
+  EXPECT_EQ(m.state, "failed");
+  EXPECT_NE(m.fatal_error.find("bad_alloc"), std::string::npos) << m.fatal_error;
+  EXPECT_EQ(m.processed, 99U);
+  EXPECT_EQ(m.received, 300U - m.rejected_after_stop);
+  EXPECT_EQ(accounted(m), m.received) << "the failed message and everything queued are counted";
+  const auto dirs = bundles_in(tmp.path());
+  ASSERT_EQ(dirs.size(), 1U);
+  const BundleRead b = load_bundle(dirs[0]);
+  EXPECT_EQ(b.manifest["status"], "pipeline_failed");
+  EXPECT_THROW((void)load_evidence(dirs[0], false, ""), EvidenceError);
+  EXPECT_EQ(validate_bundle(dirs[0]).status, ValidationStatus::invalid);
+}
+
+TEST(Recorder, InvalidUtf8InATriggerIsReplacedNotLost) {
+  testing::TempDir tmp;
+  {
+    Recorder rec(parse_profile_text(kProfile), config_for(tmp.path(), false),
+                 std::make_unique<JsonDecoder>());
+    rec.on_message(arrival(1, {{"hold", true},
+                               {"epoch", 1},
+                               {"seq", 1},
+                               {"fault_id", std::string("F\xff\xfe")},
+                               {"reason", std::string("bad \xc3")}}));
+    rec.mark(std::string("note \x80"), "test");
+    for (int i = 0; i < 40; ++i) {  // past the post window
+      rec.on_message(arrival(1, {{"hold", true}, {"epoch", 1}, {"seq", i + 2}}));
+      std::this_thread::sleep_for(10ms);
+    }
+    rec.stop();
+    const auto m = rec.metrics();
+    EXPECT_EQ(m.writer.write_errors, 0U);
+  }
+  const auto dirs = bundles_in(tmp.path());
+  ASSERT_EQ(dirs.size(), 1U);
+  EXPECT_FALSE(dirs[0].string().ends_with(".partial"));
+  EXPECT_EQ(validate_bundle(dirs[0]).status, ValidationStatus::verified);
+  const BundleRead b = load_bundle(dirs[0]);
+  EXPECT_EQ(b.manifest["triggers"][0]["fault_id"], "F\xef\xbf\xbd\xef\xbf\xbd");
+}
+
+TEST(Recorder, ABacklogDoesNotMakeATopicStale) {
+  // The hold topic publishes every 100 ms (stale after 0.5 s), behind a
+  // second of decode backlog. Judged at "now", it would go stale while its
+  // messages are merely queued; judged at the time of the data processed so
+  // far, it never does.
+  testing::TempDir tmp;
+  RecorderMetrics m;
+  {
+    Recorder rec(parse_profile_text(kProfile), config_for(tmp.path(), false),
+                 std::make_unique<JsonDecoder>(4ms));
+    rec.on_message(arrival(1, {{"hold", false}, {"epoch", 1}, {"seq", 0}}));
+    for (int i = 0; i < 250; ++i) {
+      rec.on_message(arrival(0, twist(0.1)));
+    }
+    for (int k = 1; k <= 13; ++k) {
+      std::this_thread::sleep_for(100ms);
+      rec.on_message(arrival(1, {{"hold", false}, {"epoch", 1}, {"seq", k}}));
+    }
+    while (rec.metrics().processed < 264U) {
+      std::this_thread::sleep_for(2ms);
+    }
+    rec.stop();
+    m = rec.metrics();
+  }
+  EXPECT_EQ(m.dropped_ingest, 0U);
+  EXPECT_EQ(m.core["triggers_fired"], 0) << m.core.dump();
+  EXPECT_TRUE(bundles_in(tmp.path()).empty());
+}
+
+TEST(Recorder, LossInThePreTriggerWindowMarksTheBundle) {
+  testing::TempDir tmp;
+  RecorderConfig cfg = config_for(tmp.path(), false);
+  cfg.ingest_capacity = 32;
+  cfg.control_reserve = 4;
+  RecorderMetrics m;
+  {
+    Recorder rec(parse_profile_text(kProfile), cfg, std::make_unique<JsonDecoder>(200us));
+    for (int i = 0; i < 500; ++i) {  // overload: most are dropped
+      rec.on_message(arrival(0, twist(0.1)));
+    }
+    while (rec.metrics().ingest.depth != 0) {
+      std::this_thread::sleep_for(1ms);
+    }
+    // The hold arrives after the drops, well inside their pre-trigger window.
+    for (int i = 0; i < 20; ++i) {
+      rec.on_message(arrival(1, {{"hold", true}, {"epoch", 1}, {"seq", i + 1}}));
+      std::this_thread::sleep_for(25ms);
+    }
+    rec.stop();
+    m = rec.metrics();
+  }
+  ASSERT_GT(m.dropped_ingest, 0U);
+  const auto dirs = bundles_in(tmp.path());
+  ASSERT_EQ(dirs.size(), 1U);
+  const BundleRead b = load_bundle(dirs[0]);
+  EXPECT_EQ(b.manifest["status"], "complete_with_loss");
+  EXPECT_EQ(b.manifest["recorder_stats"]["messages_lost_before_core_during_bundle"],
+            m.dropped_ingest);
+}
+
+TEST(Recorder, LossOutsideTheBundleWindowDoesNotMarkIt) {
+  testing::TempDir tmp;
+  RecorderConfig cfg = config_for(tmp.path(), false);
+  cfg.ingest_capacity = 32;
+  cfg.control_reserve = 4;
+  {
+    Recorder rec(parse_profile_text(kProfile), cfg, std::make_unique<JsonDecoder>(200us));
+    for (int i = 0; i < 500; ++i) {
+      rec.on_message(arrival(0, twist(0.1)));
+    }
+    // pre-trigger window 1 s + 1 s margin: wait it out.
+    std::this_thread::sleep_for(2300ms);
+    for (int i = 0; i < 20; ++i) {
+      rec.on_message(arrival(1, {{"hold", true}, {"epoch", 1}, {"seq", i + 1}}));
+      std::this_thread::sleep_for(25ms);
+    }
+    rec.stop();
+    ASSERT_GT(rec.metrics().dropped_ingest, 0U);
+  }
+  const auto dirs = bundles_in(tmp.path());
+  ASSERT_EQ(dirs.size(), 1U);
+  EXPECT_EQ(load_bundle(dirs[0]).manifest["status"], "complete");
+}
+
+TEST(Recorder, DdsMessageLostMarksTheBundle) {
+  testing::TempDir tmp;
+  RecorderMetrics m;
+  {
+    Recorder rec(parse_profile_text(kProfile), config_for(tmp.path(), true),
+                 std::make_unique<JsonDecoder>());
+    rec.on_message(arrival(0, twist(0.1)));
+    GraphSnapshot g;
+    g.t_mono = clock_domain::Mono::now();
+    g.t_wall = clock_domain::Wall::now();
+    g.topic_status["/nav/cmd_vel"] = {{"message_lost", std::uint64_t{7}}};
+    rec.on_graph(g);
+    g.topic_status["/nav/cmd_vel"] = {{"message_lost", std::uint64_t{9}}};  // cumulative
+    rec.on_graph(g);
+    rec.on_message(arrival(0, twist(0.1)));
+    std::this_thread::sleep_for(50ms);
+    rec.stop();
+    m = rec.metrics();
+  }
+  EXPECT_EQ(m.dropped_dds, 9U);
+  const auto dirs = bundles_in(tmp.path());
+  ASSERT_EQ(dirs.size(), 1U);
+  const BundleRead b = load_bundle(dirs[0]);
+  EXPECT_EQ(b.manifest["status"], "complete_with_loss");
+  EXPECT_EQ(b.manifest["recorder_stats"]["messages_lost_before_core_during_bundle"], 9);
+}
+
+TEST(Recorder, AStalledWriterIsBoundedAndFailsTheBundle) {
+  testing::TempDir tmp;
+  RecorderConfig cfg = config_for(tmp.path(), true);
+  cfg.writer.queue_capacity = 8;
+  cfg.writer.stall_timeout = 50ms;
+  std::atomic<bool> release{false};
+  cfg.writer.before_op = [&release] {
+    while (!release.load()) {
+      std::this_thread::sleep_for(1ms);
+    }
+  };
+  RecorderMetrics m;
+  {
+    Recorder rec(parse_profile_text(kProfile), cfg, std::make_unique<JsonDecoder>());
+    for (int i = 0; i < 50; ++i) {
+      rec.on_message(arrival(0, twist(0.1)));
+    }
+    // The pipeline keeps going although the writer takes nothing.
+    const auto t0 = std::chrono::steady_clock::now();
+    while (rec.metrics().processed < 50U) {
+      ASSERT_LT(std::chrono::steady_clock::now() - t0, 10s) << "pipeline blocked by the writer";
+      std::this_thread::sleep_for(5ms);
+    }
+    release.store(true);
+    rec.stop();
+    m = rec.metrics();
+  }
+  EXPECT_GT(m.writer.ops_dropped_stalled, 0U);
+  const auto dirs = bundles_in(tmp.path());
+  ASSERT_EQ(dirs.size(), 1U);
+  EXPECT_TRUE(dirs[0].string().ends_with(".partial"));
+  const BundleRead b = load_bundle(dirs[0]);
+  EXPECT_EQ(b.manifest["status"], "write_failed");
+  EXPECT_NE(b.manifest["writer"]["first_write_error"].get<std::string>().find("writer stalled"),
+            std::string::npos);
+}
+
+TEST(Recorder, MessagesAfterStopAreNotCountedAsReceived) {
+  testing::TempDir tmp;
+  Recorder rec(parse_profile_text(kProfile), config_for(tmp.path(), true),
+               std::make_unique<JsonDecoder>());
+  rec.on_message(arrival(0, twist(0.1)));
+  rec.stop();
+  EXPECT_EQ(rec.on_message(arrival(0, twist(0.1))), PushResult::closed);
+  const auto m = rec.metrics();
+  EXPECT_EQ(m.received, 1U);
+  EXPECT_EQ(m.rejected_after_stop, 1U);
+  EXPECT_EQ(accounted(m), m.received);
 }
 
 TEST(RecorderDeathTest, WriteFailureIsNeverFinalized) {
