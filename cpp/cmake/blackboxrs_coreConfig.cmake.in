@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+find_dependency(nlohmann_json 3.10)
+find_dependency(yaml-cpp)
+find_dependency(OpenSSL COMPONENTS Crypto)
+include("${CMAKE_CURRENT_LIST_DIR}/blackboxrs_coreTargets.cmake")
+check_required_components(blackboxrs_core)
