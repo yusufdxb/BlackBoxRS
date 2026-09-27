@@ -35,6 +35,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def git(*args: str) -> str:
+    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
 def ticks(pid: int) -> int:
     stat = Path(f"/proc/{pid}/stat").read_text()
     fields = stat[stat.rfind(")") + 2:].split()
@@ -124,7 +129,9 @@ def main() -> int:
         "schema": "blackboxrs.ros_benchmark.v1",
         "what": "C++ recorder process on real ROS 2 traffic (real types, real CDR decode), "
                 "go2_helix profile, continuous capture with fsync; workstation, not the payload",
-        "environment": {"machine": platform.machine(), "kernel": platform.release(),
+        "environment": {"git_sha": git("rev-parse", "HEAD"),
+                        "git_dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
+                        "machine": platform.machine(), "kernel": platform.release(),
                         "logical_cpus": os.cpu_count(),
                         "rmw": os.environ.get("RMW_IMPLEMENTATION", "default"),
                         "ros_distro": os.environ.get("ROS_DISTRO")},
