@@ -18,11 +18,12 @@ record (flight recorder) -> incident bundle -> replay -> inject fault
   are replayed as recorded. An injected fault never changes them, and the
   flight report's "robot stopped within 1.5 s" verdicts are deliberately not
   used in a replay.
-* **Not a GO2 digital twin.** The only modelled component is the motion
-  arbitration path (a policy model, see below). Everything downstream of the
+* **Not a GO2 digital twin.** The only component run is the motion
+  arbitration path (HELIX's own arbiter code, or a parity-checked twist_mux
+  model; see below). Everything downstream of the
   robot-facing command is out of scope.
 * **Not proof of hardware safety.** A PASS says the software invariants held
-  on this evidence and this model. It says nothing about actuators, firmware,
+  on this evidence and this arbitration path. It says nothing about actuators, firmware,
   networks or timing on the robot.
 * **Not a replacement for live validation.** Every result on synthetic
   evidence is labelled SYNTHETIC. The golden evidence shipped here is
@@ -38,7 +39,7 @@ A replay runs in separate layers (`blackboxrs/lab/`):
 | events | `events.py` | records to replay events with a total order |
 | clock | `clock.py` | virtual monotonic replay clock; wall-clock pacing is separate and cannot change a result |
 | faults | `faults.py` | deterministic injectors over the event stream |
-| system under test | `sut.py` | the robot-facing command: recorded, or from a reference arbitration model |
+| system under test | `sut.py`, `helix.py` | the robot-facing command: recorded, from HELIX's real arbiter code, or from the twist_mux model |
 | detectors | `monitors.py`, `liveness.py`, `transport.py` | safety invariants, command-path detectors, and the reused recorder and analyzer detectors |
 | dispatch and result | `engine.py`, `timeline.py`, `verdict.py` | run everything in a fixed order, build the timeline, decide the verdict |
 
@@ -51,8 +52,7 @@ sequence (`seq`), then copies a fault made of them, then events a fault
 created from nothing, in fault order. Two events with the same key are
 refused. Ordering never depends on dict or set iteration.
 
-The arbitration model ticks every 20 ms (50 Hz, like the HELIX arbiter's
-timer). At one instant, every event is delivered before the tick. Nothing in
+The arbiter ticks every 20 ms (50 Hz, `rate_hz` in HELIX's arbiter.yaml). At one instant, every event is delivered before the tick. Nothing in
 `blackboxrs/lab/` reads the wall clock, randomness or ids;
 `tests/unit/lab/test_no_wall_clock.py` enforces it, including for the flight
 modules the replay drives.
@@ -65,25 +65,35 @@ modules the replay drives.
 is for checking recorded incidents and for faults injected into the output
 itself.
 
-`--sut helix_arbiter` and `--sut twist_mux_legacy` run a reference model on
-the replayed inputs so a fault can change the outcome. Recorded outputs are
-then suppressed and counted.
+`--sut helix_arbiter` and `--sut twist_mux_legacy` run the arbitration path
+on the replayed inputs so a fault can change the outcome. Recorded outputs are
+then suppressed and counted. Parity with the deployed implementations is
+recorded and gated: see [ARBITER_PARITY.md](ARBITER_PARITY.md).
 
-* `helix_arbiter` models the policies of HELIX `helix_arbiter/arbiter_core.py`
-  (P1 to P10 in HELIX `docs/MOTION_ARBITRATION.md`): the hold state dominates
-  every source; a missing or stale hold state forces zero; NaN, Inf and
-  over-limit input is rejected and discards that source's older command; a
-  hold transition discards every stored command; freshness uses receipt time.
-  `tests/unit/lab/test_helix_parity.py` checks it decision by decision against
-  the HELIX module on 20 seeded random streams when `HELIX_SRC` points at a
-  HELIX checkout (it is skipped otherwise, including in CI).
-* `twist_mux_legacy` models the behaviour measured on the real twist_mux 4.3.0
-  binary and recorded in the same HELIX document: STOP is a zero-twist input at
-  priority 100 below teleop at 200, NaN is forwarded, and nothing is published
-  when every input is stale. The consumer keeps its last command (same
-  document), so the model's robot-facing sink holds the last published
-  command. ASSUMPTION: that the robot-facing consumer behaves this way on a
-  given robot is a property of that consumer, not of this model.
+* `helix_arbiter` **executes HELIX's own `arbiter_core.py`** (vendored byte
+  for byte from HELIX `b31a9ce`, SHA-256 checked at load, identical at the
+  commit run on the GO2 payload) configured from HELIX's own `arbiter.yaml`.
+  Only the ROS glue of `arbiter_node.py` is reproduced (`blackboxrs/lab/helix.py`:
+  message to call mapping, the 50 Hz timer, and an immediate publish when a
+  hold is asserted), and it is checked against the real node running under
+  ROS 2.
+* `twist_mux_legacy` is a **model** of twist_mux 4.3.0 (a C++ node with its
+  own clock cannot run inside a deterministic replay), configured from HELIX's
+  own `twist_mux.yaml` and checked message by message against the real binary.
+  It publishes only from an input callback, when that input is the
+  highest-priority unexpired one (equal priorities: the alphabetically first
+  input name, as measured); NaN passes through; when every input is stale
+  nothing is published. HELIX's STOP enters it as the zero Twist the recovery
+  node publishes on `/helix/cmd_vel` after each hold=true message: taken from
+  the evidence when recorded, otherwise derived from the hold messages the
+  same way.
+* What reaches the robot when twist_mux goes silent is decided by the
+  consumer, not by twist_mux. The legacy result judges the command the
+  consumer would still hold **if it retains its last command**; every legacy
+  result carries that assumption (`sut_state.consumer_assumption`). HELIX's
+  own robot-facing sink does not retain it: measured, it sends StopMove
+  0.25 to 0.30 s after its input stops. See ARBITER_PARITY.md for what is and
+  is not known.
 * `--set freshness_clock=source_timestamp` is a counterfactual that judges
   source freshness by DDS source timestamps. HELIX P10 forbids exactly this;
   the setting exists to show why.
@@ -244,7 +254,7 @@ invariants
 causal timeline
   ...
   T0008   +2.003s  INPUT     /nav/cmd_vel command (0.150, 0.000, 0.000)
-  T0009   +2.020s  OUTPUT    robot-facing command (0.150, 0.000, 0.000)  <- T0008
+  T0009   +2.003s  OUTPUT    robot-facing command (0.150, 0.000, 0.000)  <- T0008
   T0010   +3.000s  DETECT    [info] recorder_trigger:manual_marker operator marker (synthetic): flight recorder trigger manual_marker fired
   T0011   +3.953s  INPUT     /nav/cmd_vel command (0.150, 0.000, 0.000)
   T0012   +4.003s  FAULT     fault F1 drop (every_n=1, from_s=4.0, topic=/nav/cmd_vel): 40 event(s) affected
@@ -304,10 +314,10 @@ nothing.
 * The golden evidence is synthetic (the flight recorder's own generator,
   labelled in every result). Replay of a real captured flight bundle works the
   same way, but no real HELIX-run flight bundle is committed yet.
-* The reference models are models of documented policy. The HELIX parity test
-  runs only where a HELIX checkout exists; the twist_mux model has no parity
-  test against the binary here (its behaviour is taken from the measurements
-  in HELIX `docs/MOTION_ARBITRATION.md`).
+* The HELIX arbiter is executed; its ROS glue is reproduced and checked
+  against recordings of the real node. twist_mux is a model checked against
+  recordings of the real 4.3.0 binary. Both recordings were made on a PC under
+  ROS 2 Humble, not on the robot (ARBITER_PARITY.md).
 * Reordering is only visible on topics that carry a publisher sequence number
   or an embedded stamp; a reordered `geometry_msgs/Twist` stream has neither.
 * Transport findings from the flight analyzer are whole-stream counts, placed
@@ -340,9 +350,10 @@ nothing.
 * `clock_skew` and `timestamp_jump` shift the DDS source time and the
   extracted publisher stamp (`pub_stamp_s`); they do not rewrite stamps
   inside the stored payload.
-* Priority ties in the `twist_mux_legacy` model go to the most recent
-  message, as HELIX's twist_mux model documents for upstream twist_mux; not
-  re-checked against the twist_mux source here.
+* The twist_mux model does not model locks (HELIX's only lock is inert and
+  the config loader refuses an active one) or twist_mux's use of the node's
+  wall clock for timeouts (a wall-clock step would change its freshness
+  judgement; the replay clock is monotonic).
 * Liveness classification by graph evidence depends on graph records. In the
   golden cases, publisher loss is represented with the `node_exit` injector;
   the synthetic generator's graph lists `/lowstate` under
