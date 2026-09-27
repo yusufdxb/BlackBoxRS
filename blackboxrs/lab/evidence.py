@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from blackboxrs.flight.bundle import load_bundle
+from blackboxrs.flight.bundle import MANIFEST_SCHEMA, load_bundle
 from blackboxrs.flight.profile import FlightProfile, ProfileError, profile_from_text
 from blackboxrs.lab.values import digest
 
@@ -118,6 +118,12 @@ def load_evidence(path: str | Path, *, allow_partial: bool = False,
     _require(p.is_dir(), f"{path}: not a bundle directory")
     _require((p / "records.jsonl").is_file(), f"{path}: no records.jsonl")
     manifest, records, info = load_bundle(p)
+    # A different manifest schema means a format this reader does not know:
+    # refuse it rather than guess what its fields mean. (Missing: an old
+    # bundle written before the schema key existed; read as v1.)
+    schema = manifest.get("schema", MANIFEST_SCHEMA)
+    _require(schema == MANIFEST_SCHEMA,
+             f"{path}: unsupported evidence schema {schema!r} (this reader knows {MANIFEST_SCHEMA})")
     problems = []
     if info["manifest_missing"]:
         problems.append("manifest.json missing or unreadable")

@@ -353,5 +353,57 @@ maintainer.
 
 ## 9. Changes during implementation
 
-(Filled in as the build proceeds; see the final section of
-`docs/CPP_HARDWARE_VALIDATION.md` for the status at the end of this work.)
+What the build changed relative to sections 1 to 8, and why.
+
+* **Continuous capture mode (C++ only).** The Python recorder writes bundles
+  only around triggers. The passive hardware gates need whole-session
+  evidence, so the C++ recorder adds `capture.mode: continuous`: one bundle
+  from the first record to shutdown, with triggers attached as secondary.
+  A continuous capture keeps no pre-trigger ring, because nothing can use one.
+* **Statuses that can never read as complete.** `complete_with_loss` (messages
+  lost before the core during the bundle) and `write_failed` (a record did
+  not reach the disk; the directory keeps its `.partial` name). Python
+  Replay Lab used to accept `write_failed` evidence as finalized, a latent
+  defect in the reference; both engines now treat both statuses as partial
+  (commit `7166acb`).
+* **`fresh_output` specification change.** Replaying the C++ recording of
+  HELIX's off-robot rehearsal showed the invariant, in the Python reference
+  and in the port, reporting a stale command when a navigation command
+  changed between an arbiter publication and the next tick. A replaced
+  source message now backs an output for `fresh_grace_s` (50 ms) after it
+  was replaced; longer than that is still a violation. Both engines
+  changed identically; two golden cases pin it (commit `cb5f7f4`).
+* **Recorder memory.** Measured on real ROS traffic, peak RSS grew with the
+  message rate (51 MB at 1x, 206 MB at 10x) because every ring entry kept
+  its decoded JSON tree. Payloads are now released once triggers are
+  evaluated: 33 MB at every scale, CPU unchanged (commit `50db5a1`).
+* **No floating-point contraction.** Everything is compiled with
+  `-ffp-contract=off`. aarch64 has fused multiply-add, and a contracted
+  `a*b+c` rounds once where CPython rounds twice; replays must stay
+  byte-identical to Python and across architectures.
+* **Float printing.** nlohmann's Grisu2 output is round-trip-safe but not
+  always shortest (`0.5669190120000001` instead of `0.566919012`), which
+  broke byte-identity with Python. The runtime writes JSON with its own
+  emitter: shortest digits from `std::to_chars`, laid out by CPython's
+  `repr` rules.
+* **Queue.** The mutex-and-condition-variable ring queue was benchmarked at
+  6 to 8 million pushes per second with 1 to 4 producers, over 300x the
+  20x GO2 stress load. No lock-free queue was written.
+* **TSan.** GCC 11's TSan runtime does not intercept
+  `pthread_cond_clockwait`, which libstdc++ uses for `steady_clock` waits,
+  and reports a false double lock inside `condition_variable_any`. TSan runs
+  with Clang 14, whose runtime intercepts it; on Linux 6.x kernels the tests
+  run under `setarch -R` (the older TSan runtimes abort on 32-bit mmap
+  randomization). A deliberate race is reported by the same setup.
+* **Provenance keys.** The C++ manifest's session block uses the Python
+  recorder's key names, so the Python flight report shows the host and the
+  build of C++ evidence.
+* **Online monitor scope.** The monitor node runs the invariants and the
+  command-path, clock and odometry detectors live. Staleness of periodic
+  telemetry is left to the recorder's own `topic_stale` trigger, so it is
+  not computed twice.
+* **Decoder difference.** `byte[]` (octet) sequences decode to lists of
+  integers; the Python recorder writes base64 per element. No profile topic
+  has such a field.
+* **Layout.** As planned in section 3; the Python package stays at
+  `blackboxrs/`.

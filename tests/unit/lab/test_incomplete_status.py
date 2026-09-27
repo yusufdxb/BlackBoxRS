@@ -33,3 +33,13 @@ def test_incomplete_status_is_refused_or_capped(tmp_path, status):
     assert ev.partial
     result = replay(ev, ReplayConfig())
     assert result["verdict"]["result"] == "INCOMPLETE"
+
+
+def test_unknown_manifest_schema_is_refused(tmp_path):
+    b = tmp_path / "b"
+    shutil.copytree(EVIDENCE, b)
+    m = json.loads((b / "manifest.json").read_text())
+    m["schema"] = "blackboxrs.flight.manifest.v9"
+    (b / "manifest.json").write_text(json.dumps(m))
+    with pytest.raises(EvidenceError, match="unsupported evidence schema"):
+        load_evidence(b, allow_partial=True)

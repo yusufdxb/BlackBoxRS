@@ -56,6 +56,7 @@ class RecorderNode final : public rclcpp::Node {
 
  private:
   void poll_graph();
+  void poll_graph_once();
   void publish_diagnostics();
 
   blackboxrs::RuntimeConfig cfg_;

@@ -114,8 +114,29 @@ class MonitorNode final : public rclcpp::Node {
     return blackboxrs::to_replay(blackboxrs::clock_domain::Mono::now(), start_);
   }
 
+  // A monitor defect must not take the node down silently (an exception out
+  // of a callback ends spin()): it is counted, logged once, and reported as
+  // an ERROR diagnostic, and the monitor keeps judging later messages.
+  template <class F>
+  void guarded(const char* where, F&& f) {
+    try {
+      f();
+    } catch (const std::exception& exc) {
+      if (monitor_errors_++ == 0) {
+        RCLCPP_ERROR(get_logger(), "monitor error in %s: %s (further errors are only counted)",
+                     where, exc.what());
+      }
+      batch_.clear();
+    }
+  }
+
   void on_message(std::size_t i, std::shared_ptr<rclcpp::SerializedMessage> msg,
                   const rmw_message_info_t& info) {
+    guarded("message", [&] { handle_message(i, std::move(msg), info); });
+  }
+
+  void handle_message(std::size_t i, std::shared_ptr<rclcpp::SerializedMessage> msg,
+                      const rmw_message_info_t& info) {
     const auto& spec = cfg_.profile.topics[i];
     const auto r = decoder_.decode(i, SerializedPayload(std::move(msg)));
     blackboxrs::Event e;
@@ -151,6 +172,10 @@ class MonitorNode final : public rclcpp::Node {
   }
 
   void tick() {
+    guarded("tick", [&] { handle_tick(); });
+  }
+
+  void handle_tick() {
     const rp::Decision d = sut_->tick(now_rt());
     for (rp::Monitor* mon : monitors_) {
       mon->on_decision(d, batch_);
@@ -215,10 +240,11 @@ class MonitorNode final : public rclcpp::Node {
     }
     diagnostic_msgs::msg::DiagnosticStatus st;
     st.name = "blackboxrs: monitor";
-    st.level = decode_errors_ != 0 ? diagnostic_msgs::msg::DiagnosticStatus::WARN
-                                   : diagnostic_msgs::msg::DiagnosticStatus::OK;
+    st.level = monitor_errors_ != 0  ? diagnostic_msgs::msg::DiagnosticStatus::ERROR
+               : decode_errors_ != 0 ? diagnostic_msgs::msg::DiagnosticStatus::WARN
+                                     : diagnostic_msgs::msg::DiagnosticStatus::OK;
     st.message = std::to_string(findings_) + " finding(s), " + std::to_string(decode_errors_) +
-                 " decode error(s)";
+                 " decode error(s), " + std::to_string(monitor_errors_) + " monitor error(s)";
     arr.status.push_back(st);
     diag_pub_->publish(arr);
   }
@@ -243,6 +269,7 @@ class MonitorNode final : public rclcpp::Node {
   std::int64_t seq_ = 0;
   std::uint64_t findings_ = 0;
   std::uint64_t decode_errors_ = 0;
+  std::uint64_t monitor_errors_ = 0;
 };
 
 }  // namespace blackboxrs_ros

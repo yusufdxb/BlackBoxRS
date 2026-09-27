@@ -143,6 +143,16 @@ void RecorderNode::stop(const std::string& reason) {
 }
 
 void RecorderNode::poll_graph() {
+  // A graph query failing (for example while the context shuts down) must
+  // not end the recording; it is logged, and the next poll tries again.
+  try {
+    poll_graph_once();
+  } catch (const std::exception& exc) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 10000, "graph poll failed: %s", exc.what());
+  }
+}
+
+void RecorderNode::poll_graph_once() {
   auto snap = graph_->probe(*this);
   for (std::size_t i = 0; i < cfg_.profile.topics.size(); ++i) {
     snap.topic_status[cfg_.profile.topics[i].name]["message_lost"] = message_lost_[i]->load();

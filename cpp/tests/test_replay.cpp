@@ -160,6 +160,15 @@ std::vector<Event> nominal_events(TopicTable& topics) {
   return ev;
 }
 
+TEST(Faults, AnEqualOrderKeyIsRefused) {
+  std::vector<Event> v(2);
+  v[0].t = v[1].t = replay_ns(5);
+  v[0].order = v[1].order = OrderKey{0, 9, 0};
+  v[0].eid = "a";
+  v[1].eid = "b";
+  EXPECT_THROW(check_total_order(v), EvidenceError) << "an ambiguous order is never guessed";
+}
+
 TEST(Faults, MatchingNothingIsAnError) {
   TopicTable topics;
   auto ev = nominal_events(topics);

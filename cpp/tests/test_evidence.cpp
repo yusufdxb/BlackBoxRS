@@ -85,6 +85,42 @@ TEST(Evidence, MissingManifestReported) {
   EXPECT_THROW((void)load_evidence(dir, true), EvidenceError) << "no embedded profile";
 }
 
+TEST(Evidence, UnknownManifestSchemaRefused) {
+  TempDir tmp;
+  const auto dir = tmp.path() / "b";
+  testing::copy_dir(testing::golden_evidence("clean_stop"), dir);
+  Json m = Json::parse(testing::read_file(dir / "manifest.json"));
+  m["schema"] = "blackboxrs.flight.manifest.v9";
+  testing::write_file(dir / "manifest.json", m.dump());
+  try {
+    (void)load_evidence(dir, true);
+    FAIL() << "accepted an unknown schema";
+  } catch (const EvidenceError& exc) {
+    EXPECT_NE(std::string(exc.what()).find("unsupported evidence schema"), std::string::npos);
+  }
+}
+
+TEST(Events, EqualTimestampsOrderBySeqThenCopyThenSynthesized) {
+  // Three evidence events at one receipt time, a fault copy of the first and
+  // a fault-synthesized event, inserted in scrambled order.
+  auto ev = [](std::int64_t seq, std::int32_t origin, std::int64_t b, const char* id) {
+    Event e;
+    e.t = replay_ns(1'000);
+    e.order = OrderKey{origin, seq, b};
+    e.eid = id;
+    e.body = SysBody{};
+    return e;
+  };
+  std::vector<Event> v{ev(0, 1, 0, "F1.0"), ev(7, 0, 0, "r7"), ev(3, 0, 1, "r3.dup1"),
+                       ev(3, 0, 0, "r3"), ev(5, 0, 0, "r5")};
+  std::sort(v.begin(), v.end());
+  std::vector<std::string> ids;
+  for (const auto& e : v) {
+    ids.push_back(e.eid);
+  }
+  EXPECT_EQ(ids, (std::vector<std::string>{"r3", "r3.dup1", "r5", "r7", "F1.0"}));
+}
+
 TEST(Events, FromRecordKeepsClockDomainsApart) {
   const Json r = Json::parse(R"({"kind":"msg","topic":"/nav/cmd_vel","role":"cmd_vel_source",
     "type":"geometry_msgs/msg/Twist","t_mono_ns":5000001371498,"t_wall_ns":1789000000001371392,

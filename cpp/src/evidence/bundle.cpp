@@ -126,6 +126,11 @@ Evidence load_evidence(const fs::path& dir, bool allow_partial, const std::strin
   require(fs::is_directory(dir), dir.string() + ": not a bundle directory");
   require(fs::is_regular_file(dir / "records.jsonl"), dir.string() + ": no records.jsonl");
   BundleRead b = load_bundle(dir);
+  // A different manifest schema is a format this reader does not know:
+  // refuse it rather than guess (same rule as the Python reader).
+  const std::string schema = b.manifest.value("schema", std::string(kManifestSchema));
+  require(schema == kManifestSchema, dir.string() + ": unsupported evidence schema '" + schema +
+                                         "' (this reader knows " + kManifestSchema + ")");
   std::vector<std::string> problems;
   if (b.info.manifest_missing) {
     problems.emplace_back("manifest.json missing or unreadable");
