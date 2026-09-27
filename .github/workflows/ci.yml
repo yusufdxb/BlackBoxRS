@@ -54,6 +54,65 @@ jobs:
         run: |
           python scripts/measure_detector_fpr.py --hours 1 --json-output artifacts/detector_characteristics.json
 
+  replay-lab:
+    name: Replay Lab (golden cases + determinism)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Replay Lab tests (unit, faults, invariants, golden cases, determinism, fixtures)
+        # No ROS, robot or network needed. test_helix_parity skips here: it
+        # needs a HELIX checkout (HELIX_SRC), which is a separate repository.
+        run: |
+          python -m pytest -q tests/unit/lab
+
+      - name: Golden cases through the CLI, three identical replays each
+        run: |
+          mkdir -p artifacts
+          robot-blackbox lab verify examples/replay_lab/cases --repeat 3 \
+            --json artifacts/replay_lab_verify.json
+
+      - name: Same results under different hash seeds (all cases)
+        run: |
+          PYTHONHASHSEED=0 robot-blackbox lab verify --repeat 1 --json artifacts/seed0.json
+          PYTHONHASHSEED=987 robot-blackbox lab verify --repeat 1 --json artifacts/seed987.json
+          python - <<'PY'
+          import json
+          a = json.load(open("artifacts/seed0.json"))["cases"]
+          b = json.load(open("artifacts/seed987.json"))["cases"]
+          da = {c["case"]: c["result_sha256"] for c in a}
+          db = {c["case"]: c["result_sha256"] for c in b}
+          assert da == db, sorted(k for k in da if da[k] != db.get(k))
+          for k in sorted(da):
+              print(da[k][:16], k)
+          PY
+
+      - name: Upload Replay Lab summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: replay-lab-verify-py${{ matrix.python-version }}
+          path: artifacts/
+
   benchmark:
     name: Benchmark regression gate
     runs-on: ubuntu-22.04
