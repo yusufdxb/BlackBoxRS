@@ -5,8 +5,8 @@
     robot-blackbox lab faults                       list the fault injectors
 
 ``lab replay`` exits with the verdict: 0 PASS, 1 FAIL, 3 INCOMPLETE,
-4 DETECTED, 5 for malformed evidence, case or fault definitions (click's own
-usage errors are 2). ``lab verify`` exits 0 only when every case matched its
+4 DETECTED, 5 for malformed evidence, case or fault definitions, 6 for an
+internal error (click's own usage errors are 2). ``lab verify`` exits 0 only when every case matched its
 expectation and replayed identically on every repeat.
 
 No ROS installation or robot is needed.
@@ -33,6 +33,16 @@ def _fail(msg: str) -> None:
     from blackboxrs.lab.verdict import EXIT_ERROR
     click.echo(click.style(f"error: {msg}", fg="red"), err=True)
     raise SystemExit(EXIT_ERROR)
+
+
+def _internal(exc: BaseException) -> None:
+    import traceback
+
+    from blackboxrs.lab.verdict import EXIT_INTERNAL
+    traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
+    click.echo(click.style(f"internal error (not a verdict): {type(exc).__name__}: {exc}",
+                           fg="red"), err=True)
+    raise SystemExit(EXIT_INTERNAL)
 
 
 def _load_faults(path: str | None, inject: tuple[str, ...], start: int) -> list[Any]:
@@ -141,6 +151,8 @@ def lab_replay(target, sut, sets, inject, faults_file, from_s, to_s, speed, step
         result = replay(ev, cfg, pacer=pacer, observer=observer)
     except (CaseError, EvidenceError, FaultError, ValueError) as exc:
         _fail(str(exc))
+    except Exception as exc:  # a bug must never read as a verdict
+        _internal(exc)
     text = canonical_json(result)
     if json_out == "-":
         click.echo(text)
@@ -184,8 +196,7 @@ def lab_verify(paths, repeat, json_out) -> None:
     """Run golden cases (default: examples/replay_lab/cases) and check every expectation."""
     from blackboxrs.lab.case import CaseError, load_case
     from blackboxrs.lab.engine import replay
-    from blackboxrs.lab.evidence import EvidenceError, load_evidence
-    from blackboxrs.lab.faults import FaultError
+    from blackboxrs.lab.evidence import load_evidence
     from blackboxrs.lab.values import canonical_json, digest
     from blackboxrs.lab.verdict import check_expectations
 
@@ -200,8 +211,8 @@ def lab_verify(paths, repeat, json_out) -> None:
                 raise CaseError(f"{f}: case has no expect block")
             ev = load_evidence(case.evidence, label=str(case.evidence))
             runs = [canonical_json(replay(ev, case.config)) for _ in range(repeat)]
-        except (CaseError, EvidenceError, FaultError, ValueError) as exc:
-            rows.append({"case": str(f), "ok": False, "error": str(exc)})
+        except Exception as exc:  # any error fails the case; it is never a pass
+            rows.append({"case": str(f), "ok": False, "error": f"{type(exc).__name__}: {exc}"})
             ok_all = False
             click.echo(f"{click.style('ERROR', fg='red')}  {f}: {exc}")
             continue

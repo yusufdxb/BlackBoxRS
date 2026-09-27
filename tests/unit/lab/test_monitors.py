@@ -41,8 +41,25 @@ def test_stale_release_does_not_end_the_hold_for_the_oracle():
     m.on_event(hold(0.0, False, 1, eseq=10))
     m.on_event(hold(0.1, True, 2, eseq=11))
     m.on_event(hold(0.2, False, 3, eseq=9))                     # re-delivered old RESUME
-    assert m.held and m.ignored_older == 1
+    assert m.delivered.held and m.ignored_older == 1
     assert m.on_decision(dec(0.3, (0.2, 0.0, 0.0)))
+
+
+def test_oracle_accepts_any_epoch_once_the_hold_state_is_stale():
+    """HELIX P8: a restarted publisher (lower epoch) is accepted after staleness."""
+    m = StopDominance({"/helix/hold"}, set(), grace_s=0.0, hold_timeout_s=0.5)
+    m.on_event(hold(0.0, False, 1, eseq=10, epoch=5))
+    m.on_event(hold(0.2, True, 2, eseq=1, epoch=1))              # fresh: ignored
+    assert not m.delivered.held
+    m.on_event(hold(1.0, True, 3, eseq=2, epoch=1))              # stale: accepted
+    assert m.delivered.held
+
+
+def test_recorded_hold_is_enforced_when_the_delivered_one_is_gone():
+    m = StopDominance({"/helix/hold"}, set(), grace_s=0.0)
+    m.on_recorded(hold(1.0, True, 1, eseq=1))
+    f = m.on_decision(dec(1.1, (0.3, 0.0, 0.0)))
+    assert f and f[0].data["hold_stream"] == "recorded"
 
 
 def test_stop_dominance_not_exercised_without_a_hold():

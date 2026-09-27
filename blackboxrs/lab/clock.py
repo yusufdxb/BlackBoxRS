@@ -9,7 +9,7 @@ Pacing is separate. A pacer is told how far the virtual clock advanced and
 may sleep for that long (scaled by a speed factor) so a person can watch a
 replay unfold. It is given the sleep function, so tests substitute a fake
 one, and nothing it does feeds back into the replay: the result of a paced
-run is identical to an unpaced one (``tests/unit/lab/test_engine.py``).
+run is identical to an unpaced one (``tests/unit/lab/test_determinism.py``).
 """
 
 from __future__ import annotations

@@ -46,7 +46,8 @@ def test_there_is_a_fixture_per_failure_class():
                  "nan_command__twist_mux_legacy", "teleop_vs_stop__twist_mux_legacy",
                  "stop_loses_arbitration__twist_mux_legacy", "clock_skew__stamp_freshness",
                  "transport_loss__robot_host", "telemetry_dropout__odometry",
-                 "legitimate_inactivity__teleop", "contradictory_state__observed"):
+                 "legitimate_inactivity__teleop", "contradictory_state__observed",
+                 "publisher_crash__odometry", "robot_host_down"):
         assert need in names
 
 
@@ -191,3 +192,79 @@ def test_replay_that_never_exercises_the_model_is_incomplete():
     assert replay(ev, ReplayConfig(overrides=other))["verdict"]["result"] == "INCOMPLETE"
     windowed = replay(ev, ReplayConfig(from_s=1.0))
     assert any("not replayed" in r for r in windowed["verdict"]["reasons"])
+
+
+# --- regressions from the adversarial review: each of these used to PASS -------------
+
+def _run(evidence, **kw):
+    from blackboxrs.lab.engine import ReplayConfig
+    from blackboxrs.lab.faults import parse_fault
+    faults = tuple(parse_fault(f, i) for i, f in enumerate(kw.pop("faults", [])))
+    return replay(load_evidence(LAB / "evidence" / evidence), ReplayConfig(faults=faults, **kw))
+
+
+@pytest.mark.parametrize("preset", ["helix_arbiter", "twist_mux_legacy"])
+def test_a_fault_on_the_stop_signal_cannot_erase_a_recorded_stop(preset):
+    flipped = _run("clean_stop", preset=preset, faults=[
+        {"kind": "set_value", "topic": "/helix/hold", "field": "hold", "value": False,
+         "from_s": 2.9}])
+    assert flipped["verdict"]["result"] == "FAIL"
+    v = next(f for f in flipped["findings"] if f["kind"] == "stop_violated")
+    assert v["data"]["hold_stream"] == "recorded"
+
+
+def test_dropping_every_hold_message_is_not_a_pass():
+    res = _run("clean_stop", preset="twist_mux_legacy",
+               faults=[{"kind": "drop", "topic": "/helix/hold"}])
+    assert res["verdict"]["result"] in ("FAIL", "INCOMPLETE")
+
+
+def test_lower_epoch_does_not_hide_a_hold_from_the_oracle():
+    res = _run("clean_stop", sut_mode="observed", faults=[
+        {"kind": "set_value", "topic": "/helix/hold", "field": "epoch", "value": 7,
+         "from_s": 3.0},
+        {"kind": "set_value", "topic": "/cmd_vel", "field": "linear.x", "value": 0.15,
+         "from_s": 3.5}])
+    assert inv(res, "stop_dominance")["status"] == "FAIL"
+
+
+def test_a_violation_between_two_ticks_is_caught():
+    burst = {"kind": "inject_stream", "topic": "/teleop/cmd_vel", "rate_hz": 1000,
+             "from_s": 4.004, "to_s": 4.008,
+             "data": {"linear": {"x": 0.4, "y": 0.0, "z": 0.0},
+                      "angular": {"x": 0.0, "y": 0.0, "z": 0.0}},
+             "final_data": {"linear": {"x": 0.0, "y": 0.0, "z": 0.0},
+                            "angular": {"x": 0.0, "y": 0.0, "z": 0.0}}}
+    res = _run("clean_stop", preset="twist_mux_legacy", faults=[burst])
+    assert inv(res, "stop_dominance")["status"] == "FAIL"
+    assert res["replay"]["publications_between_ticks"] > 0
+
+
+@pytest.mark.parametrize("key", ["stop_grace_s", "fresh_grace_s"])
+def test_grace_is_bounded(key):
+    with pytest.raises(ValueError, match=key):
+        _run("clean_stop", **{key: 1000.0})
+    with pytest.raises(ValueError):
+        _run("clean_stop", from_s="1")
+
+
+def test_window_that_excludes_a_recorded_hold_is_incomplete():
+    res = _run("clean_stop", to_s=2.9)
+    assert inv(res, "stop_dominance")["status"] == "INCOMPLETE"
+    assert res["verdict"]["result"] == "INCOMPLETE"
+
+
+def test_hold_asserted_but_never_checked_is_not_exercised_pass():
+    # The hold asserts at 3.016 s; the window ends before any tick after the grace.
+    res = _run("clean_stop", to_s=3.03)
+    assert inv(res, "stop_dominance")["status"] == "INCOMPLETE"
+    assert inv(res, "stop_dominance")["checks"] == 0
+
+
+def test_publisher_lost_and_host_down_graph_evidence():
+    crash = run("publisher_crash__odometry")
+    lost = [f for f in crash["findings"] if f["kind"] == "publisher_lost"]
+    assert [f["subject"] for f in lost] == ["/utlidar/robot_odom"]
+    down = run("robot_host_down")
+    tl = next(f for f in down["findings"] if f["kind"] == "transport_loss")
+    assert tl["data"]["graph"] == "publishers_gone"

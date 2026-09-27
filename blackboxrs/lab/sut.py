@@ -240,6 +240,7 @@ class ReferenceArbiter:
         self._sink: Command | None = None
         self._sink_raw: tuple[Any, ...] | None = None
         self._sink_eid = ""
+        self._pending_pub = ""
         self._published_now = False
         self._rejected = ""
 
@@ -357,6 +358,21 @@ class ReferenceArbiter:
         self._sink, self._sink_raw, self._sink_eid = cmd, raw, eid
         self._published_now = True
         self.counters["published"] += 1
+        if eid:
+            self._pending_pub = eid
+
+    def take_publication(self, t_ns: int) -> Decision | None:
+        """A command published from an input callback at ``t_ns``, if any.
+
+        Only the callback (``on_input``) publisher puts commands on the robot
+        between ticks; the timer publisher decides at ticks only.
+        """
+        eid, self._pending_pub = self._pending_pub, ""
+        if not eid:
+            return None
+        win = self._winner(t_ns)
+        return Decision(t_ns, REASON_SOURCE, "" if win is None else win.spec.name, self._sink,
+                        self._sink_raw, True, None, eid)
 
     def tick(self, t_ns: int) -> Decision:
         rejected, self._rejected = self._rejected, ""
@@ -426,6 +442,7 @@ class ObservedOutput:
         self._src = ""
         self._hold: bool | None = None
         self._cause = ""
+        self._pending = ""
 
     @property
     def available(self) -> bool:
@@ -453,6 +470,15 @@ class ObservedOutput:
         self._cmd = None if any(p for _, p in nums) else Command(*(n + 0.0 for n, _ in nums))
         self._published = True
         self._cause = e.eid
+        self._pending = e.eid
+
+    def take_publication(self, t_ns: int) -> Decision | None:
+        """The recorded output message just delivered, judged at its own time."""
+        eid, self._pending = self._pending, ""
+        if not eid:
+            return None
+        return Decision(t_ns, self._reason or "RECORDED", self._src, self._cmd, self._raw,
+                        True, self._hold, eid)
 
     def tick(self, t_ns: int) -> Decision:
         published, self._published = self._published, False

@@ -65,6 +65,25 @@ class ReplayConfig:
         return d
 
 
+def _validate(cfg: ReplayConfig) -> None:
+    def real(name: str, v: object) -> float:
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v:
+            raise ValueError(f"{name} must be a number, got {v!r}")
+        return float(v)
+    for name in ("from_s", "to_s"):
+        v = getattr(cfg, name)
+        if v is not None and real(name, v) < 0:
+            raise ValueError(f"{name} must be >= 0")
+    # A grace window is tolerance for arbiter tick and transport delay. Past
+    # half a second it would hide the very violations it is meant to judge.
+    for name in ("stop_grace_s", "fresh_grace_s"):
+        if not 0.0 <= real(name, getattr(cfg, name)) <= 0.5:
+            raise ValueError(f"{name} must be within [0, 0.5] s")
+    for name in ("clock_step_threshold_s", "clock_offset_info_s", "observed_period_s"):
+        if not 0.0 < real(name, getattr(cfg, name)) <= 10.0:
+            raise ValueError(f"{name} must be within (0, 10] s")
+
+
 def _sut(cfg: ReplayConfig) -> ArbiterConfig | None:
     if cfg.sut_mode == "reference":
         return build_config(cfg.preset, cfg.overrides)
@@ -78,9 +97,11 @@ def _sut(cfg: ReplayConfig) -> ArbiterConfig | None:
 def replay(ev: Evidence, cfg: ReplayConfig, *, pacer: Pacer | None = None,
            observer: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     pacer = pacer or Pacer()
+    _validate(cfg)
     arb_cfg = _sut(cfg)
     topics = topic_table(ev, cfg.topics)
     events, skipped = normalize(ev)
+    recorded = list(events)          # the evidence as recorded, before any fault
     # apply_faults may add a topic to the table (inject_stream on a new topic)
     events, faultlog = apply_faults(events, list(cfg.faults), topics)
     by_role: dict[str, list[str]] = {}
@@ -126,7 +147,14 @@ def replay(ev: Evidence, cfg: ReplayConfig, *, pacer: Pacer | None = None,
     hold_topics = set(by_role.get("helix_hold", []))
 
     # --- detectors ------------------------------------------------------------
-    stop = StopDominance(hold_topics, set(sources), cfg.stop_grace_s)
+    stop = StopDominance(hold_topics, set(sources), cfg.stop_grace_s,
+                         arb_cfg.hold_timeout_s if arb_cfg is not None else 0.5)
+    # The oracle also follows the hold as recorded, so a fault on the STOP
+    # signal cannot erase a STOP that the evidence contains.
+    shadow = [e for e in recorded if e.kind == "msg" and e.topic in hold_topics
+              and e.t_ns >= lo and (hi is None or e.t_ns < hi)]
+    recorded_hold_at = [e.t_ns for e in recorded if e.kind == "msg" and e.topic in hold_topics
+                        and (e.data or {}).get("hold") is True]
     cmd = CommandPath(sources, cfg.fresh_grace_s)
     monitors = [stop, cmd, ConsistentState(set(by_role.get("arbiter_status", [])) if
                                            arb_cfg is None else set()),
@@ -150,12 +178,21 @@ def replay(ev: Evidence, cfg: ReplayConfig, *, pacer: Pacer | None = None,
     next_tick = lo
     ticks = 0
     delivered: list[ReplayEvent] = []
-    i = 0
+    publications = 0
+    i = j = 0
+
+    def shadow_until(t: int) -> None:
+        nonlocal j
+        while j < len(shadow) and shadow[j].t_ns <= t:
+            stop.on_recorded(shadow[j])
+            j += 1
+
     while i < len(events) or next_tick <= t_last:
         if i < len(events) and events[i].t_ns <= next_tick:
             e = events[i]
             i += 1
             pacer.wait(clock.advance_to(e.t_ns))
+            shadow_until(e.t_ns)
             timeline.advance(e.t_ns)
             timeline.input(e)
             sut.on_event(e, e.t_ns)
@@ -163,11 +200,20 @@ def replay(ev: Evidence, cfg: ReplayConfig, *, pacer: Pacer | None = None,
                 emit(m.on_event(e))
             emit(live.on_event(e))
             delivered.append(e)
+            # A callback publisher (legacy mux, or a recorded output message)
+            # can put a command on the robot between ticks: judge it now.
+            pub = sut.take_publication(e.t_ns)
+            if pub is not None:
+                publications += 1
+                timeline.decision(pub)
+                for m in monitors:
+                    emit(m.on_decision(pub))
         else:
             t = next_tick
             next_tick += period
             ticks += 1
             pacer.wait(clock.advance_to(t))
+            shadow_until(t)
             timeline.advance(t)
             d = sut.tick(t)
             timeline.decision(d)
@@ -227,6 +273,13 @@ def replay(ev: Evidence, cfg: ReplayConfig, *, pacer: Pacer | None = None,
         incomplete(output_invariants if arb_cfg is not None else ("fresh_output",),
                    f"no message on any command source {sorted(sources)} in the replay; "
                    "the arbitration path was never exercised")
+    if recorded_hold_at and invariants["stop_dominance"]["status"] == "NOT_EXERCISED":
+        incomplete(("stop_dominance",),
+                   f"the evidence asserts a hold at {recorded_hold_at[0] / NS:.3f} s, but no "
+                   "robot-facing command was judged against it in this replay window")
+    if hold_topics and not seen_topics & hold_topics and recorded_hold_at:
+        incomplete(output_invariants,
+                   "the evidence has hold messages but none reached the system under test")
     if arb_cfg is not None and arb_cfg.stop_mode == "state" and \
             arb_cfg.hold_topic not in seen_topics:
         incomplete(output_invariants,
@@ -249,7 +302,7 @@ def replay(ev: Evidence, cfg: ReplayConfig, *, pacer: Pacer | None = None,
         "injections": faultlog,
         "replay": {
             "window_start_ns": lo, "window_end_ns": t_end, "events_delivered": len(delivered),
-            "ticks": ticks, "period_ns": period,
+            "ticks": ticks, "period_ns": period, "publications_between_ticks": publications,
             "suppressed_recorded_outputs": dict(sorted(suppressed.items())),
             "skipped_record_kinds": skipped,
             "command_sources_not_in_evidence": unknown,

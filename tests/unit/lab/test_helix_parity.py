@@ -19,7 +19,7 @@ import pytest
 
 from blackboxrs.lab.sut import ReferenceArbiter, build_config
 
-from .conftest import NS, hold, msg, twist
+from .conftest import NS, hold, msg
 
 HELIX = os.environ.get("HELIX_SRC")
 CORE = Path(HELIX or "/nonexistent") / "src/helix_arbiter/helix_arbiter/arbiter_core.py"
@@ -43,6 +43,8 @@ def _value(rng):
         return math.inf
     if r < 0.12:
         return 1.3          # over the linear limit
+    if r < 0.14:
+        return "fast"       # not a number
     return round(rng.uniform(-0.8, 0.8), 3)
 
 
@@ -64,10 +66,13 @@ def test_decisions_match_helix(seed):
         seq += 1
         if r < 0.55:
             topic = rng.choice(sorted(names))
-            vx, wz = _value(rng), _value(rng)
-            e = msg(t, topic, twist(vx, 0.0, wz), seq=seq)
+            vx, vy, wz = _value(rng), _value(rng), _value(rng)
+            # the non-actuated axes: usually zero, sometimes nonzero or non-finite (P9)
+            lz, ax, ay = (rng.choice([0.0, 0.0, 0.0, 0.2, math.nan, "fast"]) for _ in range(3))
+            data = {"linear": {"x": vx, "y": vy, "z": lz}, "angular": {"x": ax, "y": ay, "z": wz}}
+            e = msg(t, topic, data, seq=seq)
             ours.on_event(e, e.t_ns)
-            theirs.on_source(names[topic], (vx, 0.0, 0.0), (0.0, 0.0, wz), t)
+            theirs.on_source(names[topic], (vx, vy, lz), (ax, ay, wz), t)
         elif r < 0.75:
             if rng.random() < 0.15:
                 held = not held

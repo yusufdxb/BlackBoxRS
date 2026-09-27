@@ -22,6 +22,7 @@ from typing import Any
 VERDICTS = ("PASS", "DETECTED", "FAIL", "INCOMPLETE")
 EXIT_CODES = {"PASS": 0, "FAIL": 1, "INCOMPLETE": 3, "DETECTED": 4}
 EXIT_ERROR = 5   # malformed evidence, case or fault definition (click usage errors are 2)
+EXIT_INTERNAL = 6   # a bug in Replay Lab itself; never a verdict
 
 
 def detection_kinds(result: dict[str, Any]) -> list[str]:

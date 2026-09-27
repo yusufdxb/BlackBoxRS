@@ -54,7 +54,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from blackboxrs.lab.events import ReplayEvent
-from blackboxrs.lab.sut import Decision, twist_of
+from blackboxrs.lab.sut import Decision
 from blackboxrs.lab.values import NS, as_number, get_path
 
 SEVERITIES = ("info", "warning", "critical")
@@ -137,14 +137,28 @@ def _nonzero(raw: tuple[Any, ...] | None) -> bool:
     return False
 
 
+_AXES = ("linear.x", "linear.y", "linear.z", "angular.x", "angular.y", "angular.z")
+
+
+def _twist_values(data: dict[str, Any]) -> tuple[tuple[float, float, float], bool]:
+    """(vx, vy, wz), and whether any of the six components is not a finite number.
+
+    Parsed here rather than shared with the arbitration model, so a parsing
+    bug in one cannot hide the same bug in the other.
+    """
+    vals = {a: as_number(get_path(data, a)[1]) for a in _AXES}
+    bad = any(p for _, p in vals.values())
+    pick = tuple((vals[a][0] if not vals[a][1] else 0.0) for a in
+                 ("linear.x", "linear.y", "angular.z"))
+    return pick, bad  # type: ignore[return-value]
+
+
 def twist_problem(data: dict[str, Any]) -> tuple[str, list[str]]:
     """('', []) when all six components are finite numbers, else the worst problem."""
-    lin, ang = twist_of(data)
     bad: list[str] = []
     worst = ""
-    for name, v in zip(("linear.x", "linear.y", "linear.z", "angular.x", "angular.y",
-                        "angular.z"), (*lin, *ang)):
-        _, p = as_number(v)
+    for name in _AXES:
+        _, p = as_number(get_path(data, name)[1])
         if p:
             bad.append(name)
             worst = "malformed" if p == "malformed" or worst == "malformed" else "nonfinite"
@@ -156,62 +170,123 @@ def twist_problem(data: dict[str, Any]) -> tuple[str, list[str]]:
 # ---------------------------------------------------------------------------
 
 
-class StopDominance(Monitor):
-    name = "stop_dominance"
+class _HoldTracker:
+    """HELIX hold state as one stream of hold messages shows it.
 
-    def __init__(self, hold_topics: set[str], source_topics: set[str], grace_s: float) -> None:
-        self.hold_topics = hold_topics
-        self.source_topics = source_topics
-        self.grace_ns = int(round(grace_s * NS))
-        self.inv = InvariantStatus(
-            "stop_dominance",
-            f"while a HELIX hold is asserted, every robot-facing command from {grace_s:g} s "
-            "after the hold is received until its release is zero")
+    Ordered by the publisher's ``(epoch, seq)``: an older state is ignored
+    while the current one is fresh; once it is stale (no hold message for
+    ``timeout``) any state is accepted, as HELIX P8 does for a restarted
+    publisher.
+    """
+
+    def __init__(self, timeout_ns: int) -> None:
+        self.timeout_ns = timeout_ns
         self.key: tuple[int, int] | None = None
+        self.last_rx: int | None = None
         self.held = False
         self.assert_t: int | None = None
         self.assert_eid = ""
         self.fault_id = ""
+        self.ignored_older = 0
+        self.ever_asserted = False
+
+    def update(self, e: ReplayEvent) -> bool:
+        """Apply one hold message; True if the held state changed."""
+        d = e.data or {}
+        hold = d.get("hold")
+        if not isinstance(hold, bool):
+            return False
+        key = _hold_key(d)
+        fresh = self.last_rx is not None and e.t_ns - self.last_rx <= self.timeout_ns
+        if key is not None and self.key is not None and key <= self.key and fresh:
+            self.ignored_older += 1
+            return False
+        self.key = key if key is not None else self.key
+        self.last_rx = e.t_ns
+        if hold and not self.held:
+            self.held, self.assert_t, self.assert_eid = True, e.t_ns, e.eid
+            self.fault_id = str(d.get("fault_id", ""))
+            self.ever_asserted = True
+            return True
+        if not hold and self.held:
+            self.held = False
+            return True
+        return False
+
+
+class StopDominance(Monitor):
+    """The hold is judged from two streams and the stricter one wins.
+
+    ``delivered``: the hold messages the system under test received (after
+    fault injection). ``recorded``: the hold messages in the evidence as
+    recorded, before any fault. A fault that deletes, delays, reorders or
+    rewrites the STOP signal therefore cannot make the oracle forget a STOP
+    the evidence contains: the robot-facing command must still be zero.
+    """
+
+    name = "stop_dominance"
+
+    def __init__(self, hold_topics: set[str], source_topics: set[str], grace_s: float,
+                 hold_timeout_s: float = 0.5) -> None:
+        self.hold_topics = hold_topics
+        self.source_topics = source_topics
+        self.grace_ns = int(round(grace_s * NS))
+        timeout = int(round(hold_timeout_s * NS))
+        self.delivered = _HoldTracker(timeout)
+        self.recorded = _HoldTracker(timeout)
+        self.inv = InvariantStatus(
+            "stop_dominance",
+            f"while a HELIX hold is asserted (in the delivered stream or in the evidence as "
+            f"recorded), every robot-facing command from {grace_s:g} s after the hold is "
+            "received until its release is zero")
         self._in_violation = False
         self._asked: set[str] = set()
-        self.ignored_older = 0
+
+    @property
+    def ignored_older(self) -> int:
+        return self.delivered.ignored_older
+
+    @property
+    def ever_asserted(self) -> bool:
+        return self.delivered.ever_asserted or self.recorded.ever_asserted
+
+    def _active(self) -> _HoldTracker | None:
+        held = [t for t in (self.delivered, self.recorded) if t.held]
+        return min(held, key=lambda t: t.assert_t) if held else None
+
+    def on_recorded(self, e: ReplayEvent) -> None:
+        """A hold message from the evidence as recorded (not the faulted stream)."""
+        if e.kind == "msg" and e.topic in self.hold_topics:
+            if self.recorded.update(e) and not self._active():
+                self._in_violation = False
 
     def on_event(self, e: ReplayEvent) -> list[Finding]:
         out: list[Finding] = []
         if e.kind != "msg" or e.data is None:
             return out
         if e.topic in self.hold_topics:
-            hold = e.data.get("hold")
-            if not isinstance(hold, bool):
-                return out
-            key = _hold_key(e.data)
-            if key is not None and self.key is not None and key <= self.key:
-                self.ignored_older += 1
-                return out
-            if key is not None:
-                self.key = key
-            if hold and not self.held:
-                self.held, self.assert_t, self.assert_eid = True, e.t_ns, e.eid
-                self.fault_id = str(e.data.get("fault_id", ""))
-                self.inv.exercised = True
-                self._asked.clear()
-            elif not hold and self.held:
-                self.held = False
-                self._in_violation = False
-        elif self.held and e.topic in self.source_topics:
-            worst, _ = twist_problem(e.data)
-            lin, ang = twist_of(e.data)
-            if not worst and _nonzero((lin[0], lin[1], ang[2])) and e.topic not in self._asked:
-                self._asked.add(e.topic)
-                out.append(Finding(
-                    e.t_ns, self.name, "motion_request_while_held", "info", e.topic,
-                    f"{e.topic} commands motion while hold {self.fault_id or '(no id)'} is "
-                    "asserted", (e.eid, self.assert_eid)))
+            if self.delivered.update(e):
+                if self.delivered.held:
+                    self._asked.clear()
+                elif not self._active():
+                    self._in_violation = False
+        else:
+            act = self._active()
+            if act is not None and e.topic in self.source_topics:
+                vals, bad = _twist_values(e.data)
+                if not bad and any(v != 0.0 for v in vals) and e.topic not in self._asked:
+                    self._asked.add(e.topic)
+                    out.append(Finding(
+                        e.t_ns, self.name, "motion_request_while_held", "info", e.topic,
+                        f"{e.topic} commands motion while hold {act.fault_id or '(no id)'} "
+                        "is asserted", (e.eid, act.assert_eid)))
         return out
 
     def on_decision(self, d: Decision) -> list[Finding]:
-        if not self.held or self.assert_t is None or d.t_ns < self.assert_t + self.grace_ns:
+        act = self._active()
+        if act is None or act.assert_t is None or d.t_ns < act.assert_t + self.grace_ns:
             return []
+        self.inv.exercised = True
         self.inv.checks += 1
         if not _nonzero(d.robot_raw):
             self._in_violation = False
@@ -223,14 +298,23 @@ class StopDominance(Monitor):
             return []
         self._in_violation = True
         self.inv.episodes += 1
+        which = "recorded" if act is self.recorded and not self.delivered.held else "delivered"
+        note = (" (the hold is in the evidence as recorded; the replayed stream lost or "
+                "altered it)" if which == "recorded" else "")
         return [Finding(
             d.t_ns, self.name, "stop_violated", "critical", "robot_output",
             f"robot-facing command {list(d.robot_raw or ())} is nonzero while hold "
-            f"{self.fault_id or '(no id)'} is asserted (winner: {d.source or 'none'})",
-            tuple(x for x in (self.assert_eid, d.cause) if x and x != "clock"),
+            f"{act.fault_id or '(no id)'} is asserted (winner: {d.source or 'none'}){note}",
+            tuple(x for x in (act.assert_eid, d.cause) if x and x != "clock"),
             invariant="stop_dominance",
             data={"robot_command": list(d.robot_raw or ()), "arbiter_reason": d.reason,
-                  "winner": d.source})]
+                  "winner": d.source, "hold_stream": which})]
+
+    def finish(self, t_end_ns: int) -> list[Finding]:
+        if self.ever_asserted and not self.inv.checks:
+            self.inv.incomplete_reason = ("a hold was asserted but no robot-facing command was "
+                                          "sampled after it")
+        return []
 
     def invariants(self) -> list[InvariantStatus]:
         return [self.inv]
@@ -283,9 +367,8 @@ class CommandPath(Monitor):
                     f"value(s) in {', '.join(bad)}", (e.eid,), data={"fields": bad}))
             return out
         self._bad_run[e.topic] = False
-        lin, ang = twist_of(e.data)
-        self.latest[e.topic] = _Latest(e.t_ns, e.eid, True,
-                                       (float(lin[0]), float(lin[1]), float(ang[2])))
+        vals, _ = _twist_values(e.data)
+        self.latest[e.topic] = _Latest(e.t_ns, e.eid, True, vals)
         return out
 
     def _justified(self, cmd: tuple[float, float, float], t_ns: int) -> str | None:

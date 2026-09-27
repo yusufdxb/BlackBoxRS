@@ -90,15 +90,29 @@ then suppressed and counted.
 
 ### Invariants and detectors
 
-Safety invariants (a violation makes the verdict FAIL). The monitors are an
-independent oracle: they never call the model and always use receipt time.
+Safety invariants (a violation makes the verdict FAIL). The monitors are
+independent of the arbitration model: they never call it, parse messages
+with their own code, and judge freshness on receipt time only. They are not
+independent of the replayed stream, with one deliberate exception: the STOP
+oracle follows the hold both as delivered (after faults) and as recorded in
+the evidence, and enforces whichever is stricter. So a fault that deletes,
+rewrites, reorders or delays the STOP signal cannot make a STOP recorded in
+the evidence disappear from the judgement. The robot-facing command is
+judged at every arbiter tick and at every publication between ticks (a
+callback publisher, or a recorded output message), so a violation shorter
+than a tick is still caught.
 
 | Invariant | Statement |
 |---|---|
-| `stop_dominance` | while a HELIX hold is asserted (ordered by `(epoch, seq)`, so a stale RESUME cannot end it), every robot-facing command from 0.05 s after the hold until its release is zero |
+| `stop_dominance` | while a HELIX hold is asserted in the delivered or the recorded hold stream (each ordered by `(epoch, seq)`, so a stale RESUME cannot end it; any epoch is accepted once the state is stale, as HELIX P8 does), every robot-facing command from 0.05 s after the hold until its release is zero |
 | `finite_output` | every robot-facing command component is a finite number |
 | `fresh_output` | a nonzero robot-facing command equals the latest valid message of a command source received within its freshness window (+0.05 s); zero is always allowed |
 | `consistent_state` | a recorded ArbiterStatus never reports the hold active with a nonzero output |
+
+The grace windows (`stop_grace_s`, `fresh_grace_s`) are bounded to
+[0, 0.5] s; a larger value would hide the violations it is meant to judge. An
+invariant counts as exercised only when at least one command was actually
+checked against it.
 
 Detectors:
 
@@ -128,10 +142,11 @@ topics advertised, no data). That is a match, not a diagnosis.
 |---|---|---|
 | PASS | every invariant held, nothing above info reported | 0 |
 | FAIL | a safety invariant was violated | 1 |
-| INCOMPLETE | an invariant could not be evaluated (for example no arbitration output in the evidence) or the evidence is partial | 3 |
+| INCOMPLETE | an invariant could not be evaluated or the evidence is partial: no arbitration output recorded; no command-source or hold message reached the system under test; a hold was asserted but no command was checked after it; the evidence asserts a hold outside the replay window | 3 |
 | DETECTED | invariants held and a detector reported a warning or critical finding | 4 |
 
-Malformed evidence, case or fault definitions exit 5 (click's own usage
+Malformed evidence, case or fault definitions exit 5; an internal error in
+Replay Lab exits 6 and is never reported as a verdict (click's own usage
 errors exit 2). `NOT_EXERCISED` invariants (for example `stop_dominance`
 when no hold was asserted) do not block PASS and are listed, so a reader can
 see what a replay did not test.
@@ -145,7 +160,7 @@ matches no event is an error. Faults apply in the order given.
 
 | Category | Kinds |
 |---|---|
-| timing / transport | `drop`, `gap`, `delay`, `duplicate`, `reorder`, `stale_redelivery`, `clock_skew`, `timestamp_jump` |
+| timing / transport | `drop`, `gap`, `delay`, `duplicate`, `reorder`, `stale_redelivery`, `clock_skew`, `timestamp_jump`, `node_exit` (a node leaves the ROS graph; compose with `drop` for its topics) |
 | data | `nan`, `inf`, `malformed`, `set_value`, `freeze`, `step` |
 | control | `inject_stream` (a stream not in the evidence, for example a teleop joystick) |
 
@@ -309,9 +324,27 @@ nothing.
   `stale_after_sec` in the profile or `stale_after_s` in the case). An
   undeclared periodic topic that stops is not flagged: a missed detection,
   never a false one.
-* `stop_dominance` overlaps the flight report's `nonzero_outputs_while_held`;
-  a test checks the two agree on the same stream. The replay keeps its own
-  because it also judges the model's output and names the offending event.
-* The `clock_offset` finding overlaps the flight report's robot-clock warning
-  (odometry stamps vs receipt); the replay's version works per host from DDS
-  source timestamps.
+* Overlaps with existing detectors, kept on purpose and listed so they are
+  not mistaken for reuse: `stop_dominance` overlaps the flight report's
+  `nonzero_outputs_while_held` (a test checks they agree on one faulted and
+  one clean stream; the replay's version also judges the model's output and
+  names the offending event); `odometry_jump` overlaps the flight report's
+  stop-distance continuity guard (a pose step implying more than 1 m/s, only
+  between the hold and the stop; the replay's rule compares displacement
+  with the reported twist over the whole run); `clock_offset` and `stamp_*` overlap the flight report's robot-clock
+  warning (odometry stamps) and the anomaly engine's `clock_skew` detector
+  (chrony/NTP offsets), but work per topic and host from DDS source
+  timestamps.
+* The recorded-hold rule can only enforce a STOP that is in the evidence.
+  If the recording itself lost the STOP, the replay cannot know.
+* `clock_skew` and `timestamp_jump` shift the DDS source time and the
+  extracted publisher stamp (`pub_stamp_s`); they do not rewrite stamps
+  inside the stored payload.
+* Priority ties in the `twist_mux_legacy` model go to the most recent
+  message, as HELIX's twist_mux model documents for upstream twist_mux; not
+  re-checked against the twist_mux source here.
+* Liveness classification by graph evidence depends on graph records. In the
+  golden cases, publisher loss is represented with the `node_exit` injector;
+  the synthetic generator's graph lists `/lowstate` under
+  `/sport_service_node` so the robot host has two periodic topics with known
+  publishers.
