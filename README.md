@@ -30,7 +30,7 @@ BlackBoxRS sits beside a robot's autonomy stack, never in its control path. It r
 | The arbitration model is the deployed HELIX logic | 2,198 decisions of HELIX's own `arbiter_core.py` (40 streams: STOP, stale command, teleop vs STOP, NaN/Inf/over-limit, hold stream lost, restarted publisher ...) reproduced exactly (`test_helix_parity`) |
 | Replay is deterministic | 100 replays of every golden case, separate processes, byte-identical (CI) |
 | It records real stacks | beside HELIX's off-robot A-F rehearsal (real HELIX nodes, `helix_msgs` and `unitree` types decoded at run time) all six stages passed; 23,140 messages, 0 dropped, every bundle verified; the Python stop-chain report reads the C++ evidence (StopMove answered, stop 0.24 s on the fake GO2) |
-| It is cheap and bounded | on real ROS traffic (real `unitree_go` LowState / SportModeState, Odometry) the recorder process used **2.8 % of one core at the GO2 rate** (946 msg/s), 17.2 % at 10x, with 0 drops and ~33 MB RSS at every scale |
+| It is cheap and bounded | on real ROS traffic (real `unitree_go` LowState / SportModeState, Odometry) the recorder process used **2.8 % of one core at the GO2 rate** (946 msg/s), 17.7 % at 10x, with 0 drops and ~33 MB RSS at every scale |
 | Nothing it runs can move the robot | the only publishers are `/diagnostics` and `/blackboxrs/...`; motion and control topics are refused before a publisher exists, including through remaps; checked on a live graph (`test_passive_nodes`) |
 | Memory-safe, race-free, UB-free under test | ASan, UBSan and TSan runs of every test in CI; clang-tidy with zero warnings |
 
@@ -115,12 +115,12 @@ Recorder process on real ROS 2 traffic (real `unitree_go` and `nav_msgs` types, 
 
 | Load | Offered | Received | Dropped | Recorder CPU (one core) | Peak RSS | Evidence |
 |---|---|---|---|---|---|---|
-| 1x GO2 | 946 msg/s | 28,382 / 28,382 | 0 | 2.8 % | 32.7 MB | verified |
-| 2x | 1,892 msg/s | 56,762 / 56,762 | 0 | 4.5 % | 32.6 MB | verified |
-| 5x | 4,730 msg/s | 141,902 / 141,902 | 0 | 10.0 % | 32.7 MB | verified |
-| 10x | 9,460 msg/s | 283,802 / 283,802 | 0 | 17.2 % | 32.8 MB | verified |
+| 1x GO2 | 946 msg/s | 28,382 / 28,382 | 0 | 2.8 % | 32.8 MB | verified |
+| 2x | 1,892 msg/s | 56,762 / 56,762 | 0 | 4.5 % | 32.8 MB | verified |
+| 5x | 4,730 msg/s | 141,902 / 141,902 | 0 | 10.0 % | 32.8 MB | verified |
+| 10x | 9,460 msg/s | 283,802 / 283,802 | 0 | 17.7 % | 32.9 MB | verified |
 
-For comparison, the Python flight recorder used 40.6 % of one core at 1x on the same workstation (with a slightly larger topic set, [docs/FLIGHT_RECORDER.md](docs/FLIGHT_RECORDER.md)) and about 98 % on the Orin NX. The C++ core also sustains 20x (20,720 msg/s) with 0 drops; subscription callbacks spend 0.5 µs median, 1.2 µs p99 handing a message to the queue; replay runs about 2,000x faster than real time.
+For comparison, the Python flight recorder used 40.6 % of one core at 1x on the same workstation (with a slightly larger topic set, [docs/FLIGHT_RECORDER.md](docs/FLIGHT_RECORDER.md)) and about 98 % on the Orin NX. The C++ core also sustains 20x (20,720 msg/s) with 0 drops; a subscription callback spends under 0.6 µs median and 1.3 µs p99 handing a message to the queue; replay runs about 2,000x faster than real time.
 
 ## Engineering notes
 

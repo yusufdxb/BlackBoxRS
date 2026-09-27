@@ -27,16 +27,20 @@ jobs:
             | xargs -0 clang-format-14 --dry-run -Werror
 
   core:
-    name: core (${{ matrix.compiler }}, ${{ matrix.build_type }})
-    runs-on: ubuntu-22.04
+    name: core (${{ matrix.compiler }}, ${{ matrix.build_type }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {compiler: gcc, build_type: Release, cc: gcc, cxx: g++}
-          - {compiler: gcc, build_type: Debug, cc: gcc, cxx: g++}
-          - {compiler: clang, build_type: Release, cc: clang-14, cxx: clang++-14}
+          - {compiler: gcc, build_type: Release, cc: gcc, cxx: g++, arch: x86_64, runner: ubuntu-22.04}
+          - {compiler: gcc, build_type: Debug, cc: gcc, cxx: g++, arch: x86_64, runner: ubuntu-22.04}
+          - {compiler: clang, build_type: Release, cc: clang-14, cxx: clang++-14, arch: x86_64, runner: ubuntu-22.04}
+          # aarch64, the Orin NX's architecture (not the Jetson itself: no
+          # CUDA, a different kernel and CPU). Checks that the code builds and
+          # replays identically there; see cross-arch below.
+          - {compiler: gcc, build_type: Release, cc: gcc, cxx: g++, arch: aarch64, runner: ubuntu-22.04-arm}
     steps:
       - uses: actions/checkout@v5
       - run: sudo apt-get update && sudo apt-get install -y $CORE_DEPS clang-14 libstdc++-12-dev
@@ -50,7 +54,28 @@ jobs:
         run: cpp/build/ci/tools/blackboxrs verify examples/replay_lab/cases --repeat 100 --json verify.json
       - uses: actions/upload-artifact@v6
         if: always()
-        with: {name: "verify-${{ matrix.compiler }}-${{ matrix.build_type }}", path: verify.json}
+        with: {name: "verify-${{ matrix.compiler }}-${{ matrix.build_type }}-${{ matrix.arch }}", path: verify.json}
+
+  cross-arch:
+    name: replays byte-identical on x86_64 and aarch64
+    needs: core
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v5
+        with: {pattern: "verify-gcc-Release-*"}
+      - name: Compare every golden case's result digest
+        run: |
+          python3 - <<'EOF'
+          import json
+          x = json.load(open("verify-gcc-Release-x86_64/verify.json"))
+          a = json.load(open("verify-gcc-Release-aarch64/verify.json"))
+          dx = {c["case"]: c["result_sha256"] for c in x["cases"]}
+          da = {c["case"]: c["result_sha256"] for c in a["cases"]}
+          assert dx.keys() == da.keys(), (sorted(dx), sorted(da))
+          diff = [k for k in dx if dx[k] != da[k]]
+          print(f"{len(dx) - len(diff)}/{len(dx)} result digests identical across architectures")
+          assert not diff, diff
+          EOF
 
   sanitizers:
     name: sanitizer (${{ matrix.sanitizer }})
