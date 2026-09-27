@@ -1,10 +1,13 @@
 #include "blackboxrs_ros/runtime.hpp"
 
+#include <rmw/rmw.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
+#include <fstream>
 
 #include "blackboxrs/build_info.hpp"
 
@@ -167,25 +170,65 @@ Json build_json() {
           {"compiler", blackboxrs::build_info::kCompiler}};
 }
 
+namespace {
+
+std::string read_first_line(const char* path) {
+  std::ifstream in(path);
+  std::string line;
+  std::getline(in, line);
+  // /proc/device-tree strings end with a NUL.
+  while (!line.empty() && (line.back() == '\0' || line.back() == '\n')) {
+    line.pop_back();
+  }
+  return line;
+}
+
+Json env_or_null(const char* name) {
+  const char* v = std::getenv(name);
+  return v != nullptr ? Json(v) : Json();
+}
+
+}  // namespace
+
 blackboxrs::recorder::ManifestContext manifest_context(const blackboxrs::RuntimeConfig& cfg,
                                                        const std::string& session_id,
                                                        const std::string& mode, bool use_sim_time) {
   blackboxrs::recorder::ManifestContext m;
-  const char* rmw = std::getenv("RMW_IMPLEMENTATION");
-  const char* domain = std::getenv("ROS_DOMAIN_ID");
+  utsname un{};
+  ::uname(&un);
+  const std::string jetson = read_first_line("/proc/device-tree/model");
+  // Key names follow blackboxrs/flight/provenance.py build_session, so the
+  // Python flight report reads C++ evidence without translation.
   m.session = {
       {"session_id", session_id},
-      {"host", hostname()},
+      {"experiment", cfg.experiment ? Json(*cfg.experiment) : Json()},
+      {"synthetic", false},
+      {"hostname", hostname()},
+      {"platform", std::string(un.sysname) + "-" + un.release + "-" + un.machine},
+      {"machine", un.machine},
+      {"jetson_model", jetson.empty() ? Json() : Json(jetson)},
+      {"ros_distro", env_or_null("ROS_DISTRO")},
+      {"rmw_implementation", rmw_get_implementation_identifier()},
+      {"rmw_env", env_or_null("RMW_IMPLEMENTATION")},
+      {"ros_domain_id",
+       std::getenv("ROS_DOMAIN_ID") != nullptr ? Json(std::getenv("ROS_DOMAIN_ID")) : Json("0")},
+      {"ros_localhost_only", env_or_null("ROS_LOCALHOST_ONLY")},
+      {"cyclonedds_uri", env_or_null("CYCLONEDDS_URI")},
+      {"use_sim_time", use_sim_time},
+      {"blackboxrs_version", blackboxrs::build_info::kVersion},
+      {"blackboxrs_git_sha", blackboxrs::build_info::kGitSha},
+      {"blackboxrs_git_dirty", blackboxrs::build_info::kGitDirty},
+      {"experiment_repos", Json::array()},
+      {"profile_name", cfg.profile.name},
+      {"started_wall_ns", blackboxrs::count_ns(blackboxrs::clock_domain::Wall::now())},
+      {"started_mono_ns", blackboxrs::count_ns(blackboxrs::clock_domain::Mono::now())},
+      {"clock_note",
+       "t_mono_ns is CLOCK_MONOTONIC on the recorder host; t_wall_ns is its CLOCK_REALTIME"},
+      // C++ runtime additions
       {"recorder", "blackboxrs-cpp"},
       {"runtime_mode", mode},
       {"capture_mode",
        cfg.capture_mode == blackboxrs::CaptureMode::continuous ? "continuous" : "triggered"},
-      {"experiment", cfg.experiment ? Json(*cfg.experiment) : Json()},
-      {"synthetic", false},
-      {"use_sim_time", use_sim_time},
-      {"rmw_implementation", rmw != nullptr ? Json(rmw) : Json()},
-      {"ros_domain_id", domain != nullptr ? Json(domain) : Json()},
-      {"started_wall_ns", blackboxrs::count_ns(blackboxrs::clock_domain::Wall::now())},
       {"config", {{"path", cfg.path}, {"sha256", cfg.sha256}}},
       {"build", build_json()}};
   m.profile = blackboxrs::profile_manifest_block(cfg.profile, cfg.profile_path);

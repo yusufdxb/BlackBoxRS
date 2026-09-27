@@ -1,0 +1,155 @@
+name: C++ runtime
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cpp-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CORE_DEPS: ninja-build nlohmann-json3-dev libyaml-cpp-dev libgtest-dev libssl-dev
+
+jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y clang-format-14
+      - name: Check formatting
+        run: |
+          find cpp ros2 \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
+            | xargs -0 clang-format-14 --dry-run -Werror
+
+  core:
+    name: core (${{ matrix.compiler }}, ${{ matrix.build_type }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {compiler: gcc, build_type: Release, cc: gcc, cxx: g++}
+          - {compiler: gcc, build_type: Debug, cc: gcc, cxx: g++}
+          - {compiler: clang, build_type: Release, cc: clang-14, cxx: clang++-14}
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y $CORE_DEPS clang-14 libstdc++-12-dev
+      - name: Configure (warnings are errors)
+        env: {CC: "${{ matrix.cc }}", CXX: "${{ matrix.cxx }}"}
+        run: cmake -S cpp -B cpp/build/ci -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DBLACKBOXRS_WERROR=ON
+      - run: cmake --build cpp/build/ci
+      - name: Unit and integration tests
+        run: ctest --test-dir cpp/build/ci --output-on-failure -j4
+      - name: Golden cases, 100 identical replays each
+        run: cpp/build/ci/tools/blackboxrs verify examples/replay_lab/cases --repeat 100 --json verify.json
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with: {name: "verify-${{ matrix.compiler }}-${{ matrix.build_type }}", path: verify.json}
+
+  sanitizers:
+    name: sanitizer (${{ matrix.sanitizer }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {sanitizer: address, cc: gcc, cxx: g++}
+          - {sanitizer: undefined, cc: gcc, cxx: g++}
+          # GCC 11's TSan runtime does not intercept pthread_cond_clockwait and
+          # reports a false double lock inside condition_variable_any; Clang
+          # 14's runtime does intercept it (docs/CPP_ARCHITECTURE.md).
+          - {sanitizer: thread, cc: clang-14, cxx: clang++-14}
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y $CORE_DEPS clang-14 libstdc++-12-dev
+      - name: Configure
+        env: {CC: "${{ matrix.cc }}", CXX: "${{ matrix.cxx }}"}
+        run: >
+          cmake -S cpp -B cpp/build/san -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBLACKBOXRS_SANITIZER=${{ matrix.sanitizer }} -DBLACKBOXRS_WERROR=ON
+      - run: cmake --build cpp/build/san
+      - name: Tests under the sanitizer (any report fails the job)
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: ctest --test-dir cpp/build/san --output-on-failure -j2
+
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y $CORE_DEPS clang-tidy-14
+      - run: cmake -S cpp -B cpp/build/tidy -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build cpp/build/tidy --target blackboxrs_build_info
+      - name: clang-tidy (warnings are errors)
+        run: |
+          find cpp/src cpp/tools -name '*.cpp' -print0 \
+            | xargs -0 -n 1 -P 4 clang-tidy-14 -p cpp/build/tidy --quiet \
+                --extra-arg=-Wno-unknown-warning-option --warnings-as-errors='*'
+
+  parity:
+    name: Python vs C++ parity and evidence compatibility
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.10", cache: pip, cache-dependency-path: pyproject.toml}
+      - run: sudo apt-get update && sudo apt-get install -y $CORE_DEPS
+      - run: cmake -S cpp -B cpp/build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBLACKBOXRS_WERROR=ON
+      - run: cmake --build cpp/build/release
+      - run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+      - name: Differential tests (byte-identical replays, determinism, C++ evidence in Python)
+        run: python -m pytest -q tests/cpp
+      - name: Replay Lab Python suite (reference behaviour unchanged)
+        run: python -m pytest -q tests/unit/lab
+
+  ros2:
+    name: ROS 2 package (Humble)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    container: ros:humble-ros-base-jammy
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependencies
+        run: |
+          apt-get update
+          apt-get install -y ninja-build nlohmann-json3-dev libyaml-cpp-dev libssl-dev \
+            ros-humble-diagnostic-msgs ros-humble-nav-msgs ros-humble-sensor-msgs \
+            ros-humble-geometry-msgs ros-humble-ament-cmake-gtest
+      - name: Build
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon build --base-paths cpp ros2 --cmake-args -DCMAKE_BUILD_TYPE=Release -G Ninja
+      - name: Test (live graph on a private domain)
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash && source install/setup.bash
+          export ROS_LOCALHOST_ONLY=1
+          colcon test --base-paths cpp ros2 --packages-select blackboxrs_ros --event-handlers console_direct+
+          colcon test-result --verbose
+
+  benchmark:
+    name: Benchmark smoke (recorded, not gated)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y $CORE_DEPS
+      - run: cmake -S cpp -B cpp/build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBLACKBOXRS_BUILD_TESTS=OFF
+      - run: cmake --build cpp/build/release
+      - name: Run (hosted runners are noisy; numbers are recorded, never asserted)
+        run: cpp/build/release/tools/blackboxrs benchmark --seconds 5 --scale 1,2,5 --json benchmark.json
+      - uses: actions/upload-artifact@v6
+        with: {name: benchmark, path: benchmark.json}

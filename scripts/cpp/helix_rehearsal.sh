@@ -36,9 +36,13 @@ sed -e "s#^profile: .*#profile: $ROOT/blackboxrs/flight/profiles/go2_helix.yaml#
     -e "s#  expect_rmw: .*#  expect_rmw: null#" \
     "$ROOT/configs/go2_hardware_stage_e.yaml" > "$OUT/runtime.yaml"
 
-ros2 run blackboxrs_ros recorder --config "$OUT/runtime.yaml" > "$OUT/logs/recorder.log" 2>&1 &
+# The binaries are started directly, not through `ros2 run`: a background
+# job of a non-interactive shell ignores SIGINT, so the `ros2 run` wrapper
+# would never pass it on. rclcpp installs its own SIGINT handler in the binary.
+BIN=$(ros2 pkg prefix blackboxrs_ros)/lib/blackboxrs_ros
+"$BIN/recorder" --config "$OUT/runtime.yaml" > "$OUT/logs/recorder.log" 2>&1 &
 REC=$!
-ros2 run blackboxrs_ros monitor --config "$OUT/runtime.yaml" > "$OUT/logs/monitor.log" 2>&1 &
+"$BIN/monitor" --config "$OUT/runtime.yaml" > "$OUT/logs/monitor.log" 2>&1 &
 MON=$!
 sleep 3
 
@@ -49,4 +53,28 @@ sleep 16   # the post-trigger window (15 s) of the last incident
 kill -INT "$MON" "$REC"
 wait "$REC"; echo "recorder exit $?"
 wait "$MON"; echo "monitor exit $?"
-grep -E "REHEARSAL COMPLETE|did not PASS|PASS|FAIL" "$OUT/logs/helix_rehearsal.log" | tail -12
+grep -E "^STAGE [A-F]: |REHEARSAL COMPLETE|did not PASS" "$OUT/logs/helix_rehearsal.log"
+
+# Post-analysis: integrity, both replay engines, the Python stop-chain report.
+CLI="$ROOT/cpp/build/release/tools/blackboxrs"
+for b in "$OUT"/evidence/*/inc_*; do
+  echo "== $(basename "$b")"
+  "$CLI" validate "$b" | head -1
+  for sut in observed helix_arbiter twist_mux_legacy; do
+    "$CLI" replay "$b" --sut "$sut" --json "$b/cpp_replay_$sut.json" > /dev/null
+    echo "  C++ replay ($sut): $(python3 -c "import json;print(json.load(open('$b/cpp_replay_$sut.json'))['verdict']['result'])")"
+  done
+  (cd "$ROOT" && PYTHONPATH="$ROOT" python3 -m blackboxrs flight replay "$b" --write > /dev/null 2>&1)
+done
+(cd "$ROOT" && PYTHONPATH="$ROOT" BLACKBOXRS_BIN="$CLI" python3 - "$OUT" <<'PY2'
+import glob, sys
+sys.path.insert(0, "tests/cpp")
+from conftest import cpp_replay_json, python_replay_json
+n = same = 0
+for b in sorted(glob.glob(sys.argv[1] + "/evidence/*/inc_*")):
+    for sut in ("observed", "helix_arbiter", "twist_mux_legacy"):
+        n += 1
+        same += python_replay_json(b, (), sut) == cpp_replay_json(b, "--sut", sut)
+print(f"Python vs C++ replay: {same}/{n} byte-identical")
+PY2
+)
