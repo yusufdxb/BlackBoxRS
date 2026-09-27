@@ -23,7 +23,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang-format-14
       - name: Check formatting
         run: |
-          find cpp ros2 \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
+          find cpp ros2 -path '*/build' -prune -o \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
             | xargs -0 clang-format-14 --dry-run -Werror
 
   core:

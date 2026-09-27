@@ -16,5 +16,4 @@ int cmd_version(const Argv& argv) {
   return 0;
 }
 
-
 }  // namespace blackboxrs::cli
