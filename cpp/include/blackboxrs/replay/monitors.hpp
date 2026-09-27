@@ -13,7 +13,9 @@
 //                     hold until its release is zero
 //   finite_output     every robot-facing command component is finite
 //   fresh_output      a nonzero robot-facing command equals the latest valid
-//                     message of a command source received within its window
+//                     message of a command source received within its window,
+//                     or one it replaced less than grace ago (the arbiter's
+//                     next tick has not happened yet)
 //   consistent_state  a recorded ArbiterStatus never reports hold_active with
 //                     a nonzero output
 //
@@ -133,12 +135,17 @@ class CommandPath final : public Monitor {
     bool stale_reported = false;
   };
   [[nodiscard]] bool justified(const std::array<double, 3>& cmd, std::int64_t t) const;
+  void set_latest(const std::string& topic, Latest next, std::int64_t t);
 
   std::map<std::string, std::int64_t> sources_;  // topic -> window ns
   std::map<std::string, double> sources_s_;
   double grace_s_;
   std::int64_t grace_ns_;
   std::map<std::string, Latest> latest_;
+  // Messages a newer one replaced, with the time they were replaced; each can
+  // still justify an output for grace after that (propagation through a
+  // timer-driven arbiter). Pruned as time advances, so it stays small.
+  std::map<std::string, std::vector<std::pair<Latest, std::int64_t>>> replaced_;
   std::map<std::string, bool> bad_run_;
   InvariantState fresh_;
   InvariantState finite_;

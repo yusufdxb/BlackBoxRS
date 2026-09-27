@@ -18,7 +18,14 @@ Safety invariants (a violation makes the replay verdict FAIL):
     A nonzero robot-facing command equals the latest message of a command
     source that is valid (all six twist components finite) and was received
     within that source's freshness window (plus ``grace``). Zero is always
-    allowed: stopping is never a freshness violation.
+    allowed: stopping is never a freshness violation. A source's previous
+    valid message still counts for ``grace`` after a newer one replaced it:
+    a timer-driven arbiter publishes the new command only at its next tick,
+    so the robot-facing command legitimately lags a source change by up to
+    one period. (Found on a real HELIX run: a navigation command changed
+    0.2 ms after an arbiter output and 7 ms before the replay's tick; without
+    the allowance that lag read as a stale command.) An arbiter that keeps
+    forwarding the older command past ``grace`` still violates.
 ``consistent_state``
     An arbiter status never reports the hold active while reporting a
     nonzero output (evaluated on recorded ``ArbiterStatus``).
@@ -341,11 +348,15 @@ class CommandPath(Monitor):
         self.sources = {t: int(round(s * NS)) for t, s in sorted(sources.items())}
         self.grace_ns = int(round(grace_s * NS))
         self.latest: dict[str, _Latest] = {}
+        # Messages a newer one replaced, with the time they were replaced;
+        # each can justify an output for ``grace`` after that (propagation).
+        self.replaced: dict[str, list[tuple[_Latest, int]]] = {}
         self._bad_run: dict[str, bool] = {}
         self.fresh = InvariantStatus(
             "fresh_output",
             "a nonzero robot-facing command equals the latest valid message of a command "
-            f"source received within that source's freshness window (+{grace_s:g} s)")
+            f"source received within that source's freshness window (+{grace_s:g} s), or one "
+            f"it replaced less than {grace_s:g} s ago")
         self.finite = InvariantStatus(
             "finite_output", "every robot-facing command component is a finite number")
         self._stale_ep = False
@@ -358,7 +369,7 @@ class CommandPath(Monitor):
         worst, bad = twist_problem(e.data)
         out: list[Finding] = []
         if worst:
-            self.latest[e.topic] = _Latest(e.t_ns, e.eid, False, None)
+            self._set_latest(e.topic, _Latest(e.t_ns, e.eid, False, None), e.t_ns)
             if not self._bad_run.get(e.topic):
                 self._bad_run[e.topic] = True
                 out.append(Finding(
@@ -368,15 +379,30 @@ class CommandPath(Monitor):
             return out
         self._bad_run[e.topic] = False
         vals, _ = _twist_values(e.data)
-        self.latest[e.topic] = _Latest(e.t_ns, e.eid, True, vals)
+        self._set_latest(e.topic, _Latest(e.t_ns, e.eid, True, vals), e.t_ns)
         return out
 
+    def _set_latest(self, topic: str, new: _Latest, t_ns: int) -> None:
+        prev = self.latest.get(topic)
+        kept = [(m, at) for m, at in self.replaced.get(topic, [])
+                if at >= t_ns - self.grace_ns]
+        if prev is not None:
+            kept.append((prev, t_ns))
+        self.replaced[topic] = kept
+        self.latest[topic] = new
+
     def _justified(self, cmd: tuple[float, float, float], t_ns: int) -> str | None:
+        def backs(m: _Latest, window: int) -> bool:
+            return (m.valid and m.cmd is not None and t_ns - m.t_ns <= window + self.grace_ns
+                    and all(abs(a - b) <= 1e-9 for a, b in zip(m.cmd, cmd)))
         for topic, window in self.sources.items():
             last = self.latest.get(topic)
-            if (last is not None and last.valid and last.cmd is not None
-                    and t_ns - last.t_ns <= window + self.grace_ns
-                    and all(abs(a - b) <= 1e-9 for a, b in zip(last.cmd, cmd))):
+            if last is not None and backs(last, window):
+                return topic
+            # a message replaced less than grace ago: the arbiter has not yet
+            # had a tick to publish its successor
+            if any(at >= t_ns - self.grace_ns and backs(m, window)
+                   for m, at in self.replaced.get(topic, [])):
                 return topic
         return None
 

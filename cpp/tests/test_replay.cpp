@@ -46,7 +46,7 @@ INSTANTIATE_TEST_SUITE_P(Replay, GoldenCase, ::testing::ValuesIn(all_cases()),
                          });
 
 TEST(Replay, GoldenSetHasEveryFailureClass) {
-  EXPECT_EQ(all_cases().size(), 28U);
+  EXPECT_EQ(all_cases().size(), 30U);
 }
 
 TEST(Replay, PacingNeverChangesTheResult) {

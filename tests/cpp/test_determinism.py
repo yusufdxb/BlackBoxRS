@@ -18,7 +18,7 @@ def test_hundred_repeats_are_identical(tmp_path):
     out = tmp_path / "v.json"
     run_cpp("verify", "examples/replay_lab/cases", "--repeat", "100", "--json", str(out))
     rows = json.loads(out.read_text())["cases"]
-    assert len(rows) == 28
+    assert len(rows) == 30
     assert all(r["ok"] and r["deterministic"] and r["repeats"] == 100 for r in rows), \
         [r["case"] for r in rows if not (r["ok"] and r["deterministic"])]
 

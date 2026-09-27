@@ -106,8 +106,17 @@ than a tick is still caught.
 |---|---|
 | `stop_dominance` | while a HELIX hold is asserted in the delivered or the recorded hold stream (each ordered by `(epoch, seq)`, so a stale RESUME cannot end it; any epoch is accepted once the state is stale, as HELIX P8 does), every robot-facing command from 0.05 s after the hold until its release is zero |
 | `finite_output` | every robot-facing command component is a finite number |
-| `fresh_output` | a nonzero robot-facing command equals the latest valid message of a command source received within its freshness window (+0.05 s); zero is always allowed |
+| `fresh_output` | a nonzero robot-facing command equals the latest valid message of a command source received within its freshness window (+0.05 s), or a message that source replaced less than 0.05 s ago (a timer-driven arbiter publishes a source's new command only at its next tick); zero is always allowed |
 | `consistent_state` | a recorded ArbiterStatus never reports the hold active with a nonzero output |
+
+The replaced-message allowance of `fresh_output` was added after a real
+HELIX run (the off-robot rehearsal recorded by the C++ recorder) showed the
+original rule reporting a stale command when a navigation command changed
+between an arbiter publication and the replay's next tick; the arbiter
+published the new command 20 ms later, as designed. The allowance is bounded
+by `fresh_grace_s`: an output that keeps a replaced command longer is still a
+violation (golden cases `source_change_propagation__observed` and
+`superseded_command_forwarded__observed`).
 
 The grace windows (`stop_grace_s`, `fresh_grace_s`) are bounded to
 [0, 0.5] s; a larger value would hide the violations it is meant to judge. An

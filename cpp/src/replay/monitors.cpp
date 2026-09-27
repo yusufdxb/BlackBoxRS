@@ -318,13 +318,14 @@ CommandPath::CommandPath(std::map<std::string, double> sources, double grace_s)
 
 void CommandPath::reset() {
   latest_.clear();
+  replaced_.clear();
   bad_run_.clear();
   fresh_ = InvariantState{};
   fresh_.name = "fresh_output";
   fresh_.statement =
       "a nonzero robot-facing command equals the latest valid message of a command source "
       "received within that source's freshness window (+" +
-      fmt_g(grace_s_) + " s)";
+      fmt_g(grace_s_) + " s), or one it replaced less than " + fmt_g(grace_s_) + " s ago";
   finite_ = InvariantState{};
   finite_.name = "finite_output";
   finite_.statement = "every robot-facing command component is a finite number";
@@ -341,7 +342,7 @@ void CommandPath::on_event(const Event& e, Findings& out) {
   const VelocityCommand v = twist_view(*m);
   const auto [worst, bad] = twist_problem(v);
   if (!worst.empty()) {
-    latest_[m->topic] = Latest{e.t_ns(), e.eid, false, std::nullopt, false};
+    set_latest(m->topic, Latest{e.t_ns(), e.eid, false, std::nullopt, false}, e.t_ns());
     if (!bad_run_[m->topic]) {
       bad_run_[m->topic] = true;
       std::string axes;
@@ -363,18 +364,36 @@ void CommandPath::on_event(const Event& e, Findings& out) {
     return;
   }
   bad_run_[m->topic] = false;
-  latest_[m->topic] = Latest{e.t_ns(), e.eid, true, twist_values(v).first, false};
+  set_latest(m->topic, Latest{e.t_ns(), e.eid, true, twist_values(v).first, false}, e.t_ns());
+}
+
+void CommandPath::set_latest(const std::string& topic, Latest next, std::int64_t t) {
+  auto& replaced = replaced_[topic];
+  std::erase_if(replaced, [&](const auto& r) { return r.second < t - grace_ns_; });
+  if (const auto it = latest_.find(topic); it != latest_.end()) {
+    replaced.emplace_back(it->second, t);
+    it->second = std::move(next);
+  } else {
+    latest_.emplace(topic, std::move(next));
+  }
 }
 
 bool CommandPath::justified(const std::array<double, 3>& cmd, std::int64_t t) const {
   for (const auto& [topic, window] : sources_) {
-    const auto it = latest_.find(topic);
-    if (it == latest_.end()) {
-      continue;
-    }
-    const Latest& last = it->second;
-    if (last.valid && last.cmd && t - last.t_ns <= window + grace_ns_ && close3(*last.cmd, cmd)) {
+    auto backs = [&](const Latest& m) {
+      return m.valid && m.cmd && t - m.t_ns <= window + grace_ns_ && close3(*m.cmd, cmd);
+    };
+    if (const auto it = latest_.find(topic); it != latest_.end() && backs(it->second)) {
       return true;
+    }
+    // A message replaced less than grace ago: the arbiter has not yet had a
+    // tick to publish its successor.
+    if (const auto it = replaced_.find(topic); it != replaced_.end()) {
+      for (const auto& [m, at] : it->second) {
+        if (at >= t - grace_ns_ && backs(m)) {
+          return true;
+        }
+      }
     }
   }
   return false;

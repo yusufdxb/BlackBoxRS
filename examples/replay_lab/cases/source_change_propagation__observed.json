@@ -1,0 +1,24 @@
+{
+  "schema": "blackboxrs.lab.case.v1",
+  "name": "source_change_propagation__observed",
+  "regression": "A robot-facing command that lags a source's new command by less than the freshness grace is propagation through a timer-driven arbiter, not a stale command. Found on a real HELIX run recorded by the C++ recorder (off-robot rehearsal, 2026-09-27): a navigation command changed 0.2 ms after an arbiter output and 7 ms before the replay's tick, and fresh_output reported a stale command forwarded.",
+  "initial_conditions": "Synthetic GO2 + HELIX run (6.5 s): /nav/cmd_vel at 20 Hz commands 0.15 m/s from t=2 s; the recorded /cmd_vel follows each command 2 to 5 ms later.",
+  "injected_fault": "From t=4.0 s the navigation source commands 0.1 m/s; the recorded /cmd_vel switches to 0.1 m/s only from t=4.03 s (its first 0.1 message at 4.056 s), so for 53 ms the output still carries the replaced 0.15 m/s command.",
+  "evidence": "../evidence/nominal_motion",
+  "sut": {
+    "mode": "observed"
+  },
+  "faults": [
+    {"kind": "set_value", "topic": "/nav/cmd_vel", "field": "linear.x", "value": 0.1, "from_s": 4.0},
+    {"kind": "set_value", "topic": "/cmd_vel", "field": "linear.x", "value": 0.1, "from_s": 4.03}
+  ],
+  "expect": {
+    "verdict": "PASS",
+    "invariants": {
+      "fresh_output": "PASS",
+      "finite_output": "PASS"
+    },
+    "detections": [],
+    "info": ["clock_offset"]
+  }
+}
