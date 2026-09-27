@@ -347,6 +347,10 @@ def _inject_stream(events, p, ctx):
         raise FaultError("rate_hz must be > 0")
     if p.get("to_s") is None:
         raise FaultError("inject_stream needs to_s")
+    for key in ("data", "final_data"):
+        if p.get(key) is not None and not isinstance(p[key], dict):
+            raise FaultError(f"inject_stream: {key} must be a message object, "
+                             f"got {p[key]!r}")
     topic = p["topic"]
     info = ctx.topics.get(topic)
     role = p.get("role") or (info.role if info else None)
@@ -387,6 +391,55 @@ def _inject_stream(events, p, ctx):
     if topic not in ctx.topics:
         ctx.topics[topic] = TopicInfo(topic, role, host, "event", None)
     return list(events) + new
+
+
+def _node_exit(events, p, ctx):
+    """A node leaves the ROS graph at at_s (crash, kill, host down).
+
+    Adds a graph change record at at_s and removes the node from every later
+    recorded graph snapshot, so the graph never shows it again. Its topics
+    keep arriving unless another fault removes them (compose with drop/gap).
+    """
+    at = int(round(p["at_s"] * NS))
+    node = p["node"]
+    before = [e for e in events if e.kind == "graph" and e.t_ns <= at]
+    nodes: set[str] = set()
+    pubs: dict[str, list[str]] = {}
+    for g in before:
+        r = g.record
+        if r.get("full"):
+            nodes = set(r.get("nodes") or [])
+        else:
+            nodes = (nodes - set(r.get("nodes_gone") or [])) | set(r.get("nodes_new") or [])
+        pubs = {k: list(v) for k, v in (r.get("publishers") or pubs).items()}
+    if node not in nodes:
+        raise FaultError(f"node_exit: {node} is not on the recorded graph before "
+                         f"{at / NS:.3f} s")
+
+    def without(r: dict[str, Any]) -> dict[str, Any]:
+        r = copy.deepcopy(r)
+        for k in ("nodes", "nodes_new"):
+            if k in r:
+                r[k] = [n for n in r[k] if n != node]
+        if "publishers" in r:
+            r["publishers"] = {t: [n for n in v if n != node]
+                               for t, v in r["publishers"].items()}
+        return r
+
+    out = []
+    for e in events:
+        if e.kind == "graph" and e.t_ns > at:
+            e = ctx.mark(replace(e, record=without(e.record)))
+        out.append(e)
+    anchor = before[-1] if before else events[0]
+    shift = at - anchor.t_ns
+    rec = {"kind": "graph", "full": False, "nodes_gone": [node], "nodes_new": [],
+           "publishers": {t: [n for n in v if n != node] for t, v in sorted(pubs.items())},
+           "t_mono_ns": anchor.record.get("t_mono_ns", anchor.t_ns) + shift,
+           "t_wall_ns": anchor.record.get("t_wall_ns", 0) + shift}
+    out.append(ctx.mark(ReplayEvent(t_ns=at, order=(1, ctx.index, 0), eid=f"{ctx.fault.id}.0",
+                                    kind="graph", record=rec)))
+    return out
 
 
 _FIELD = {"field": Param("str", None, "dotted payload field"),
@@ -434,6 +487,9 @@ _kind("step", "data", "add delta to a numeric field from at_s on (discontinuity)
       {"field": Param("str", help="dotted payload field"), "delta": Param("float", help="step"),
        "at_s": Param("float", help="step time"), "to_s": Param("float", None, "step end")},
       window=False)
+_kind("node_exit", "transport", "a node leaves the ROS graph at at_s (crash or host down)",
+      _node_exit, {"node": Param("str", help="fully qualified node name"),
+                   "at_s": Param("float", help="exit time")}, selects=False, window=False)
 _kind("inject_stream", "control",
       "publish a message stream that is not in the evidence (e.g. a teleop stream)",
       _inject_stream,

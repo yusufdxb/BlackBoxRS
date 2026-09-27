@@ -124,7 +124,10 @@ class Liveness:
         if e.kind == "graph":
             pubs = e.record.get("publishers") or {}
             for topic, plist in pubs.items():
-                self.publishers[topic] = tuple(sorted(plist))
+                # every node ever seen publishing it: a node that has just
+                # left must still count as this topic's publisher
+                self.publishers[topic] = tuple(sorted(set(self.publishers.get(topic, ()))
+                                                      | set(plist)))
             if e.record.get("full"):
                 self.nodes = set(e.record.get("nodes") or [])
             else:

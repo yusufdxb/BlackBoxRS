@@ -43,6 +43,8 @@ fault.
 | `nan_telemetry` | nominal_motion | helix_arbiter | Odometry twist linear.x is NaN for 0.2 s from t=3.0 s. | nonfinite_telemetry | fresh_output PASS | **DETECTED** |
 | `nominal_motion` | nominal_motion | helix_arbiter | none | none | finite_output PASS, fresh_output PASS, stop_dominance NOT_EXERCISED | **PASS** |
 | `odometry_discontinuity` | nominal_motion | helix_arbiter | Odometry x position steps +0.5 m at t=4.0 s. | odometry_jump | fresh_output PASS | **DETECTED** |
+| `publisher_crash__odometry` | nominal_motion | helix_arbiter | The odometry publisher node /utlidar_node leaves the ROS graph at t=3.0 s and its topic stops; lowstate from the same host keeps arriving. | node_disappeared, publisher_lost | fresh_output PASS, finite_output PASS | **DETECTED** |
+| `robot_host_down` | nominal_motion | helix_arbiter | Both robot-host publisher nodes leave the graph at t=3.0 s and every robot-host topic stops for the rest of the run. | node_disappeared, transport_loss | fresh_output PASS, finite_output PASS | **DETECTED** |
 | `stale_command__helix_arbiter` | nominal_motion | helix_arbiter | /nav/cmd_vel stops at t=4.0 s while its last command is 0.15 m/s. | command_source_stale | fresh_output PASS, finite_output PASS | **DETECTED** |
 | `stale_command__twist_mux_legacy` | nominal_motion | twist_mux_legacy | /nav/cmd_vel stops at t=4.0 s while its last command is 0.15 m/s. | command_source_stale | fresh_output FAIL | **FAIL** |
 | `stale_hold_redelivery` | clean_stop | helix_arbiter | At t=4.0 s, while held, a 2 s old hold message saying hold=false is delivered again. | duplicate_messages, out_of_order_stamps, stamp_behind | stop_dominance PASS | **DETECTED** |
