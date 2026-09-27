@@ -1054,7 +1054,8 @@ Fault parse_fault(const Json& raw, std::size_t index) {
     f.id = "F" + std::to_string(index + 1);
   }
   std::vector<std::string> extra;
-  for (const auto& [k, v] : raw.items()) {
+  for (const auto& item : raw.items()) {
+    const std::string& k = item.key();
     if (k == "kind" || k == "id") {
       continue;
     }

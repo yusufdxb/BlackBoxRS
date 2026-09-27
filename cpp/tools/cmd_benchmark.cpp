@@ -142,9 +142,9 @@ Json bench_serialize() {
   std::vector<Record> recs;
   for (int i = 0; i < 1000; ++i) {
     const auto& t = load[static_cast<std::size_t>(i) % load.size()];
-    const auto& p = static_cast<const bench::JsonPayload&>(*t.payloads[0]);
     Record r =
-        make_msg_record(t.topic, Role::go2_state, "x/msg/Y", p.json(), true,
+        make_msg_record(t.topic, Role::go2_state, "x/msg/Y",
+                        t.make(static_cast<std::uint64_t>(i), 1'789'000'000'000'000'000LL), true,
                         mono_ns(1'000'000'000LL + i), wall_ns(1'789'000'000'000'000'000LL + i),
                         std::nullopt, source_ns(1'789'000'000'000'000'000LL), std::nullopt);
     r.seq = i;
@@ -450,6 +450,45 @@ int cmd_benchmark(const Argv& argv) {
     std::cout << text << "\n";
   }
   return 0;
+}
+
+}  // namespace blackboxrs::cli
+
+namespace blackboxrs::cli {
+
+// Record the synthetic GO2 + HELIX load through the real pipeline into a
+// bundle (continuous mode). For compatibility tests and rehearsals only:
+// the bundle says synthetic.
+int cmd_synth_record(const Argv& argv) {
+  OptionSpec spec;
+  spec.values = {"--out", "--seconds", "--scale", "--profile", "--repo"};
+  const Args a(argv, spec);
+  const auto out = a.value("--out");
+  if (!out) {
+    throw UsageError("synth-record needs --out DIR");
+  }
+  const std::string repo = a.value("--repo").value_or(".");
+  const std::string profile_path =
+      a.value("--profile")
+          .value_or((fs::path(repo) / "blackboxrs/flight/profiles/go2_helix.yaml").string());
+  const Profile profile = load_profile_file(profile_path);
+  recorder::RecorderConfig cfg = recorder_config(*out);
+  cfg.manifest.profile = profile_manifest_block(profile, profile_path);
+  cfg.manifest.session["recorder"] = "blackboxrs-cpp synth-record";
+  auto rec = std::make_unique<recorder::Recorder>(profile, cfg,
+                                                  std::make_unique<bench::JsonPayloadDecoder>());
+  const auto g = bench::run_load(*rec, bench::go2_helix_load(), a.number("--scale").value_or(1.0),
+                                 std::chrono::milliseconds(static_cast<std::int64_t>(
+                                     a.number("--seconds").value_or(3.0) * 1000)),
+                                 0);
+  rec->stop("synth_record_done");
+  const auto m = rec->metrics();
+  for (const auto& b : rec->bundles()) {
+    std::cout << b << "\n";
+  }
+  std::cerr << "offered " << g.offered << ", processed " << m.processed << ", dropped "
+            << m.dropped_ingest + m.dropped_at_shutdown << "\n";
+  return rec->bundles().empty() ? 1 : 0;
 }
 
 }  // namespace blackboxrs::cli

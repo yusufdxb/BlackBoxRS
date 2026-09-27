@@ -14,6 +14,15 @@ elseif(BLACKBOXRS_SANITIZER STREQUAL "undefined")
 elseif(BLACKBOXRS_SANITIZER STREQUAL "thread")
   add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
   add_link_options(-fsanitize=thread)
+  # The TSan runtimes of GCC 11 / Clang 14 abort with "unexpected memory
+  # mapping" on kernels that use 32 bits of mmap randomization (Linux 6.x
+  # defaults). Running each test with ASLR disabled for that process only
+  # (setarch -R) avoids it without root and without weakening the check.
+  find_program(BLACKBOXRS_SETARCH setarch)
+  if(BLACKBOXRS_SETARCH)
+    set(CMAKE_CROSSCOMPILING_EMULATOR "${BLACKBOXRS_SETARCH};${CMAKE_SYSTEM_PROCESSOR};-R"
+        CACHE STRING "run TSan binaries without ASLR" FORCE)
+  endif()
 elseif(NOT BLACKBOXRS_SANITIZER STREQUAL "")
   message(FATAL_ERROR "unknown BLACKBOXRS_SANITIZER '${BLACKBOXRS_SANITIZER}'")
 endif()

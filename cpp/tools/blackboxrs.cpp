@@ -28,6 +28,9 @@ commands:
   validate  <bundle>               check evidence integrity (exit 0 valid, 1 invalid)
   benchmark [--profile go2] [--scale 1,2,5] [--json PATH]
                                    ingest / serialization / replay / detector benchmarks
+  synth-record --out DIR [--seconds S] [--scale X]
+                                   record the synthetic GO2 load through the real
+                                   pipeline (compatibility tests; marked synthetic)
   config    <runtime.yaml>         validate a runtime configuration
   version                          build provenance
 
@@ -53,6 +56,7 @@ int main(int argc, char** argv) {
     if (cmd == "inspect") return cmd_inspect(rest);
     if (cmd == "validate") return cmd_validate(rest);
     if (cmd == "benchmark") return cmd_benchmark(rest);
+    if (cmd == "synth-record") return cmd_synth_record(rest);
     if (cmd == "config") return cmd_config(rest);
     if (cmd == "version") return cmd_version(rest);
     std::cerr << "unknown command '" << cmd << "'\n" << kUsage;

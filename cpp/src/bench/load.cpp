@@ -19,15 +19,6 @@ Json twist(double vx, double wz) {
           {"angular", {{"x", 0.0}, {"y", 0.0}, {"z", wz}}}};
 }
 
-template <class Make>
-std::vector<std::shared_ptr<const recorder::Payload>> variants(std::size_t bytes, Make make) {
-  std::vector<std::shared_ptr<const recorder::Payload>> out;
-  for (int i = 0; i < 8; ++i) {
-    out.push_back(std::make_shared<JsonPayload>(make(i), bytes));
-  }
-  return out;
-}
-
 }  // namespace
 
 recorder::DecodeResult JsonPayloadDecoder::decode(std::size_t, const recorder::Payload& p) {
@@ -37,59 +28,68 @@ recorder::DecodeResult JsonPayloadDecoder::decode(std::size_t, const recorder::P
 }
 
 std::vector<TopicLoad> go2_helix_load() {
-  const std::int64_t t0 = 1'789'000'000'000'000'000;
   std::vector<TopicLoad> load;
-  // Sizes are the CDR sizes of the message types (LowState ~ 1 KiB).
-  load.push_back({"/lowstate", 500.0, "measured on GO2 (field notes 2026-09-01/02)",
-                  variants(1020, [&](int i) {
+  load.push_back({"/lowstate", 500.0, "measured on GO2 (field notes 2026-09-01/02)", 1020,
+                  [](std::uint64_t n, std::int64_t) {
+                    const auto i = static_cast<std::int64_t>(n);
                     return Json{{"tick", 1000 + i},
-                                {"power_v", 28.5 - 0.01 * i},
-                                {"power_a", 3.2 + 0.05 * i},
-                                {"bms_state", {{"soc", 87}, {"current", -3200 - i}}},
-                                {"foot_force", {21 + i, 19, 23, 20}},
+                                {"power_v", 28.5 - 0.0001 * static_cast<double>(n % 1000)},
+                                {"power_a", 3.2},
+                                {"bms_state", {{"soc", 87}, {"current", -3200}}},
+                                {"foot_force", {21, 19, 23, 20}},
                                 {"temperature_ntc1", 41}};
-                  })});
-  load.push_back({"/sportmodestate", 295.0, "measured on GO2 (field notes 2026-09-01/02)",
-                  variants(260, [&](int i) {
-                    return Json{{"stamp", stamp(t0 + i * 3'390'000)},
+                  }});
+  load.push_back({"/sportmodestate", 295.0, "measured on GO2 (field notes 2026-09-01/02)", 260,
+                  [](std::uint64_t n, std::int64_t wall) {
+                    return Json{{"stamp", stamp(wall)},
                                 {"error_code", 0},
                                 {"mode", 1},
                                 {"progress", 0.0},
                                 {"gait_type", 1},
-                                {"position", {0.01 * i, 0.0, 0.31}},
+                                {"position", {0.001 * static_cast<double>(n), 0.0, 0.31}},
                                 {"body_height", 0.31},
                                 {"velocity", {0.15, 0.0, 0.0}},
                                 {"yaw_speed", 0.0}};
-                  })});
-  load.push_back({"/utlidar/robot_odom", 151.0, "measured on GO2 (field notes 2026-09-01/02)",
-                  variants(720, [&](int i) {
-                    return Json{
-                        {"header", {{"stamp", stamp(t0 + i * 6'600'000)}, {"frame_id", "odom"}}},
-                        {"child_frame_id", "base_link"},
-                        {"pose",
-                         {{"pose",
-                           {{"position", {{"x", 0.001 * i}, {"y", 0.0}, {"z", 0.0}}},
-                            {"orientation", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"w", 1.0}}}}}}},
-                        {"twist",
-                         {{"twist",
-                           {{"linear", {{"x", 0.15}, {"y", 0.0}, {"z", 0.0}}},
-                            {"angular", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}}}}}}};
-                  })});
+                  }});
   load.push_back(
-      {"/helix/arbiter/status", 50.0, "HELIX arbiter.yaml rate_hz", variants(180, [&](int i) {
+      {"/utlidar/robot_odom", 151.0, "measured on GO2 (field notes 2026-09-01/02)", 720,
+       [](std::uint64_t n, std::int64_t wall) {
          return Json{
-             {"reason", "SOURCE"},   {"selected_source", "nav"}, {"hold_active", false},
-             {"hold_fault_id", ""},  {"out_linear_x", 0.15},     {"out_linear_y", 0.0},
-             {"out_angular_z", 0.0}, {"seq", 100 + i},           {"stamp", 1.789e9 + 0.02 * i}};
-       })});
-  load.push_back(
-      {"/helix/hold", 20.0, "HELIX recovery hold publisher (20 Hz)", variants(120, [&](int i) {
-         return Json{{"hold", false},        {"fault_id", ""}, {"reason", ""},
-                     {"epoch", 1},           {"seq", 10 + i},  {"stamp", 1.789e9 + 0.05 * i},
-                     {"asserted_stamp", 0.0}};
-       })});
-  load.push_back({"/nav/cmd_vel", 20.0, "navigation source as in the Replay Lab evidence",
-                  variants(48, [&](int) { return twist(0.15, 0.0); })});
+             {"header", {{"stamp", stamp(wall)}, {"frame_id", "odom"}}},
+             {"child_frame_id", "base_link"},
+             {"pose",
+              {{"pose",
+                {{"position", {{"x", 0.001 * static_cast<double>(n)}, {"y", 0.0}, {"z", 0.0}}},
+                 {"orientation", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"w", 1.0}}}}}}},
+             {"twist",
+              {{"twist",
+                {{"linear", {{"x", 0.15}, {"y", 0.0}, {"z", 0.0}}},
+                 {"angular", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}}}}}}};
+       }});
+  load.push_back({"/helix/arbiter/status", 50.0, "HELIX arbiter.yaml rate_hz", 180,
+                  [](std::uint64_t n, std::int64_t wall) {
+                    return Json{{"reason", "SOURCE"},
+                                {"selected_source", "nav"},
+                                {"hold_active", false},
+                                {"hold_fault_id", ""},
+                                {"out_linear_x", 0.15},
+                                {"out_linear_y", 0.0},
+                                {"out_angular_z", 0.0},
+                                {"seq", static_cast<std::int64_t>(n) + 1},
+                                {"stamp", static_cast<double>(wall) / 1e9}};
+                  }});
+  load.push_back({"/helix/hold", 20.0, "HELIX recovery hold publisher (20 Hz)", 120,
+                  [](std::uint64_t n, std::int64_t wall) {
+                    return Json{{"hold", false},
+                                {"fault_id", ""},
+                                {"reason", ""},
+                                {"epoch", 1},
+                                {"seq", static_cast<std::int64_t>(n) + 1},
+                                {"stamp", static_cast<double>(wall) / 1e9},
+                                {"asserted_stamp", 0.0}};
+                  }});
+  load.push_back({"/nav/cmd_vel", 20.0, "navigation source as in the Replay Lab evidence", 48,
+                  [](std::uint64_t, std::int64_t) { return twist(0.15, 0.0); }});
   return load;
 }
 
@@ -141,7 +141,8 @@ GeneratorResult run_load(recorder::Recorder& rec, const std::vector<TopicLoad>& 
     m.t_wall = clock_domain::Wall::now();
     m.src = source_ns(count_ns(m.t_wall) - 400'000);
     m.rx = m.t_wall;
-    m.payload = load[i].payloads[sent[i] % load[i].payloads.size()];
+    m.payload =
+        std::make_shared<JsonPayload>(load[i].make(sent[i], count_ns(m.t_wall)), load[i].bytes);
     ++sent[i];
     const bool sample = latency_sample_every != 0 && n % latency_sample_every == 0;
     const auto t0 = sample ? Clock::now() : Clock::time_point{};

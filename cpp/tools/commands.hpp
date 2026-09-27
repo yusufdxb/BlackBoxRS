@@ -14,6 +14,7 @@ int cmd_faults(const Argv& args);
 int cmd_inspect(const Argv& args);
 int cmd_validate(const Argv& args);
 int cmd_benchmark(const Argv& args);
+int cmd_synth_record(const Argv& args);
 int cmd_config(const Argv& args);
 int cmd_version(const Argv& args);
 

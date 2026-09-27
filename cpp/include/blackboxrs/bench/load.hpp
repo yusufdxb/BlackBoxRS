@@ -11,12 +11,13 @@
 //   * a navigation command source at 20 Hz, as in the Replay Lab evidence.
 // "1x" is that set. Scaling multiplies every rate.
 //
-// Payloads are built once per topic (a small ring of variants) and shared,
-// so generating the load costs almost nothing next to what it measures.
+// Each payload is built when it is sent (the generator's cost is on the
+// producer thread; per-thread CPU figures for the recorder exclude it).
 #pragma once
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,7 +31,10 @@ struct TopicLoad {
   std::string topic;
   double hz = 0.0;
   std::string rate_source;  // where the rate comes from
-  std::vector<std::shared_ptr<const recorder::Payload>> payloads;
+  std::size_t bytes = 0;    // approximate CDR size of the message type
+  // Payload of the n-th message, stamped at `wall_ns`: sequence numbers
+  // increase and stamps move forward, as a real publisher's would.
+  std::function<Json(std::uint64_t n, std::int64_t wall_ns)> make;
 };
 
 // A payload that already is decoded JSON (what the recorder's decoder
