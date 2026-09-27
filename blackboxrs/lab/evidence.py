@@ -25,6 +25,13 @@ from blackboxrs.flight.bundle import load_bundle
 from blackboxrs.flight.profile import FlightProfile, ProfileError, profile_from_text
 from blackboxrs.lab.values import digest
 
+# Bundle statuses that mean the evidence is not complete: still capturing,
+# killed before finalization, unreadable, a write error (the recorder could not
+# put every record on disk), or messages lost before the recorder core
+# (written by the C++ recorder when its ingest queue overflowed).
+INCOMPLETE_STATUSES = ("capturing", "interrupted_unfinalized", "unknown", "write_failed",
+                       "complete_with_loss")
+
 # Record kinds that are inputs to a replay. Trigger, health and clock_jump
 # records are outputs the recorder derived live; the replay derives its own.
 INPUT_KINDS = ("msg", "graph", "marker", "sys")
@@ -116,7 +123,7 @@ def load_evidence(path: str | Path, *, allow_partial: bool = False,
         problems.append("manifest.json missing or unreadable")
     if info["torn_lines"]:
         problems.append(f"{info['torn_lines']} torn record line(s)")
-    if manifest.get("status") in ("capturing", "interrupted_unfinalized", "unknown"):
+    if manifest.get("status") in INCOMPLETE_STATUSES:
         problems.append(f"bundle status is {manifest.get('status')!r}")
     if problems and not allow_partial:
         raise EvidenceError(f"{path}: incomplete evidence ({'; '.join(problems)}); "

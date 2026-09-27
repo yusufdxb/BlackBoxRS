@@ -134,7 +134,9 @@ Evidence load_evidence(const fs::path& dir, bool allow_partial, const std::strin
     problems.push_back(std::to_string(b.info.torn_lines) + " torn record line(s)");
   }
   const std::string status = b.manifest.value("status", std::string());
-  if (status == "capturing" || status == "interrupted_unfinalized" || status == "unknown") {
+  // Same list as Python lab/evidence.py INCOMPLETE_STATUSES.
+  if (status == "capturing" || status == "interrupted_unfinalized" || status == "unknown" ||
+      status == "write_failed" || status == "complete_with_loss") {
     problems.push_back("bundle status is '" + status + "'");
   }
   if (!problems.empty() && !allow_partial) {
