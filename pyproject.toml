@@ -48,7 +48,9 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov",
-    "ruff",
+    # Pinned: ruff 0.16 widened its default rule set (275 new findings on the
+    # existing tree). Adopting it is its own change; lint stays reproducible.
+    "ruff>=0.15,<0.16",
 ]
 prometheus = [
     "prometheus_client>=0.17",
