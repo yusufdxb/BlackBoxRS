@@ -196,6 +196,8 @@ def generate(sc: Scenario, t_wall0: float = 1_789_000_000.0,
             "/helix/sink/trace": ["/helix_go2_sport_sink"],
             "/utlidar/robot_odom": ["/utlidar_node"],
             "/api/sport/response": ["/sport_service_node"]}
+    if sc.lowstate_hz:
+        pubs["/lowstate"] = ["/sport_service_node"]
     topics_all = {t: [] for t in pubs}
 
     def graph_at(t: float, node_list: list[str]) -> None:
