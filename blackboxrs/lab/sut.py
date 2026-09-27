@@ -1,6 +1,6 @@
 """The system under test: what command reaches the robot-facing boundary.
 
-Two modes:
+Three kinds:
 
 ``observed``
     The arbitration output recorded in the evidence (``/cmd_vel`` when the
@@ -9,33 +9,37 @@ Two modes:
     topics cannot change a recorded output; use this mode to check recorded
     incidents and to inject faults into the recorded output itself.
 
-``reference``
-    A model of the arbitration path is run on the replayed (and possibly
-    faulted) inputs, so an input fault can change the outcome. Recorded
-    outputs are suppressed and counted. Two presets:
+``helix_arbiter`` (reference)
+    HELIX's own arbiter, executed: ``blackboxrs.lab.helix`` runs the real
+    ``arbiter_core`` (vendored byte for byte, hash checked) behind an adapter
+    for the node's ROS glue, configured from HELIX's own ``arbiter.yaml``.
+    Parity with the running ``arbiter_node`` is recorded in docs/parity/.
 
-    * ``helix_arbiter``: the policies of HELIX ``helix_arbiter/arbiter_core.py``
-      (P1-P9 in HELIX docs/MOTION_ARBITRATION.md): the hold state dominates
-      every source, a stale or missing hold state forces zero, non-finite or
-      over-limit input is rejected and discards that source's previous
-      command, a hold transition discards every stored command, the output
-      is published on a fixed timer and is zero when no fresh source exists.
-      Freshness uses the arbiter's receipt clock (P10). This is a model of
-      the documented policy, not the HELIX code; ``tests/unit/lab/
-      test_helix_parity.py`` compares it decision by decision against the
-      HELIX module when a HELIX checkout is available.
-    * ``twist_mux_legacy``: the behaviour measured on the real twist_mux
-      4.3.0 binary and recorded in HELIX docs/MOTION_ARBITRATION.md: HELIX's
-      stop is a zero-twist input at priority 100 below teleop at 200; NaN is
-      forwarded; the output is published only from an input callback, so
-      when every input goes stale nothing is published. The robot-facing
-      consumer keeps its last command (same document), which the model
-      represents as a sink that holds the last published command.
+``twist_mux_legacy`` (reference)
+    A model of ``twist_mux`` 4.3.0 (C++; a ROS node with its own clock, so it
+    cannot be run inside a deterministic replay), configured from HELIX's own
+    ``twist_mux.yaml``. It follows the 4.3.0 source: a message is published
+    from its input callback only when its input is the highest-priority
+    unexpired one (ties go to the alphabetically first input name, as measured
+    on the binary); nothing is ever published on a timer, so when every input
+    is stale the output is silent; NaN passes through unchanged. Parity with
+    the real binary is recorded in docs/parity/.
 
-    ``freshness_clock: source_timestamp`` is a counterfactual override that
-    judges source freshness by the publisher's DDS source timestamp against
-    the arbiter host's wall clock (what a stamp-based freshness check does).
-    HELIX P10 rejects exactly this; the override exists to show why.
+    HELIX's STOP enters this path as a zero Twist on /helix/cmd_vel, which
+    the recovery node publishes right after each hold=true message
+    (recovery_node.py ``_on_publish_tick``). When the evidence recorded
+    /helix/cmd_vel, those messages are used. When it did not (the go2
+    profiles do not record it), they are derived from the hold=true messages
+    in exactly that way, and the result says so.
+
+    What the robot does when twist_mux goes silent is not decided by twist_mux.
+    The model reports the command the robot-facing consumer would still hold
+    IF it retains its last command; that is an assumption about the consumer
+    (see docs/ARBITER_PARITY.md), and every legacy result carries it.
+
+    ``freshness_clock: source_timestamp`` (helix_arbiter only) is a
+    counterfactual that judges source freshness by the publisher's DDS source
+    timestamp. HELIX P10 rejects exactly this; the override exists to show why.
 
 Everything is on integer nanoseconds of the replay clock. The caller
 supplies time on every call; nothing here reads a clock.
@@ -43,7 +47,7 @@ supplies time on every call; nothing here reads a clock.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from blackboxrs.lab.events import ReplayEvent
@@ -86,18 +90,16 @@ class SourceSpec:
 class ArbiterConfig:
     preset: str
     sources: tuple[SourceSpec, ...]
+    config_file: str
+    config_sha256: str
     hold_topic: str = "/helix/hold"
     hold_timeout_s: float = 0.5
     period_s: float = 0.02
     max_abs_linear: float = 1.0
     max_abs_angular: float = 1.5
-    # semantics
-    stop_mode: str = "state"            # state: hold dominates | source: zero-twist input
-    stop_priority: int = 100
-    stop_timeout_s: float = 0.5
-    nonfinite: str = "reject"           # reject | forward
-    publish: str = "timer"              # timer | on_input
-    freshness_clock: str = "receipt"    # receipt | source_timestamp
+    freshness_clock: str = "receipt"    # receipt | source_timestamp (helix_arbiter only)
+    recovery_topic: str = ""            # twist_mux_legacy: HELIX's zero-twist input
+    consumer_assumption: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -105,45 +107,82 @@ class ArbiterConfig:
         return d
 
 
-HELIX_SOURCES = (SourceSpec("teleop", "/teleop/cmd_vel", 200, 0.5),
-                 SourceSpec("nav", "/nav/cmd_vel", 50, 0.5))
+def _vendor(name: str) -> tuple[dict[str, Any], str, str]:
+    import hashlib
 
-PRESETS: dict[str, ArbiterConfig] = {
-    # HELIX src/helix_arbiter/config/arbiter.yaml: teleop 200, nav 50, 0.5 s,
-    # hold_timeout 0.5 s, 50 Hz timer, limits 1.0 m/s and 1.5 rad/s.
-    "helix_arbiter": ArbiterConfig(preset="helix_arbiter", sources=HELIX_SOURCES),
-    # HELIX config/twist_mux.yaml: teleop 200 > helix_recovery 100 > navigation 50.
-    "twist_mux_legacy": ArbiterConfig(
-        preset="twist_mux_legacy", sources=HELIX_SOURCES, stop_mode="source",
-        stop_priority=100, stop_timeout_s=0.5, nonfinite="forward", publish="on_input"),
-}
+    import yaml
 
-_OVERRIDABLE = {"sources", "hold_topic", "hold_timeout_s", "period_s", "max_abs_linear",
-                "max_abs_angular", "stop_priority", "stop_timeout_s", "freshness_clock"}
+    from blackboxrs.lab.helix import VENDOR, provenance
+    path = VENDOR / name
+    data = path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    want = provenance()["files"][name]["sha256"]
+    if digest != want:
+        raise ValueError(f"{path}: sha256 {digest} is not the pinned HELIX config {want}")
+    return yaml.safe_load(data), provenance()["files"][name]["path"], digest
+
+
+def _helix_preset() -> ArbiterConfig:
+    raw, path, digest = _vendor("arbiter.yaml")
+    p = raw["helix_arbiter"]["ros__parameters"]
+    return ArbiterConfig(
+        preset="helix_arbiter",
+        sources=tuple(SourceSpec(n, str(c["topic"]), int(c["priority"]), float(c["timeout"]))
+                      for n, c in sorted(p["sources"].items())),
+        config_file=path, config_sha256=digest, hold_topic=str(p["hold_topic"]),
+        hold_timeout_s=float(p["hold_timeout_sec"]), period_s=1.0 / float(p["rate_hz"]),
+        max_abs_linear=float(p["max_abs_linear"]), max_abs_angular=float(p["max_abs_angular"]))
+
+
+def _twist_mux_preset() -> ArbiterConfig:
+    raw, path, digest = _vendor("twist_mux.yaml")
+    p = raw["twist_mux"]["ros__parameters"]
+    for name, lock in (p.get("locks") or {}).items():
+        # a lock with timeout 0 never expires and, never published, never locks;
+        # with priority 0 it could not mask any input anyway
+        if float(lock["timeout"]) != 0.0 or int(lock["priority"]) != 0:
+            raise ValueError(f"twist_mux lock {name!r} is active; locks are not modeled")
+    srcs = tuple(SourceSpec(n, str(c["topic"]), max(0, min(255, int(c["priority"]))),
+                            float(c["timeout"])) for n, c in sorted(p["topics"].items()))
+    recovery = next((s.topic for s in srcs if s.name == "helix_recovery"), "")
+    return ArbiterConfig(
+        preset="twist_mux_legacy", sources=srcs, config_file=path, config_sha256=digest,
+        recovery_topic=recovery,
+        consumer_assumption=("UNVERIFIED: the robot-facing consumer keeps executing the last "
+                             "command twist_mux published; twist_mux itself publishes nothing "
+                             "when every input is stale"))
+
+
+PRESETS = {"helix_arbiter": _helix_preset, "twist_mux_legacy": _twist_mux_preset}
+
+_OVERRIDABLE = {"helix_arbiter": {"sources", "hold_topic", "hold_timeout_s", "max_abs_linear",
+                                  "max_abs_angular", "freshness_clock"},
+                "twist_mux_legacy": {"sources"}}
 
 
 def build_config(preset: str, overrides: dict[str, Any] | None = None) -> ArbiterConfig:
     if preset not in PRESETS:
         raise ValueError(f"unknown preset {preset!r}; known: {sorted(PRESETS)}")
-    cfg = PRESETS[preset]
+    cfg = PRESETS[preset]()
     o = dict(overrides or {})
-    bad = sorted(set(o) - _OVERRIDABLE)
+    bad = sorted(set(o) - _OVERRIDABLE[preset])
     if bad:
-        raise ValueError(f"sut overrides: unknown or fixed keys {bad} "
-                         f"(overridable: {sorted(_OVERRIDABLE)})")
+        raise ValueError(f"sut overrides for {preset}: unknown or fixed keys {bad} "
+                         f"(overridable: {sorted(_OVERRIDABLE[preset])})")
     if "sources" in o:
         o["sources"] = tuple(SourceSpec(str(s["name"]), str(s["topic"]), int(s["priority"]),
                                         float(s["timeout_s"])) for s in o["sources"])
     if o.get("freshness_clock", "receipt") not in ("receipt", "source_timestamp"):
         raise ValueError("freshness_clock must be receipt or source_timestamp")
+    if o:
+        o["config_file"] = cfg.config_file + " (overridden)"
     cfg = replace(cfg, **o)
     names = [s.name for s in cfg.sources]
     if not cfg.sources or len(set(names)) != len(names):
         raise ValueError(f"sources must be non-empty with unique names: {names}")
     if any(s.timeout_s <= 0 for s in cfg.sources) or cfg.hold_timeout_s <= 0:
-        raise ValueError("every timeout must be > 0")
-    if cfg.period_s <= 0:
-        raise ValueError("period_s must be > 0")
+        raise ValueError("every timeout must be > 0 (twist_mux timeout 0 = never expires "
+                         "is not modeled)")
     return cfg
 
 
@@ -184,190 +223,69 @@ def twist_of(data: dict[str, Any]) -> tuple[tuple[Any, Any, Any], tuple[Any, Any
     return lin, ang  # type: ignore[return-value]
 
 
-def _hold_fields(e: ReplayEvent) -> tuple[bool, str, int, int] | None:
-    d = e.data or {}
-    hold, epoch, seq = d.get("hold"), d.get("epoch"), d.get("seq")
-    if not isinstance(hold, bool):
-        return None
-    ok = all(isinstance(x, int) and not isinstance(x, bool) for x in (epoch, seq))
-    return hold, str(d.get("fault_id", "")), (epoch if ok else 0), (seq if ok else 0)
-
-
-# ---------------------------------------------------------------------------
-# reference model
-# ---------------------------------------------------------------------------
-
-
 @dataclass
-class _Slot:
+class _Input:
     spec: SourceSpec
+    raw: tuple[Any, ...] | None = None
     cmd: Command | None = None
-    raw: tuple[Any, ...] | None = None   # forwarded payload (legacy, may be non-finite)
     rx_ns: int | None = None
-    fresh_ref_ns: int | None = None      # time freshness is measured from
-    order: int = -1
     eid: str = ""
 
 
-@dataclass
-class _Hold:
-    hold: bool
-    fault_id: str
-    epoch: int
-    seq: int
-    rx_ns: int
-    eid: str
+class TwistMuxModel:
+    """twist_mux 4.3.0 on HELIX's twist_mux.yaml (see the module docstring)."""
 
+    implementation = "twist_mux 4.3.0 model (C++ binary not executable in replay)"
 
-@dataclass
-class ReferenceArbiter:
-    cfg: ArbiterConfig
-    wall0_ns: int = 0                    # arbiter host wall clock at replay t=0
-    slots: dict[str, _Slot] = field(default_factory=dict)
-    counters: dict[str, int] = field(default_factory=lambda: {
-        "rejected": 0, "hold_reordered": 0, "hold_transitions": 0, "hold_malformed": 0,
-        "published": 0})
-
-    def __post_init__(self) -> None:
-        self.slots = {s.name: _Slot(s) for s in self.cfg.sources}
-        if self.cfg.stop_mode == "source":
-            spec = SourceSpec("helix_recovery", self.cfg.hold_topic, self.cfg.stop_priority,
-                              self.cfg.stop_timeout_s)
-            self.slots[spec.name] = _Slot(spec)
-        self._by_topic = {s.spec.topic: s for s in self.slots.values()}
-        self._hold: _Hold | None = None
-        self._order = 0
+    def __init__(self, cfg: ArbiterConfig, *, derive_recovery_from_hold: bool = False) -> None:
+        self.cfg = cfg
+        self.derive = derive_recovery_from_hold and bool(cfg.recovery_topic)
+        # sorted by name: equal priorities go to the first name (measured)
+        self.inputs = {s.topic: _Input(s) for s in sorted(cfg.sources, key=lambda s: s.name)}
         self._sink: Command | None = None
         self._sink_raw: tuple[Any, ...] | None = None
         self._sink_eid = ""
-        self._pending_pub = ""
-        self._published_now = False
-        self._rejected = ""
-
-    # -- inputs --------------------------------------------------------------
-
-    @property
-    def input_topics(self) -> set[str]:
-        return set(self._by_topic) | {self.cfg.hold_topic}
-
-    def _fresh_ref(self, e: ReplayEvent, t_ns: int) -> int:
-        if self.cfg.freshness_clock == "source_timestamp" and e.src_ns is not None:
-            # the publisher's clock mapped onto the replay clock through the
-            # arbiter host's wall clock: skew between the two hosts shifts it
-            return e.src_ns - self.wall0_ns
-        return t_ns
+        self._pending = ""
+        self.published = 0
+        self.derived = 0
 
     def on_event(self, e: ReplayEvent, t_ns: int) -> None:
         if e.kind != "msg":
             return
-        if e.topic == self.cfg.hold_topic:
-            self._on_hold(e, t_ns)
-            if self.cfg.stop_mode != "source":
-                return
-        slot = self._by_topic.get(e.topic or "")
-        if slot is None:
+        if self.derive and e.topic == self.cfg.hold_topic:
+            if e.data is not None and e.data.get("hold") is True:
+                # recovery_node publishes Twist() on /helix/cmd_vel after each hold=true
+                self.derived += 1
+                self._input(self.inputs[self.cfg.recovery_topic],
+                            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0), e.eid, t_ns)
+            return
+        inp = self.inputs.get(e.topic or "")
+        if inp is None:
             return
         if e.data is None:
-            raise EvidenceError(f"{e.eid} on {e.topic}: payload not stored; the reference "
-                                "arbiter cannot replay a command it cannot read")
-        if slot.spec.name == "helix_recovery":
-            fields = _hold_fields(e)
-            if fields is None or not fields[0]:
-                return   # only an asserted hold is a zero-twist input on this path
-            lin, ang = (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
-        else:
-            lin, ang = twist_of(e.data)
-        self._on_source(slot, lin, ang, e, t_ns)
+            raise EvidenceError(f"{e.eid} on {e.topic}: payload not stored; the model cannot "
+                                "replay a command it cannot read")
+        lin, ang = twist_of(e.data)
+        self._input(inp, (*lin, *ang), e.eid, t_ns)
 
-    def _on_source(self, slot: _Slot, lin, ang, e: ReplayEvent, t_ns: int) -> None:
-        nums = [as_number(v) for v in (*lin, *ang)]
-        bad = any(p for _, p in nums)
-        if self.cfg.nonfinite == "reject":
-            if bad or not self._within_limits(nums):
-                slot.cmd = slot.raw = None      # P4: never fall back to an older value
-                slot.rx_ns = slot.fresh_ref_ns = None
-                self.counters["rejected"] += 1
-                self._rejected = e.eid
-                return
-            cmd = Command(nums[0][0] + 0.0, nums[1][0] + 0.0, nums[5][0] + 0.0)
-            raw = tuple(cmd.as_list())
-        else:
-            # twist_mux forwards the payload unchanged, NaN and garbage included
-            cmd = None if bad else Command(nums[0][0] + 0.0, nums[1][0] + 0.0, nums[5][0] + 0.0)
-            raw = (lin[0], lin[1], ang[2])
-        self._order += 1
-        slot.cmd, slot.raw, slot.rx_ns, slot.order, slot.eid = cmd, raw, t_ns, self._order, e.eid
-        slot.fresh_ref_ns = self._fresh_ref(e, t_ns)
-        if self.cfg.publish == "on_input":
-            win = self._winner(t_ns)
-            if win is slot:
-                self._publish(slot.cmd, slot.raw, e.eid)
+    def _input(self, inp: _Input, v: tuple[Any, ...], eid: str, t_ns: int) -> None:
+        nums = [as_number(x) for x in v]
+        inp.raw = (v[0], v[1], v[5])   # forwarded unchanged: NaN and garbage included
+        inp.cmd = (None if any(p for _, p in nums)
+                   else Command(nums[0][0] + 0.0, nums[1][0] + 0.0, nums[5][0] + 0.0))
+        inp.rx_ns, inp.eid = t_ns, eid
+        if self._winner(t_ns) is inp:      # VelocityTopicHandle::callback + hasPriority
+            self._sink, self._sink_raw, self._sink_eid = inp.cmd, inp.raw, eid
+            self._pending = eid
+            self.published += 1
 
-    def _within_limits(self, nums) -> bool:
-        lx, ly, wz = nums[0][0], nums[1][0], nums[5][0]
-        return (abs(lx) <= self.cfg.max_abs_linear and abs(ly) <= self.cfg.max_abs_linear
-                and abs(wz) <= self.cfg.max_abs_angular)
-
-    def _on_hold(self, e: ReplayEvent, t_ns: int) -> None:
-        if e.data is None:
-            raise EvidenceError(f"{e.eid} on {e.topic}: hold payload not stored")
-        fields = _hold_fields(e)
-        if fields is None:
-            self.counters["hold_malformed"] += 1
-            return
-        if self.cfg.stop_mode == "source":
-            return   # legacy path: the hold only feeds the zero-twist input
-        hold, fid, epoch, seq = fields
-        cur = self._hold
-        if cur is not None and self._hold_fresh(t_ns) and (epoch, seq) <= (cur.epoch, cur.seq):
-            self.counters["hold_reordered"] += 1     # P8
-            return
-        before = self._effective_hold(t_ns)
-        self._hold = _Hold(hold, fid, epoch, seq, t_ns, e.eid)
-        if self._effective_hold(t_ns) != before:
-            self._clear()                             # P7
-            self.counters["hold_transitions"] += 1
-
-    # -- decision ------------------------------------------------------------
-
-    def _hold_fresh(self, t_ns: int) -> bool:
-        return (self._hold is not None
-                and t_ns - self._hold.rx_ns <= int(round(self.cfg.hold_timeout_s * NS)))
-
-    def _effective_hold(self, t_ns: int) -> bool:
-        return self._hold is None or not self._hold_fresh(t_ns) or self._hold.hold
-
-    def _clear(self) -> None:
-        for s in self.slots.values():
-            s.cmd = s.raw = None
-            s.rx_ns = s.fresh_ref_ns = None
-
-    def _fresh(self, s: _Slot, t_ns: int) -> bool:
-        if s.raw is None or s.fresh_ref_ns is None:
-            return False
-        return t_ns - s.fresh_ref_ns <= int(round(s.spec.timeout_s * NS))
-
-    def _winner(self, t_ns: int) -> _Slot | None:
-        live = [s for s in self.slots.values() if self._fresh(s, t_ns)]
-        if not live:
-            return None
-        return max(live, key=lambda s: (s.spec.priority, s.order))
-
-    def _publish(self, cmd: Command | None, raw: tuple[Any, ...] | None,
-                 eid: str = "") -> None:
-        self._sink, self._sink_raw, self._sink_eid = cmd, raw, eid
-        self._published_now = True
-        self.counters["published"] += 1
-        if eid:
-            self._pending_pub = eid
+    def _winner(self, t_ns: int) -> _Input | None:
+        live = [i for i in self.inputs.values() if i.rx_ns is not None
+                and t_ns - i.rx_ns <= int(round(i.spec.timeout_s * NS))]   # hasExpired: >
+        return max(live, key=lambda i: i.spec.priority) if live else None  # first max wins
 
     def take_publication(self, t_ns: int) -> Decision | None:
-        """A command published from an input callback at ``t_ns``, if any.
-
-        Only the callback (``on_input``) publisher puts commands on the robot
-        between ticks; the timer publisher decides at ticks only.
-        """
-        eid, self._pending_pub = self._pending_pub, ""
+        eid, self._pending = self._pending, ""
         if not eid:
             return None
         win = self._winner(t_ns)
@@ -375,45 +293,19 @@ class ReferenceArbiter:
                         self._sink_raw, True, None, eid)
 
     def tick(self, t_ns: int) -> Decision:
-        rejected, self._rejected = self._rejected, ""
-        if self.cfg.stop_mode == "state":
-            return self._tick_state(t_ns, rejected)
-        return self._tick_source(t_ns)
-
-    def _tick_state(self, t_ns: int, cause: str) -> Decision:
-        # The decision's cause is the input that determines it: the winning
-        # source's message, the hold message, a just-rejected message, or
-        # the clock (a timeout, or nothing received yet).
-        if self._effective_hold(t_ns):
-            self._clear()
-        hold = None if self._hold is None else self._hold.hold
-        if self._hold is None:
-            reason, src, cmd, why = REASON_MISSING, "", ZERO, "clock"
-        elif not self._hold_fresh(t_ns):
-            reason, src, cmd, why = REASON_STALE, "", ZERO, "clock"
-        elif self._hold.hold:
-            reason, src, cmd, why = REASON_HOLD, "", ZERO, self._hold.eid
-        else:
-            win = self._winner(t_ns)
-            if win is None:
-                reason, src, cmd, why = REASON_NO_INPUT, "", ZERO, cause or "clock"
-            else:
-                reason, src, cmd, why = REASON_SOURCE, win.spec.name, win.cmd, win.eid
-        self._publish(cmd, tuple(cmd.as_list()))
-        self._published_now = False
-        return Decision(t_ns, reason, src, cmd, tuple(cmd.as_list()), True, hold, why)
-
-    def _tick_source(self, t_ns: int) -> Decision:
+        """No publication happens here; this samples what the consumer holds."""
         win = self._winner(t_ns)
-        published, self._published_now = self._published_now, False
         reason = REASON_SOURCE if win is not None else REASON_SILENT
         return Decision(t_ns, reason, "" if win is None else win.spec.name, self._sink,
-                        self._sink_raw, published, None,
-                        (self._sink_eid or "clock") if published or win is not None
-                        else "clock")
+                        self._sink_raw, False, None,
+                        (self._sink_eid or "clock") if win is not None else "clock")
 
     def state(self) -> dict[str, Any]:
-        return {"counters": dict(self.counters)}
+        return {"implementation": self.implementation,
+                "config": {"file": self.cfg.config_file, "sha256": self.cfg.config_sha256},
+                "published": self.published,
+                "recovery_zero_twists_derived_from_hold": self.derived,
+                "consumer_assumption": self.cfg.consumer_assumption}
 
 
 # ---------------------------------------------------------------------------

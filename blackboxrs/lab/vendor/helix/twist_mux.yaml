@@ -1,0 +1,46 @@
+# LEGACY twist_mux configuration (enable_twist_mux:=true only; the default
+# motion path is helix_arbiter, see docs/MOTION_ARBITRATION.md).
+#
+# Wiring (highest priority wins when multiple topics publish within timeout):
+#   /teleop/cmd_vel  (priority 200)  operator override, always wins
+#   /helix/cmd_vel   (priority 100)  HELIX recovery (zero-twist STOP_AND_HOLD)
+#   /nav/cmd_vel     (priority  50)  autonomy / planner output
+#
+# Output topic is `cmd_vel` (remapped from the upstream default `cmd_vel_out`
+# in `helix_closedloop.launch.py`). The Isaac Sim bridge consumes `/cmd_vel`.
+# A stock GO2 has NO `/cmd_vel` consumer (docs/GO2_FIELD_NOTES.md section 3).
+#
+# Timeout behavior: each input has a `timeout`. If no message arrives within
+# that window, twist_mux discards it from arbitration and falls through to
+# the next-highest live input. CORRECTION (2026-09-17, measured against the
+# real twist_mux 4.3.0 binary): if every input is stale, twist_mux publishes
+# NOTHING (it is event-driven), it does NOT publish zero. A lock also silences
+# the output rather than publishing zero, and NaN is forwarded unchanged. The
+# downstream consumer keeps its last command. twist_mux is not a safety layer.
+#
+# /helix/cmd_vel sits BELOW /teleop/cmd_vel, so a live teleop stream defeats
+# a HELIX STOP_AND_HOLD on this path. The arbiter path does not have that gap.
+twist_mux:
+  ros__parameters:
+    topics:
+      teleop:
+        topic:    /teleop/cmd_vel
+        timeout:  0.5
+        priority: 200
+      helix_recovery:
+        topic:    /helix/cmd_vel
+        timeout:  0.5
+        priority: 100
+      navigation:
+        topic:    /nav/cmd_vel
+        timeout:  0.5
+        priority: 50
+    # No active locks defined. We declare a single dummy lock with timeout 0.0
+    # (twist_mux requires the `locks` parameter to be populated, an empty map
+    # raises rclcpp::exceptions::InvalidParameterValueException at startup).
+    # priority 0 means this lock can never preempt any input.
+    locks:
+      unused:
+        topic:    /helix/_twist_mux_unused_lock
+        timeout:  0.0
+        priority: 0

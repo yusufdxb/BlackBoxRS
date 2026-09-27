@@ -29,7 +29,8 @@ from blackboxrs.lab.monitors import (
     OdometryConsistency,
     StopDominance,
 )
-from blackboxrs.lab.sut import ArbiterConfig, ObservedOutput, ReferenceArbiter, build_config
+from blackboxrs.lab.helix import HelixArbiterAdapter
+from blackboxrs.lab.sut import ArbiterConfig, ObservedOutput, TwistMuxModel, build_config
 from blackboxrs.lab.timeline import Timeline
 from blackboxrs.lab.transport import analyze_delivered
 from blackboxrs.lab.values import NS, digest, jsonable
@@ -136,9 +137,16 @@ def replay(ev: Evidence, cfg: ReplayConfig, *, pacer: Pacer | None = None,
             else:
                 kept.append(e)
         events = kept
-        sut: Any = ReferenceArbiter(arb_cfg, wall0_ns=wall0)
+        if arb_cfg.preset == "helix_arbiter":
+            sut: Any = HelixArbiterAdapter(arb_cfg, wall0_ns=wall0)
+        else:
+            # the recovery node's zero twists, unless the evidence recorded them
+            has_recovery = any(e.kind == "msg" and e.topic == arb_cfg.recovery_topic
+                               for e in events)
+            sut = TwistMuxModel(arb_cfg, derive_recovery_from_hold=not has_recovery)
         period = int(round(arb_cfg.period_s * NS))
-        sources = {s.topic: s.timeout_s for s in arb_cfg.sources}
+        sources = {s.topic: s.timeout_s for s in arb_cfg.sources
+                   if s.topic != arb_cfg.recovery_topic}
     else:
         sut = ObservedOutput(by_role)
         period = int(round(cfg.observed_period_s * NS))
@@ -280,7 +288,7 @@ def replay(ev: Evidence, cfg: ReplayConfig, *, pacer: Pacer | None = None,
     if hold_topics and not seen_topics & hold_topics and recorded_hold_at:
         incomplete(output_invariants,
                    "the evidence has hold messages but none reached the system under test")
-    if arb_cfg is not None and arb_cfg.stop_mode == "state" and \
+    if arb_cfg is not None and arb_cfg.preset == "helix_arbiter" and \
             arb_cfg.hold_topic not in seen_topics:
         incomplete(output_invariants,
                    f"no {arb_cfg.hold_topic} message in the replay: the model holds zero "

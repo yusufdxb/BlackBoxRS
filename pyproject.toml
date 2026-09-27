@@ -75,10 +75,14 @@ include = ["blackboxrs*"]
 
 [tool.setuptools.package-data]
 "blackboxrs.flight" = ["profiles/*.yaml"]
+# HELIX files executed or read by Replay Lab, byte-identical to HELIX (see PROVENANCE.json)
+"blackboxrs.lab.vendor" = ["helix/*.py", "helix/*.yaml", "helix/*.json", "helix/LICENSE"]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+# Vendored third-party files are pinned by SHA-256; never reformat them.
+extend-exclude = ["blackboxrs/lab/vendor/helix"]
 
 # Pytest configuration lives in pytest.ini so the test path stays
 # robust when /opt/ros/<distro>/setup.bash has been sourced (we have to

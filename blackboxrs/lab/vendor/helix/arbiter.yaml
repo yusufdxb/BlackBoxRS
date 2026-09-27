@@ -1,0 +1,26 @@
+# helix_arbiter: the single authoritative velocity output of the HELIX stack.
+# Policies are documented in docs/MOTION_ARBITRATION.md.
+#
+# HELIX is NOT a source here. It enters through hold_topic (/helix/hold) and
+# forces the output to zero whenever the hold is asserted, stale, or missing.
+# No source priority can override that. To move the robot, recovery must be
+# active and not holding.
+helix_arbiter:
+  ros__parameters:
+    output_topic: /cmd_vel
+    status_topic: /helix/arbiter/status
+    hold_topic: /helix/hold
+    rate_hz: 50.0
+    hold_timeout_sec: 0.5        # recovery publishes at 20 Hz: 10 missed = stale
+    max_abs_linear: 1.0          # m/s; larger commands are rejected, not clamped
+    max_abs_angular: 1.5         # rad/s
+    shutdown_zero_count: 10
+    sources:
+      teleop:
+        topic: /teleop/cmd_vel
+        priority: 200
+        timeout: 0.5
+      nav:
+        topic: /nav/cmd_vel
+        priority: 50
+        timeout: 0.5

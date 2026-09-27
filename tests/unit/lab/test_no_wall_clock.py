@@ -22,7 +22,8 @@ def _modules() -> list[Path]:
     # the flight modules the replay drives: recorder core, feeder, analyzer, records, profile
     reused = [flight / n for n in ("core.py", "replay.py", "analysis.py", "records.py",
                                    "profile.py")]
-    return sorted(pkg.glob("*.py")) + reused
+    # the vendored HELIX arbiter the replay executes
+    return sorted(pkg.glob("*.py")) + sorted((pkg / "vendor" / "helix").glob("*.py")) + reused
 
 
 def _imports(tree: ast.AST) -> list[tuple[str, str, int]]:

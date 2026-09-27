@@ -88,7 +88,8 @@ def test_teleop_beats_stop_only_on_the_legacy_path():
 def test_stop_loses_arbitration_when_its_input_goes_quiet():
     res = run("stop_loses_arbitration__twist_mux_legacy")
     v = next(f for f in res["findings"] if f["kind"] == "stop_violated")
-    assert v["data"]["winner"] == "nav" and 3.9 < v["t_s"] < 4.0
+    # "navigation": the source name in HELIX twist_mux.yaml
+    assert v["data"]["winner"] == "navigation" and 3.9 < v["t_s"] < 4.0
     good = run("stop_loses_arbitration__helix_arbiter")
     reasons = [e["text"] for e in good["timeline"] if e["layer"] == "decision"]
     assert any("HELIX_STATE_STALE" in r for r in reasons)

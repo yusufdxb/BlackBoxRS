@@ -1,0 +1,36 @@
+{
+  "what": "HELIX files Replay Lab executes (arbiter_core.py) or reads as configuration (the YAML files), copied byte for byte",
+  "repository": "https://github.com/yusufdxb/helix",
+  "branch": "feat/motion-arbitration-hw-closure",
+  "commit": "b31a9ce8b49cd5f282b02c8dc5ee6d25287bb186",
+  "identical_at": {
+    "7d5bc14": "arbiter introduced",
+    "5f474e5": "commit built and run on the GO2 payload computer, 2026-09-18 no-motion session",
+    "b31a9ce": "branch tip"
+  },
+  "files": {
+    "arbiter_core.py": {
+      "path": "src/helix_arbiter/helix_arbiter/arbiter_core.py",
+      "sha256": "4ca399f486daae8b2efb961c9b0769d2bb53cc4abdd6e2e07fd123861fc0022c"
+    },
+    "arbiter.yaml": {
+      "path": "src/helix_arbiter/config/arbiter.yaml",
+      "sha256": "bdd549a9b95dd71bf7985b0346496774c6225c3daf2a26567fe07a2149218851"
+    },
+    "twist_mux.yaml": {
+      "path": "src/helix_bringup/config/twist_mux.yaml",
+      "sha256": "517d948b3a69c3425e91bdcffe518ff9cf503ac109a2135e83b2edc50c048537"
+    }
+  },
+  "not_vendored": {
+    "src/helix_arbiter/helix_arbiter/arbiter_node.py": {
+      "sha256": "7acf292d75308d1a63896e11320057463b3c9a55f9e65d154996074ff21e6695",
+      "why": "needs rclpy and helix_msgs; its decision-relevant glue is reproduced in blackboxrs/lab/helix.py and checked against the running node (docs/parity/helix_arbiter_node.json)"
+    },
+    "src/helix_recovery/helix_recovery/recovery_node.py": {
+      "sha256": "cb0b60991582a5c2ac3d36df482e320b07d02bf602c57c6b0ae031d3175539b2",
+      "why": "source of the 20 Hz hold state and, on the legacy path, the zero Twist on /helix/cmd_vel after each hold=true"
+    }
+  },
+  "license": "MIT (LICENSE in this directory)"
+}
