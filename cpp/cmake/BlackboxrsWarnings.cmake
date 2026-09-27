@@ -8,8 +8,9 @@ function(blackboxrs_set_warnings target)
       -Woverloaded-virtual -Wnull-dereference -Wdouble-promotion
       -Wformat=2 -Wimplicit-fallthrough)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    list(APPEND _common -Wduplicated-cond -Wduplicated-branches -Wlogical-op
-         -Wuseless-cast)
+    # -Wuseless-cast is left out on purpose: it flags casts that are no-ops on
+    # x86_64 but required on other targets (int64_t -> time_t, long, ...).
+    list(APPEND _common -Wduplicated-cond -Wduplicated-branches -Wlogical-op)
   endif()
   target_compile_options(${target} PRIVATE ${_common})
   if(BLACKBOXRS_WERROR)

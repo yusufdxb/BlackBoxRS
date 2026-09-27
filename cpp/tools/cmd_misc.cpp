@@ -16,12 +16,6 @@ int cmd_version(const Argv& argv) {
   return 0;
 }
 
-int cmd_inspect(const Argv&) {
-  throw UsageError("inspect: not built yet");
-}
-int cmd_validate(const Argv&) {
-  throw UsageError("validate: not built yet");
-}
 int cmd_benchmark(const Argv&) {
   throw UsageError("benchmark: not built yet");
 }

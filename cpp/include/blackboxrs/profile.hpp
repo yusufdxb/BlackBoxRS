@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "blackboxrs/json.hpp"
 #include "blackboxrs/role.hpp"
 
 namespace blackboxrs {
@@ -47,6 +48,20 @@ struct SamplingSpec {
   double health_tick_sec = 0.25;
 };
 
+struct StopCriteria {
+  double stopped_speed_mps = 0.03;
+  double stop_deadline_sec = 1.5;
+  double moving_speed_mps = 0.05;
+  double pose_speed_baseline_sec = 0.05;
+};
+
+struct PreflightSpec {
+  double listen_sec = 3.0;
+  std::optional<std::string> expect_rmw;
+  double max_recorder_cpu_percent = 50.0;
+  double max_recorder_rss_mb = 500.0;
+};
+
 struct TriggerSpec {
   bool helix_hold_asserted = true;
   bool recovery_action_stop = true;
@@ -71,7 +86,9 @@ struct Profile {
   std::int64_t min_free_disk_mb = 2048;
   BufferSpec buffer;
   SamplingSpec sampling;
+  StopCriteria stop;
   TriggerSpec triggers;
+  PreflightSpec preflight;
   std::vector<std::string> co_hosted_roles;
   std::vector<std::string> expected_nodes;
 
@@ -80,5 +97,15 @@ struct Profile {
 
 // Parse profile YAML text. Throws ProfileError with the offending key.
 [[nodiscard]] Profile parse_profile_text(const std::string& text);
+
+// Load a profile file. `extends: <name>` is resolved against <name>.yaml in
+// the same directory (Python flight.profile._resolve_extends rules: top-level
+// keys replace the base's, exclude_topics removes base topics, topics
+// appends). The embedded text of a resolved profile is the YAML the resolver
+// emits, so its hash is not the Python loader's hash for the same file.
+[[nodiscard]] Profile load_profile_file(const std::string& path);
+
+// The manifest's "profile" block (Python BundleWriter._write_manifest).
+[[nodiscard]] Json profile_manifest_block(const Profile& p, const std::string& source);
 
 }  // namespace blackboxrs

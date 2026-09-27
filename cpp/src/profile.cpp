@@ -2,7 +2,11 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <set>
+#include <sstream>
 
 #include "blackboxrs/integrity.hpp"
 
@@ -182,6 +186,22 @@ Profile parse_profile_text(const std::string& text) {
     p.sampling.health_tick_sec =
         positive_or(s, "health_tick_sec", "sampling.health_tick_sec", 0.25);
 
+    const YAML::Node sc =
+        raw["stop_criteria"] ? raw["stop_criteria"] : YAML::Node(YAML::NodeType::Map);
+    p.stop.stopped_speed_mps = positive_or(sc, "stopped_speed_mps", "stopped_speed_mps", 0.03);
+    p.stop.stop_deadline_sec = positive_or(sc, "stop_deadline_sec", "stop_deadline_sec", 1.5);
+    p.stop.moving_speed_mps = positive_or(sc, "moving_speed_mps", "moving_speed_mps", 0.05);
+    p.stop.pose_speed_baseline_sec =
+        positive_or(sc, "pose_speed_baseline_sec", "pose_speed_baseline_sec", 0.05);
+    const YAML::Node pf = raw["preflight"] ? raw["preflight"] : YAML::Node(YAML::NodeType::Map);
+    p.preflight.listen_sec = positive_or(pf, "listen_sec", "preflight.listen_sec", 3.0);
+    if (pf["expect_rmw"] && !pf["expect_rmw"].IsNull()) {
+      p.preflight.expect_rmw = pf["expect_rmw"].as<std::string>();
+    }
+    p.preflight.max_recorder_cpu_percent =
+        positive_or(pf, "max_recorder_cpu_percent", "preflight.max_recorder_cpu_percent", 50.0);
+    p.preflight.max_recorder_rss_mb =
+        positive_or(pf, "max_recorder_rss_mb", "preflight.max_recorder_rss_mb", 500.0);
     const YAML::Node tr = raw["triggers"] ? raw["triggers"] : YAML::Node(YAML::NodeType::Map);
     const TriggerSpec defaults;
     p.triggers.helix_hold_asserted = flag(tr["helix_hold_asserted"], true, nullptr);
@@ -204,7 +224,7 @@ Profile parse_profile_text(const std::string& text) {
     if (tr["max_incidents_per_run"]) {
       p.triggers.max_incidents_per_run = tr["max_incidents_per_run"].as<std::int64_t>();
     }
-    p.name = str_or(raw, "profile", "profile");
+    p.name = str_or(raw, "profile", "<bundle>");
     p.description = str_or(raw, "description", "");
     p.evidence_dir = str_or(raw, "evidence_dir", "~/blackboxrs_evidence");
     if (raw["min_free_disk_mb"]) {
@@ -216,6 +236,145 @@ Profile parse_profile_text(const std::string& text) {
     throw ProfileError(std::string("profile: ") + exc.what());
   }
   return p;
+}
+
+namespace {
+
+YAML::Node load_yaml_file(const std::string& path) {
+  try {
+    return YAML::LoadFile(path);
+  } catch (const YAML::Exception& exc) {
+    throw ProfileError(path + ": invalid YAML: " + exc.what());
+  }
+}
+
+std::string resolve_base(const std::string& base, const std::string& from) {
+  namespace fs = std::filesystem;
+  const fs::path sibling = fs::path(from).parent_path() / (base + ".yaml");
+  if (fs::is_regular_file(sibling)) {
+    return sibling.string();
+  }
+  if (fs::is_regular_file(base)) {
+    return base;
+  }
+  throw ProfileError("profile '" + base + "' not found next to " + from);
+}
+
+YAML::Node resolve_extends(YAML::Node raw, const std::string& path, int depth) {
+  if (!raw.IsMap() || !raw["extends"] || raw["extends"].IsNull()) {
+    return raw;
+  }
+  if (depth > 3) {
+    throw ProfileError(path + ": extends chain too deep");
+  }
+  const std::string base_name = raw["extends"].as<std::string>();
+  const std::string base_path = resolve_base(base_name, path);
+  YAML::Node base = resolve_extends(load_yaml_file(base_path), base_path, depth + 1);
+  YAML::Node merged(YAML::NodeType::Map);
+  for (const auto& kv : base) {
+    merged[kv.first.as<std::string>()] = YAML::Clone(kv.second);
+  }
+  for (const auto& kv : raw) {
+    const std::string k = kv.first.as<std::string>();
+    if (k != "extends" && k != "exclude_topics" && k != "topics") {
+      merged[k] = YAML::Clone(kv.second);
+    }
+  }
+  std::set<std::string> drop;
+  if (raw["exclude_topics"]) {
+    for (const auto& t : raw["exclude_topics"]) {
+      drop.insert(t.as<std::string>());
+    }
+  }
+  std::set<std::string> names;
+  YAML::Node topics(YAML::NodeType::Sequence);
+  if (base["topics"]) {
+    for (const auto& t : base["topics"]) {
+      const std::string n = t["name"].as<std::string>();
+      names.insert(n);
+      if (drop.count(n) == 0U) {
+        topics.push_back(YAML::Clone(t));
+      }
+    }
+  }
+  for (const auto& d : drop) {
+    if (names.count(d) == 0U) {
+      throw ProfileError(path + ": exclude_topics not in " + base_name + ": " + d);
+    }
+  }
+  if (raw["topics"]) {
+    for (const auto& t : raw["topics"]) {
+      topics.push_back(YAML::Clone(t));
+    }
+  }
+  merged["topics"] = topics;
+  YAML::Node resolved(YAML::NodeType::Map);
+  resolved["base"] = base_name;
+  YAML::Node excluded(YAML::NodeType::Sequence);
+  for (const auto& d : drop) {
+    excluded.push_back(d);
+  }
+  resolved["excluded_topics"] = excluded;
+  merged["resolved_from"] = resolved;
+  return merged;
+}
+
+}  // namespace
+
+Profile load_profile_file(const std::string& path) {
+  std::ifstream in(path);
+  if (!in) {
+    throw ProfileError("profile " + path + " not found");
+  }
+  std::stringstream ss;
+  ss << in.rdbuf();
+  std::string text = ss.str();
+  YAML::Node raw;
+  try {
+    raw = YAML::Load(text);
+  } catch (const YAML::Exception& exc) {
+    throw ProfileError(path + ": invalid YAML: " + exc.what());
+  }
+  if (raw.IsMap() && raw["extends"] && !raw["extends"].IsNull()) {
+    YAML::Emitter out;
+    out << resolve_extends(raw, path, 0);
+    text = std::string(out.c_str()) + "\n";
+  }
+  return parse_profile_text(text);
+}
+
+namespace {
+std::vector<std::string> sorted(std::vector<std::string> v) {
+  std::sort(v.begin(), v.end());
+  return v;
+}
+}  // namespace
+
+Json profile_manifest_block(const Profile& p, const std::string& source) {
+  Json topics = Json::array();
+  for (const auto& t : p.topics) {
+    topics.push_back({{"name", t.name},
+                      {"type", t.type},
+                      {"role", std::string(role_name(t.role))},
+                      {"required", t.required},
+                      {"expected_hz", t.expected_hz ? Json(*t.expected_hz) : Json()},
+                      {"stale_after_sec", t.stale_after_sec ? Json(*t.stale_after_sec) : Json()},
+                      {"store_max_hz", t.store_max_hz ? Json(*t.store_max_hz) : Json()},
+                      {"fields", t.fields}});
+  }
+  return {{"name", p.name},
+          {"sha256", p.sha256},
+          {"source", source},
+          {"pre_trigger_sec", p.buffer.pre_trigger_sec},
+          {"post_trigger_sec", p.buffer.post_trigger_sec},
+          {"stop_criteria",
+           {{"stopped_speed_mps", p.stop.stopped_speed_mps},
+            {"stop_deadline_sec", p.stop.stop_deadline_sec},
+            {"moving_speed_mps", p.stop.moving_speed_mps},
+            {"pose_speed_baseline_sec", p.stop.pose_speed_baseline_sec}}},
+          {"co_hosted_roles", sorted(p.co_hosted_roles)},
+          {"text", p.text},
+          {"topics", topics}};
 }
 
 }  // namespace blackboxrs

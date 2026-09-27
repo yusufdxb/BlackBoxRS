@@ -74,6 +74,21 @@ FlightCore::FlightCore(Profile profile, SinkFactory factory, CanOpen can_open, C
 FlightCore::~FlightCore() = default;
 
 void FlightCore::ingest(Record rec) {
+  if (options_.continuous && !session_started_) {
+    session_started_ = true;
+    Trigger start;
+    start.type = "recording_started";
+    start.t_mono = rec.t_mono;
+    start.t_wall = rec.t_wall;
+    fire(std::move(start));
+    // Nothing can close a continuous incident before shutdown. If it could
+    // not open (disk floor), stats().incidents_skipped says so and the
+    // recorder refuses to report the session as recording.
+    if (open_) {
+      open_->close_at_mono = INT64_MAX;
+      open_->hard_close_mono = INT64_MAX;
+    }
+  }
   rec.seq = ++seq_;
   ++stats_.records_in;
   std::optional<Record> jump = clock_jump(rec);
@@ -329,7 +344,9 @@ void FlightCore::fire(Trigger trig) {
   if (open_) {
     Open& o = *open_;
     ++o.triggers;
-    o.close_at_mono = std::min(std::max(o.close_at_mono, t + post_ns_), o.hard_close_mono);
+    if (!options_.continuous) {
+      o.close_at_mono = std::min(std::max(o.close_at_mono, t + post_ns_), o.hard_close_mono);
+    }
     trig.role = "secondary";
     o.sink->add_trigger(trig);
     ++stats_.triggers_attached;
@@ -390,7 +407,7 @@ void FlightCore::shutdown(const std::string& reason) {
     return;
   }
   Trigger t;
-  t.type = "recorder_shutdown";
+  t.type = options_.continuous ? "recording_stopped" : "recorder_shutdown";
   t.reason = reason;
   t.role = "note";
   t.seq = ++seq_;
@@ -399,7 +416,9 @@ void FlightCore::shutdown(const std::string& reason) {
     t.t_wall = ring_.back().record->t_wall;
   }
   open_->sink->add_trigger(t);
-  close("interrupted");
+  // Stopping ends a continuous capture normally; a triggered incident whose
+  // post-trigger window was cut short is interrupted.
+  close(options_.continuous ? "complete" : "interrupted");
 }
 
 Json FlightCore::stats_json() const {

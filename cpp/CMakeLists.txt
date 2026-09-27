@@ -48,6 +48,10 @@ add_library(blackboxrs_core
   src/evidence/bundle.cpp
   src/evidence/record.cpp
   src/recorder/flight_core.cpp
+  src/recorder/evidence_writer.cpp
+  src/recorder/recorder.cpp
+  src/recorder/system_sampler.cpp
+  src/evidence/integrity_record.cpp
   src/replay/faults.cpp
   src/replay/sut.cpp
   src/replay/monitors.cpp

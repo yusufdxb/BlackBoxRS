@@ -107,6 +107,11 @@ struct CoreOptions {
   // Serialize every record (the ring's byte cap needs the size, the writer
   // needs the line). A replay that only wants triggers can skip it.
   bool serialize = true;
+  // Continuous capture (a C++ runtime addition; the Python recorder only has
+  // triggered capture): one bundle opens with the first record (trigger
+  // "recording_started") and stays open until shutdown, which closes it as
+  // complete. Triggers still fire and are attached to it as secondary.
+  bool continuous = false;
 };
 
 class FlightCore {
@@ -178,6 +183,7 @@ class FlightCore {
   // trigger state
   std::optional<bool> hold_;
   bool arbiter_forced_ = false;
+  bool session_started_ = false;
   std::map<std::string, std::int64_t> last_rx_;
   std::set<std::string> stale_;
   std::vector<std::pair<std::string, std::int64_t>> stale_after_;  // profile order
