@@ -193,7 +193,11 @@ class Recorder {
   void handle(IngestItem& item);
   void handle_message(MessageArrival& m);
   void periodic(bool force);
-  void process(std::vector<IngestItem>& batch);
+  // Handle items in order; stop early at `until` or when `stop` is
+  // requested, leaving the rest (from batch_done_) unprocessed.
+  void process(std::vector<IngestItem>& batch,
+               std::optional<std::chrono::steady_clock::time_point> until = std::nullopt,
+               const std::stop_token* stop = nullptr);
   void account_unprocessed(std::vector<IngestItem>& items);
   void fail(std::vector<IngestItem>& batch, const std::string& what) noexcept;
   [[nodiscard]] Json topic_status_json() const;  // pipeline thread

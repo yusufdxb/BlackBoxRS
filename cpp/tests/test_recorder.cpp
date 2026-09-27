@@ -293,13 +293,18 @@ TEST(Recorder, StopWhileBusyDrainsFinalizesAndJoins) {
   testing::TempDir tmp;
   RecorderConfig cfg = config_for(tmp.path(), true);
   cfg.drain_deadline = 50ms;  // shorter than the backlog takes
+  cfg.batch = 4096;           // one batch can hold the whole backlog
   RecorderMetrics m;
   {
     Recorder rec(parse_profile_text(kProfile), cfg, std::make_unique<JsonDecoder>(500us));
     for (int i = 0; i < 1000; ++i) {
       rec.on_message(arrival(0, twist(0.1)));
     }
+    const auto t0 = std::chrono::steady_clock::now();
     rec.stop("test_stop");  // queue non-empty, writer active
+    // Bounded by the drain deadline plus one message and the finalization,
+    // not by the batch size (a whole batch would take 0.5 s).
+    EXPECT_LT(std::chrono::steady_clock::now() - t0, 400ms);
     m = rec.metrics();
     EXPECT_EQ(rec.on_message(arrival(0, twist(0.1))), PushResult::closed);
   }

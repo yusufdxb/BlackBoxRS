@@ -200,8 +200,12 @@ Json Recorder::topic_status_json() const {
   return out;
 }
 
-void Recorder::process(std::vector<IngestItem>& batch) {
+void Recorder::process(std::vector<IngestItem>& batch, std::optional<SteadyClock::time_point> until,
+                       const std::stop_token* stop) {
   for (batch_done_ = 0; batch_done_ < batch.size(); ++batch_done_) {
+    if ((until && SteadyClock::now() >= *until) || (stop != nullptr && stop->stop_requested())) {
+      return;  // items [batch_done_, size) are left to the caller
+    }
     handle(batch[batch_done_]);
   }
 }
@@ -231,18 +235,34 @@ void Recorder::run(std::stop_token stop) {
       batch.clear();
       const auto deadline = std::min({next_tick_, next_sample_, next_session_file_});
       ingest_.pop_batch(batch, config_.batch, deadline, stop);
-      process(batch);
+      process(batch, std::nullopt, &stop);
+      if (batch_done_ < batch.size()) {
+        break;  // stop requested mid-batch: the rest goes to the drain below
+      }
       periodic(false);
     }
-    // Drain: stop was requested and the queue is closed.
+    // Drain: stop was requested and the queue is closed. The deadline is
+    // checked per item, so a large batch cannot overrun it; what is left
+    // when it passes is counted as dropped at shutdown.
     state_.store(1);
     const auto drain_until = SteadyClock::now() + config_.drain_deadline;
-    while (SteadyClock::now() < drain_until) {
+    if (batch_done_ < batch.size()) {
+      batch.erase(batch.begin(), batch.begin() + static_cast<std::ptrdiff_t>(batch_done_));
+    } else {
       batch.clear();
-      if (ingest_.pop_batch(batch, config_.batch, SteadyClock::now(), std::stop_token{}) == 0) {
+    }
+    while (true) {
+      if (batch.empty() &&
+          ingest_.pop_batch(batch, config_.batch, SteadyClock::now(), std::stop_token{}) == 0) {
         break;
       }
-      process(batch);
+      process(batch, drain_until);
+      if (batch_done_ < batch.size()) {
+        batch.erase(batch.begin(), batch.begin() + static_cast<std::ptrdiff_t>(batch_done_));
+        account_unprocessed(batch);
+        break;
+      }
+      batch.clear();
     }
     batch.clear();
     (void)ingest_.drain(batch);
