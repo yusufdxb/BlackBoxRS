@@ -74,6 +74,12 @@ target_link_libraries(blackboxrs_core
   PRIVATE yaml-cpp OpenSSL::Crypto)
 blackboxrs_set_warnings(blackboxrs_core)
 
+# Synthetic load for benchmarks and compatibility tests (not part of the runtime).
+add_library(blackboxrs_bench STATIC src/bench/load.cpp)
+add_library(blackboxrs::bench ALIAS blackboxrs_bench)
+target_link_libraries(blackboxrs_bench PUBLIC blackboxrs::core)
+blackboxrs_set_warnings(blackboxrs_bench)
+
 if(BLACKBOXRS_BUILD_TOOLS)
   add_subdirectory(tools)
 endif()

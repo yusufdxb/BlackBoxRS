@@ -93,6 +93,7 @@ class EvidenceWriter {
 
   [[nodiscard]] WriterStats stats() const;
   [[nodiscard]] std::vector<std::string> finalized_bundles() const;
+  [[nodiscard]] int thread_id() const noexcept { return tid_.load(); }
 
  private:
   struct OpOpen {
@@ -143,6 +144,7 @@ class EvidenceWriter {
   mutable std::mutex finalized_mu_;
   std::vector<std::string> finalized_;
   std::atomic<bool> finished_{false};
+  std::atomic<int> tid_{0};
   std::jthread thread_;  // last member: started after everything it uses exists
 };
 

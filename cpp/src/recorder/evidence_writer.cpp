@@ -257,6 +257,7 @@ void EvidenceWriter::finish() {
 }
 
 void EvidenceWriter::run(std::stop_token stop) {
+  tid_.store(static_cast<int>(::gettid()));
   std::vector<Op> batch;
   batch.reserve(512);
   while (true) {

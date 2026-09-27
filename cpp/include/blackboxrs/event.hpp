@@ -94,6 +94,10 @@ struct Event {
   [[nodiscard]] GraphBody* graph() noexcept { return std::get_if<GraphBody>(&body); }
   [[nodiscard]] const MarkerBody* marker() const noexcept { return std::get_if<MarkerBody>(&body); }
   [[nodiscard]] bool is_message() const noexcept { return message() != nullptr; }
+  // The message body of an event the caller has already selected as a
+  // message. Throws std::logic_error when that invariant is broken.
+  [[nodiscard]] const MessageBody& msg() const;
+  [[nodiscard]] MessageBody& msg();
   // Topic of a message event, empty otherwise.
   [[nodiscard]] const std::string& topic() const noexcept;
   [[nodiscard]] std::string_view kind_name() const noexcept;

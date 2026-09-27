@@ -492,9 +492,9 @@ std::vector<Event> fault_reorder(std::vector<Event> events, const Fault& f, Ctx&
     Event na = ea;
     Event nb = eb;
     na.t = eb.t;
-    na.message()->rx_wall = eb.message()->rx_wall;
+    na.msg().rx_wall = eb.msg().rx_wall;
     nb.t = ea.t;
-    nb.message()->rx_wall = ea.message()->rx_wall;
+    nb.msg().rx_wall = ea.msg().rx_wall;
     events[idx[p]] = ctx.mark(std::move(na));
     events[idx[p + 1]] = ctx.mark(std::move(nb));
   }
@@ -614,7 +614,7 @@ std::vector<Event> set_fields(
       }
     }
     Event changed = e;
-    changed.message()->set_data(std::move(data));
+    changed.msg().set_data(std::move(data));
     events[i] = ctx.mark(std::move(changed));
   }
   return events;
@@ -693,7 +693,7 @@ std::vector<Event> fault_step(std::vector<Event> events, const Fault& f, Ctx& ct
   return set_fields(
       std::move(events), f, ctx, window_of(f, f.f64("at_s")),
       [delta, &ctx](const Event& e, const std::string& field) {
-        const Numeric n = as_number(get_path(*e.message()->data, field));
+        const Numeric n = as_number(get_path(*e.msg().data, field));
         if (n.problem()) {
           ctx.fail("step: '" + field + "' on " + e.topic() + " is not a finite number");
         }
@@ -775,7 +775,7 @@ std::vector<Event> fault_inject_stream(std::vector<Event> events, const Fault& f
   if (anchor == nullptr) {
     ctx.fail("inject_stream: evidence has no receipt wall clock to anchor on");
   }
-  const std::int64_t wall0 = count_ns(*anchor->message()->rx_wall) - anchor->t_ns();
+  const std::int64_t wall0 = count_ns(*anchor->msg().rx_wall) - anchor->t_ns();
   const std::int64_t mono0 = count_ns(anchor->rec_mono) - anchor->t_ns();
   const std::int64_t off = host_offset_ns(events, host, ctx.topics);
   const std::int64_t lo = ns_of(f.f64("from_s"));

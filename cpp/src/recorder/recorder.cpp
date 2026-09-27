@@ -1,5 +1,7 @@
 #include "blackboxrs/recorder/recorder.hpp"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -188,6 +190,7 @@ Json Recorder::topic_status_json() const {
 }
 
 void Recorder::run(std::stop_token stop) {
+  pipeline_tid_.store(static_cast<int>(::gettid()));
   std::vector<IngestItem> batch;
   batch.reserve(config_.batch);
   try {

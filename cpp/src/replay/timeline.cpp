@@ -277,7 +277,7 @@ Json Timeline::result(const std::map<std::string, std::string>& finding_ids,
   });
   std::vector<std::string> new_id(entries_.size());
   for (std::size_t n = 0; n < order.size(); ++n) {
-    char buf[16];
+    char buf[32];
     std::snprintf(buf, sizeof buf, "T%04zu", n + 1);
     new_id[order[n]] = buf;
   }

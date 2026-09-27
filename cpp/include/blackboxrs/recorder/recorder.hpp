@@ -167,6 +167,11 @@ class Recorder {
   [[nodiscard]] const Profile& profile() const noexcept { return profile_; }
   [[nodiscard]] std::optional<std::uint32_t> topic_index(std::string_view name) const noexcept;
   [[nodiscard]] std::vector<std::string> bundles() const { return writer_.finalized_bundles(); }
+  // Kernel thread ids of the pipeline and writer threads (0 until started),
+  // for per-thread CPU accounting from /proc/self/task/<tid>/stat.
+  [[nodiscard]] std::pair<int, int> thread_ids() const noexcept {
+    return {pipeline_tid_.load(), writer_.thread_id()};
+  }
 
  private:
   void run(std::stop_token stop);
@@ -202,7 +207,8 @@ class Recorder {
   std::atomic<std::uint64_t> decimated_{0};
   std::atomic<std::uint64_t> processed_{0};
   std::atomic<std::uint64_t> dropped_at_shutdown_{0};
-  std::atomic<int> state_{0};  // 0 recording, 1 draining, 2 stopped, 3 failed
+  std::atomic<int> state_{0};
+  std::atomic<int> pipeline_tid_{0};  // 0 recording, 1 draining, 2 stopped, 3 failed
   mutable std::mutex snapshot_mu_;
   Json core_snapshot_ = Json::object();
   Json system_snapshot_ = Json::object();

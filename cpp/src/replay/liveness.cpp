@@ -510,7 +510,7 @@ TransportResult analyze_delivered(const Profile& profile, const std::vector<Even
       ooo[topic] = out_of_order;
     }
     const TopicSpec* spec = profile.topic(topic);
-    const Role role = spec != nullptr ? spec->role : recs.front()->message()->role;
+    const Role role = spec != nullptr ? spec->role : recs.front()->msg().role;
     if (role == Role::helix_hold || role == Role::arbiter_status) {
       const SeqStats st = seq_loss(recs, role == Role::helix_hold);
       sequences[topic] = st;

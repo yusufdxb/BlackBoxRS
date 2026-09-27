@@ -1,6 +1,7 @@
 #include "blackboxrs/event.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 
 namespace blackboxrs {
 namespace {
@@ -58,6 +59,22 @@ std::string_view Event::kind_name() const noexcept {
     case 2: return "marker";
     default: return "sys";
   }
+}
+
+const MessageBody& Event::msg() const {
+  const MessageBody* m = message();
+  if (m == nullptr) {
+    throw std::logic_error("event " + eid + " is not a message");
+  }
+  return *m;
+}
+
+MessageBody& Event::msg() {
+  MessageBody* m = message();
+  if (m == nullptr) {
+    throw std::logic_error("event " + eid + " is not a message");
+  }
+  return *m;
 }
 
 void Event::touch(const std::string& fault_id) {

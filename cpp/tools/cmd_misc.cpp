@@ -16,9 +16,6 @@ int cmd_version(const Argv& argv) {
   return 0;
 }
 
-int cmd_benchmark(const Argv&) {
-  throw UsageError("benchmark: not built yet");
-}
 int cmd_config(const Argv&) {
   throw UsageError("config: not built yet");
 }

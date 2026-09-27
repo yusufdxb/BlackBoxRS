@@ -367,7 +367,7 @@ Json replay(const Evidence& ev, const ReplayConfig& cfg, const ReplayOptions& op
   if (anchor == nullptr) {
     throw EvidenceError("no message in the replay window");
   }
-  const std::int64_t wall0 = count_ns(*anchor->message()->rx_wall) - anchor->t_ns();
+  const std::int64_t wall0 = count_ns(*anchor->msg().rx_wall) - anchor->t_ns();
   std::map<std::string, std::int64_t> suppressed;
   std::map<std::string, double> sources;
   std::int64_t period = 0;
@@ -587,7 +587,7 @@ Json replay(const Evidence& ev, const ReplayConfig& cfg, const ReplayOptions& op
   });
   std::map<std::string, std::string> fid;
   for (std::size_t n = 0; n < order.size(); ++n) {
-    char buf[16];
+    char buf[32];
     std::snprintf(buf, sizeof buf, "D%03zu", n + 1);
     fid[findings[order[n]].first] = buf;
   }
