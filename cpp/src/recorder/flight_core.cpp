@@ -92,20 +92,39 @@ void FlightCore::ingest(Record rec) {
   rec.seq = ++seq_;
   ++stats_.records_in;
   std::optional<Record> jump = clock_jump(rec);
-  if (options_.serialize) {
-    rec.serialize();
-  }
   const std::int64_t t = count_ns(rec.t_mono);
   const bool is_msg = rec.kind == RecordKind::msg;
+  // Trigger conditions are evaluated on the record as ingested (they read
+  // its payload and update the hold / arbiter state); they fire below, after
+  // the record is in the ring, so it is part of its own pre-trigger window.
+  std::vector<Trigger> triggers;
+  if (is_msg) {
+    triggers = message_triggers(rec);
+  }
+  if (options_.serialize) {
+    rec.serialize();
+    // Past this point only the serialized line is used (by the ring and the
+    // writer): drop the decoded payload so a ring of records does not also
+    // hold a JSON tree per message.
+    rec.data.reset();
+    rec.typed = OpaquePayload{};
+    rec.fields = OrderedJson::object();
+  }
+  last_mono_ = rec.t_mono;
+  last_wall_ = rec.t_wall;
   auto ptr = std::make_shared<const Record>(std::move(rec));
-  push(ptr);
+  // A continuous capture's one incident is open from the first record, so no
+  // later trigger can need a pre-trigger window: nothing is kept in the ring.
+  if (!(options_.continuous && open_)) {
+    push(ptr);
+  }
   if (open_) {
     open_->sink->append(ptr);
   }
   if (is_msg) {
     last_rx_[ptr->topic] = t;
     stale_.erase(ptr->topic);
-    for (auto& trig : message_triggers(*ptr)) {
+    for (auto& trig : triggers) {
       fire(std::move(trig));
     }
   }
@@ -411,10 +430,10 @@ void FlightCore::shutdown(const std::string& reason) {
   t.reason = reason;
   t.role = "note";
   t.seq = ++seq_;
-  if (!ring_.empty()) {
-    t.t_mono = ring_.back().record->t_mono;
-    t.t_wall = ring_.back().record->t_wall;
-  }
+  // The last record ingested (Python: the newest ring entry, which is the
+  // same record; the ring is empty in continuous mode).
+  t.t_mono = last_mono_;
+  t.t_wall = last_wall_;
   open_->sink->add_trigger(t);
   // Stopping ends a continuous capture normally; a triggered incident whose
   // post-trigger window was cut short is interrupted.

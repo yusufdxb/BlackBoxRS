@@ -18,7 +18,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 function(blackboxrs_ros_warnings target)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor
-                                           -Woverloaded-virtual -Wnull-dereference)
+                                           -Woverloaded-virtual -Wnull-dereference
+                                           -ffp-contract=off)
 endfunction()
 
 add_library(blackboxrs_ros_lib STATIC

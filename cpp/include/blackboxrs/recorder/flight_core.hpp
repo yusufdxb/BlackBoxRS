@@ -184,6 +184,8 @@ class FlightCore {
   std::optional<bool> hold_;
   bool arbiter_forced_ = false;
   bool session_started_ = false;
+  MonoTime last_mono_{};
+  WallTime last_wall_{};
   std::map<std::string, std::int64_t> last_rx_;
   std::set<std::string> stale_;
   std::vector<std::pair<std::string, std::int64_t>> stale_after_;  // profile order

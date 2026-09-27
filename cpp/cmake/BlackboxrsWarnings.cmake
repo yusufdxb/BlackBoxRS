@@ -13,6 +13,12 @@ function(blackboxrs_set_warnings target)
     list(APPEND _common -Wduplicated-cond -Wduplicated-branches -Wlogical-op)
   endif()
   target_compile_options(${target} PRIVATE ${_common})
+  # Floating point must round exactly as CPython does (each operation
+  # rounded on its own) for replays to be byte-identical to the Python
+  # reference and across architectures. aarch64 (the Jetson) has fused
+  # multiply-add, and GCC may contract a*b+c into one FMA with a single
+  # rounding; forbid it.
+  target_compile_options(${target} PRIVATE -ffp-contract=off)
   if(BLACKBOXRS_WERROR)
     target_compile_options(${target} PRIVATE -Werror)
   endif()

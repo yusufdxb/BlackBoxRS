@@ -1,0 +1,94 @@
+{
+  "schema": "blackboxrs.ros_benchmark.v1",
+  "what": "C++ recorder process on real ROS 2 traffic (real types, real CDR decode), go2_helix profile, continuous capture with fsync; workstation, not the payload",
+  "environment": {
+    "machine": "x86_64",
+    "kernel": "6.8.0-138-generic",
+    "logical_cpus": 24,
+    "rmw": "default",
+    "ros_distro": "humble"
+  },
+  "seconds_per_scale": 30.0,
+  "results": [
+    {
+      "scale": 1.0,
+      "offered_msgs_per_sec": 946.0666666666667,
+      "published": 28382,
+      "received": 28382,
+      "processed": 28382,
+      "dropped_ingest": 0,
+      "dropped_at_shutdown": 0,
+      "not_received": 0,
+      "recorder_cpu_percent_one_core": 2.808262174554337,
+      "recorder_rss_mb_end": 32.7421875,
+      "recorder_rss_mb_peak": 32.7421875,
+      "exit_code": 0,
+      "evidence": "verified",
+      "load_publisher": [
+        "/lowstate unitree_go/msg/LowState 1180 bytes at 500 Hz",
+        "/sportmodestate unitree_go/msg/SportModeState 236 bytes at 295 Hz",
+        "/utlidar/robot_odom nav_msgs/msg/Odometry 708 bytes at 151 Hz"
+      ]
+    },
+    {
+      "scale": 2.0,
+      "offered_msgs_per_sec": 1892.0666666666666,
+      "published": 56762,
+      "received": 56762,
+      "processed": 56762,
+      "dropped_ingest": 0,
+      "dropped_at_shutdown": 0,
+      "not_received": 0,
+      "recorder_cpu_percent_one_core": 4.484361645766587,
+      "recorder_rss_mb_end": 32.6484375,
+      "recorder_rss_mb_peak": 32.6484375,
+      "exit_code": 0,
+      "evidence": "verified",
+      "load_publisher": [
+        "/lowstate unitree_go/msg/LowState 1180 bytes at 1000 Hz",
+        "/sportmodestate unitree_go/msg/SportModeState 236 bytes at 590 Hz",
+        "/utlidar/robot_odom nav_msgs/msg/Odometry 708 bytes at 302 Hz"
+      ]
+    },
+    {
+      "scale": 5.0,
+      "offered_msgs_per_sec": 4730.066666666667,
+      "published": 141902,
+      "received": 141902,
+      "processed": 141902,
+      "dropped_ingest": 0,
+      "dropped_at_shutdown": 0,
+      "not_received": 0,
+      "recorder_cpu_percent_one_core": 9.985661641666963,
+      "recorder_rss_mb_end": 32.69921875,
+      "recorder_rss_mb_peak": 32.69921875,
+      "exit_code": 0,
+      "evidence": "verified",
+      "load_publisher": [
+        "/lowstate unitree_go/msg/LowState 1180 bytes at 2500 Hz",
+        "/sportmodestate unitree_go/msg/SportModeState 236 bytes at 1475 Hz",
+        "/utlidar/robot_odom nav_msgs/msg/Odometry 708 bytes at 755 Hz"
+      ]
+    },
+    {
+      "scale": 10.0,
+      "offered_msgs_per_sec": 9460.066666666668,
+      "published": 283802,
+      "received": 283802,
+      "processed": 283802,
+      "dropped_ingest": 0,
+      "dropped_at_shutdown": 0,
+      "not_received": 0,
+      "recorder_cpu_percent_one_core": 17.159896494372273,
+      "recorder_rss_mb_end": 32.80859375,
+      "recorder_rss_mb_peak": 32.80859375,
+      "exit_code": 0,
+      "evidence": "verified",
+      "load_publisher": [
+        "/lowstate unitree_go/msg/LowState 1180 bytes at 5000 Hz",
+        "/sportmodestate unitree_go/msg/SportModeState 236 bytes at 2950 Hz",
+        "/utlidar/robot_odom nav_msgs/msg/Odometry 708 bytes at 1510 Hz"
+      ]
+    }
+  ]
+}
