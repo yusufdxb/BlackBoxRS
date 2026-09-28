@@ -7,6 +7,7 @@
 #include <cstring>
 #include <ctime>
 #include <system_error>
+#include <vector>
 
 #include "blackboxrs/evidence/bundle.hpp"
 #include "blackboxrs/evidence/integrity_record.hpp"
@@ -102,6 +103,74 @@ std::error_code write_file_atomic(const fs::path& path, const std::string& text)
   return {};
 }
 
+// Append `src` (whole file) to the open descriptor `fd`.
+std::error_code copy_file_to(const fs::path& src, int fd) {
+  UniqueFd in(::open(src.c_str(), O_RDONLY | O_CLOEXEC));
+  if (!in.valid()) {
+    return {errno, std::generic_category()};
+  }
+  std::vector<char> buf(1U << 16U);
+  while (true) {
+    const ssize_t n = ::read(in.get(), buf.data(), buf.size());
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return {errno, std::generic_category()};
+    }
+    if (n == 0) {
+      return {};
+    }
+    if (auto ec = write_all(fd, std::string_view(buf.data(), static_cast<std::size_t>(n))); ec) {
+      return ec;
+    }
+  }
+}
+
+// integrity.json from `record` (counts, hashes) and the spooled chunk table,
+// written atomically like every other bundle file. Byte-identical to
+// write_file_atomic(path, record-with-chunks.to_json().dump(2) + "\n").
+std::error_code write_integrity_streamed(const fs::path& path, const IntegrityRecord& record,
+                                         const fs::path& chunks, std::uint64_t n_chunks) {
+  const IntegrityText text = integrity_text_around_chunks(record);
+  const fs::path tmp = path.string() + ".tmp";
+  UniqueFd fd(::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
+  if (!fd.valid()) {
+    return {errno, std::generic_category()};
+  }
+  if (auto ec = write_all(fd.get(), text.head); ec) {
+    return ec;
+  }
+  if (n_chunks == 0) {
+    if (auto ec = write_all(fd.get(), kIntegrityChunksEmpty); ec) {
+      return ec;
+    }
+  } else {
+    if (auto ec = write_all(fd.get(), kIntegrityChunksOpen); ec) {
+      return ec;
+    }
+    if (auto ec = copy_file_to(chunks, fd.get()); ec) {
+      return ec;
+    }
+    if (auto ec = write_all(fd.get(), kIntegrityChunksClose); ec) {
+      return ec;
+    }
+  }
+  if (auto ec = write_all(fd.get(), text.tail); ec) {
+    return ec;
+  }
+  if (auto ec = fsync_fd(fd.get()); ec) {
+    return ec;
+  }
+  if (auto ec = fd.close(); ec) {
+    return ec;
+  }
+  if (::rename(tmp.c_str(), path.c_str()) != 0) {
+    return {errno, std::generic_category()};
+  }
+  return {};
+}
+
 std::string describe(const std::error_code& ec) {
   const char* name = nullptr;
   switch (ec.value()) {
@@ -183,9 +252,17 @@ struct EvidenceWriter::Bundle {
   fs::path final_dir;
   UniqueFd fd;
   Sha256 sha;
-  IntegrityRecord integrity;
+  IntegrityRecord integrity;  // counts and hashes only; its `chunks` stays empty
   ChunkEntry chunk;
   bool chunk_open = false;
+  // Completed chunk-table entries, already in their integrity.json text form,
+  // are appended to this file instead of kept in memory: the table grows by
+  // one entry per chunk for as long as the bundle is open (a continuous
+  // capture is open for the whole session). integrity.json is assembled from
+  // it at close, and it is removed before the bundle is renamed.
+  fs::path chunks_path;
+  UniqueFd chunks_fd;
+  std::uint64_t chunks_spooled = 0;
   std::uint64_t unwritten = 0;
   std::uint64_t write_errors = 0;
   std::string first_error;
@@ -396,6 +473,24 @@ void EvidenceWriter::handle(Op& op) {
       b.first_error = what + ": " + describe(ec);
     }
   };
+  // One completed chunk to the on-disk chunk table.
+  auto spool_chunk = [&](Bundle& b) {
+    b.chunk_open = false;
+    if (!b.chunks_fd.valid()) {
+      fail(b, "write integrity chunk table", std::error_code(EBADF, std::generic_category()));
+      return;
+    }
+    std::string entry;
+    if (b.chunks_spooled != 0) {
+      entry = kIntegrityChunksSeparator;
+    }
+    entry += integrity_chunk_text(b.chunk);
+    if (auto ec = write_all(b.chunks_fd.get(), entry); ec) {
+      fail(b, "write integrity chunk table", ec);
+      return;
+    }
+    ++b.chunks_spooled;
+  };
   auto write_line = [&](Bundle& b, std::string_view line, std::int64_t seq,
                         std::optional<std::int64_t> t_mono) {
     if (!b.fd.valid() || b.failed()) {
@@ -423,8 +518,7 @@ void EvidenceWriter::handle(Op& op) {
     ++b.chunk.records;
     b.chunk.last_seq = seq;
     if (b.chunk.records >= options_.chunk_records || b.chunk.length >= options_.chunk_bytes) {
-      b.integrity.chunks.push_back(b.chunk);
-      b.chunk_open = false;
+      spool_chunk(b);
     }
     b.integrity.bytes += buf.size();
     ++b.integrity.records;
@@ -522,6 +616,12 @@ void EvidenceWriter::handle(Op& op) {
       if (!b->fd.valid()) {
         fail(*b, "open records.jsonl", std::error_code(errno, std::generic_category()));
       }
+      b->chunks_path = b->partial_dir / "integrity.chunks.tmp";
+      b->chunks_fd = UniqueFd(::open(b->chunks_path.c_str(),
+                                     O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0644));
+      if (!b->chunks_fd.valid()) {
+        fail(*b, "open integrity chunk table", std::error_code(errno, std::generic_category()));
+      }
     }
     for (const RecordPtr& r : o->pre) {
       write_line(*b, r->line, r->seq, count_ns(r->t_mono));
@@ -592,8 +692,12 @@ void EvidenceWriter::handle(Op& op) {
       }
     }
     if (b.chunk_open) {
-      b.integrity.chunks.push_back(b.chunk);
-      b.chunk_open = false;
+      spool_chunk(b);
+    }
+    if (b.chunks_fd.valid()) {
+      if (auto ec = b.chunks_fd.close(); ec) {
+        fail(b, "close integrity chunk table", ec);
+      }
     }
     b.integrity.sha256 = b.sha.finish_hex();
     b.integrity.complete = !b.failed() && b.unwritten == 0;
@@ -601,11 +705,19 @@ void EvidenceWriter::handle(Op& op) {
     if (b.failed()) {
       status = "write_failed";
     }
-    if (auto ec =
-            write_file_atomic(b.partial_dir / "integrity.json", dump_text(b.integrity.to_json()));
+    if (auto ec = write_integrity_streamed(b.partial_dir / "integrity.json", b.integrity,
+                                           b.chunks_path, b.chunks_spooled);
         ec) {
       fail(b, "write integrity.json", ec);
       status = "write_failed";
+    }
+    // The chunk table now lives in integrity.json. A failed bundle keeps the
+    // spool file too, as evidence of what was written.
+    if (status != "write_failed" && !b.chunks_path.empty()) {
+      if (::unlink(b.chunks_path.c_str()) != 0 && errno != ENOENT) {
+        fail(b, "remove integrity chunk table", std::error_code(errno, std::generic_category()));
+        status = "write_failed";
+      }
     }
     if (auto ec = write_file_atomic(b.partial_dir / "manifest.json",
                                     manifest(b, status, c->recorder_stats));

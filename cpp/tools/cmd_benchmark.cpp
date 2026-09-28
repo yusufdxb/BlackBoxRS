@@ -15,6 +15,7 @@
 // Nothing here asserts a threshold: numbers are recorded, not judged. A
 // Debug build is labelled as such in the output.
 
+#include <malloc.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
@@ -316,12 +317,31 @@ Json bench_soak(const Profile& profile, double scale, std::chrono::seconds durat
   // Samples are plain structs in storage reserved up front, so the
   // measuring harness does not itself grow the RSS it measures (a JSON
   // object per sample did, by about 1 MB over 30 min).
+  // Besides RSS, each sample records what glibc's allocator holds, so RSS
+  // growth can be told apart: live heap (heap_in_use), memory the allocator
+  // keeps but no one uses (heap_free), and anonymous vs file-backed pages.
   struct Sample {
     double t_s;
     double rss_mb;
+    double rss_anon_mb;
+    double rss_file_mb;
+    double heap_in_use_mb;
+    double heap_free_mb;
+    double heap_mmap_mb;
     std::size_t queue_depth;
     std::uint64_t records_written;
     std::uint64_t dropped;
+  };
+  const auto status_mb = [](const char* key) {
+    std::ifstream in("/proc/self/status");
+    std::string line;
+    const std::string k = std::string(key) + ":";
+    while (std::getline(in, line)) {
+      if (line.rfind(k, 0) == 0) {
+        return std::stod(line.substr(k.size())) / 1024.0;
+      }
+    }
+    return 0.0;
   };
   std::vector<Sample> raw;
   raw.reserve(static_cast<std::size_t>(duration.count()) + 16);
@@ -332,9 +352,13 @@ Json bench_soak(const Profile& profile, double scale, std::chrono::seconds durat
       std::this_thread::sleep_for(1s);
       const auto m = rec->metrics();
       if (raw.size() < raw.capacity()) {
+        const struct mallinfo2 mi = ::mallinfo2();
+        constexpr double kMb = 1024.0 * 1024.0;
         raw.push_back({std::chrono::duration<double>(Clock::now() - t0).count(),
-                       recorder::current_rss_mb().value_or(0.0), m.ingest.depth,
-                       m.writer.records_written, m.dropped_ingest});
+                       recorder::current_rss_mb().value_or(0.0), status_mb("RssAnon"),
+                       status_mb("RssFile"), static_cast<double>(mi.uordblks + mi.hblkhd) / kMb,
+                       static_cast<double>(mi.fordblks) / kMb, static_cast<double>(mi.hblkhd) / kMb,
+                       m.ingest.depth, m.writer.records_written, m.dropped_ingest});
       }
     }
   });
@@ -349,6 +373,11 @@ Json bench_soak(const Profile& profile, double scale, std::chrono::seconds durat
   for (const Sample& x : raw) {
     samples.push_back({{"t_s", x.t_s},
                        {"rss_mb", x.rss_mb},
+                       {"rss_anon_mb", x.rss_anon_mb},
+                       {"rss_file_mb", x.rss_file_mb},
+                       {"heap_in_use_mb", x.heap_in_use_mb},
+                       {"heap_free_mb", x.heap_free_mb},
+                       {"heap_mmap_mb", x.heap_mmap_mb},
                        {"queue_depth", x.queue_depth},
                        {"records_written", x.records_written},
                        {"dropped", x.dropped}});

@@ -653,6 +653,72 @@ fs::path recorded_bundle(const fs::path& dir) {
   return bundles_in(dir).at(0);
 }
 
+IntegrityRecord integrity_with_chunks(std::size_t n) {
+  IntegrityRecord r;
+  r.records = 1024 * n + 7;
+  r.bytes = 400'000 * n + 99;
+  r.sha256 = std::string(64, 'a');
+  r.first_seq = n != 0 ? std::optional<std::int64_t>(1) : std::nullopt;
+  r.last_seq =
+      n != 0 ? std::optional<std::int64_t>(static_cast<std::int64_t>(1024 * n)) : std::nullopt;
+  r.first_t_mono_ns = 5;
+  r.complete = n % 2 == 0;
+  for (std::size_t i = 0; i < n; ++i) {
+    r.chunks.push_back({i * 400'000, 400'000, 1024, static_cast<std::int64_t>(i * 1024 + 1),
+                        static_cast<std::int64_t>(i * 1024 + 1024),
+                        static_cast<std::uint32_t>(0xdeadbeefU ^ i)});
+  }
+  return r;
+}
+
+TEST(Integrity, StreamedTextIsByteIdenticalToTheInMemoryDocument) {
+  for (const std::size_t n : {0U, 1U, 2U, 37U}) {
+    const IntegrityRecord r = integrity_with_chunks(n);
+    const IntegrityText t = integrity_text_around_chunks(r);
+    std::string streamed = t.head;
+    if (n == 0) {
+      streamed += kIntegrityChunksEmpty;
+    } else {
+      streamed += kIntegrityChunksOpen;
+      for (std::size_t i = 0; i < n; ++i) {
+        if (i != 0) {
+          streamed += kIntegrityChunksSeparator;
+        }
+        streamed += integrity_chunk_text(r.chunks[i]);
+      }
+      streamed += kIntegrityChunksClose;
+    }
+    streamed += t.tail;
+    EXPECT_EQ(streamed, r.to_json().dump(2) + "\n") << n << " chunks";
+  }
+}
+
+TEST(Integrity, FinalBundleHasTheFullChunkTableAndNoSpoolFile) {
+  testing::TempDir tmp;
+  RecorderConfig cfg = config_for(tmp.path(), true);  // chunk_records = 16
+  {
+    Recorder rec(parse_profile_text(kProfile), cfg, std::make_unique<JsonDecoder>());
+    for (int i = 0; i < 1000; ++i) {
+      rec.on_message(arrival(0, twist(0.1)));
+    }
+    rec.stop();
+  }
+  const auto dirs = bundles_in(tmp.path());
+  ASSERT_EQ(dirs.size(), 1U);
+  EXPECT_FALSE(fs::exists(dirs[0] / "integrity.chunks.tmp"));
+  const auto ir =
+      IntegrityRecord::from_json(Json::parse(testing::read_file(dirs[0] / "integrity.json")));
+  std::uint64_t in_chunks = 0;
+  for (const auto& c : ir.chunks) {
+    in_chunks += c.records;
+  }
+  EXPECT_GE(ir.chunks.size(), 1000U / 16U);
+  EXPECT_EQ(in_chunks, ir.records) << "every record is in exactly one chunk";
+  EXPECT_EQ(testing::read_file(dirs[0] / "integrity.json"), ir.to_json().dump(2) + "\n")
+      << "the streamed file has exactly the in-memory layout";
+  EXPECT_EQ(validate_bundle(dirs[0]).status, ValidationStatus::verified);
+}
+
 TEST(Integrity, FlippedByteIsDetectedAndLocated) {
   testing::TempDir tmp;
   const fs::path b = recorded_bundle(tmp.path());

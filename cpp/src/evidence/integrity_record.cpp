@@ -8,15 +8,17 @@
 namespace blackboxrs {
 namespace fs = std::filesystem;
 
+namespace {
+Json chunk_json(const ChunkEntry& c) {
+  return {{"offset", c.offset},       {"length", c.length},     {"records", c.records},
+          {"first_seq", c.first_seq}, {"last_seq", c.last_seq}, {"crc32c", c.crc32c}};
+}
+}  // namespace
+
 Json IntegrityRecord::to_json() const {
   Json chunk_list = Json::array();
   for (const auto& c : chunks) {
-    chunk_list.push_back({{"offset", c.offset},
-                          {"length", c.length},
-                          {"records", c.records},
-                          {"first_seq", c.first_seq},
-                          {"last_seq", c.last_seq},
-                          {"crc32c", c.crc32c}});
+    chunk_list.push_back(chunk_json(c));
   }
   auto opt = [](const std::optional<std::int64_t>& v) { return v ? Json(*v) : Json(); };
   return {{"schema", kIntegritySchema},
@@ -29,6 +31,36 @@ Json IntegrityRecord::to_json() const {
           {"last_t_mono_ns", opt(last_t_mono_ns)},
           {"chunks", chunk_list},
           {"complete", complete}};
+}
+
+IntegrityText integrity_text_around_chunks(const IntegrityRecord& record) {
+  // Dump the record with a marker in place of the chunk table and split the
+  // text there, so the layout is nlohmann's own (sorted keys, indent 2).
+  static constexpr std::string_view kMarker = "\"@@blackboxrs_chunks@@\"";
+  IntegrityRecord bare = record;
+  bare.chunks.clear();
+  Json j = bare.to_json();
+  j["chunks"] = std::string(kMarker.substr(1, kMarker.size() - 2));
+  const std::string text = j.dump(2, ' ', false, Json::error_handler_t::replace) + "\n";
+  const auto at = text.find(kMarker);
+  if (at == std::string::npos) {
+    throw std::logic_error("integrity text: chunk marker not found");
+  }
+  return {text.substr(0, at), text.substr(at + kMarker.size())};
+}
+
+std::string integrity_chunk_text(const ChunkEntry& chunk) {
+  // An element of the "chunks" array sits two levels deep: indent every line
+  // of its own dump by four spaces.
+  const std::string one = chunk_json(chunk).dump(2);
+  std::string out = "    ";
+  for (const char ch : one) {
+    out.push_back(ch);
+    if (ch == '\n') {
+      out += "    ";
+    }
+  }
+  return out;
 }
 
 IntegrityRecord IntegrityRecord::from_json(const Json& j) {

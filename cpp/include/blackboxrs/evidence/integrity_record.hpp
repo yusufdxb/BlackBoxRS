@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "blackboxrs/json.hpp"
@@ -49,6 +50,24 @@ struct IntegrityRecord {
   [[nodiscard]] Json to_json() const;
   [[nodiscard]] static IntegrityRecord from_json(const Json& j);
 };
+
+// Streaming form of IntegrityRecord::to_json().dump(2) + "\n", for a
+// writer that must not hold the chunk table in memory (it grows with every
+// 1024 records of a bundle). The document is
+//   head + "[]" + tail                                   with no chunks, or
+//   head + "[\n" + e1 + ",\n" + e2 ... + "\n  ]" + tail   with entries ei =
+//   integrity_chunk_text(chunk i),
+// byte-identical to the in-memory form. `record.chunks` is ignored.
+struct IntegrityText {
+  std::string head;  // ends with `"chunks": `
+  std::string tail;  // the fields after the chunk table, and the final newline
+};
+[[nodiscard]] IntegrityText integrity_text_around_chunks(const IntegrityRecord& record);
+[[nodiscard]] std::string integrity_chunk_text(const ChunkEntry& chunk);
+inline constexpr std::string_view kIntegrityChunksOpen = "[\n";
+inline constexpr std::string_view kIntegrityChunksSeparator = ",\n";
+inline constexpr std::string_view kIntegrityChunksClose = "\n  ]";
+inline constexpr std::string_view kIntegrityChunksEmpty = "[]";
 
 enum class ValidationStatus : std::uint8_t {
   verified,      // integrity record present and every check passed
