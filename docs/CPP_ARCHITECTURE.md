@@ -398,6 +398,14 @@ What the build changed relative to sections 1 to 8, and why.
   engines skip it, so a hold with no command after it is INCOMPLETE. The
   online monitor applies the offline INCOMPLETE gates in its diagnostics
   (no output observed, no command source seen, hold without a check).
+* **Integrity chunk table streamed to disk.** A profile of the 5x soak found
+  the recorder's only growing allocation: the open bundle's chunk table, one
+  48-byte entry per 1,024 records held in a vector for the bundle's whole
+  life (a continuous capture: the whole session). Completed entries are now
+  appended to `integrity.chunks.tmp` in the bundle directory and
+  `integrity.json` is assembled from it at close, byte-identical to before;
+  the spool file is removed before the rename. RSS over 30 minutes at 5x is
+  now flat after warmup ([CPP_BENCHMARKS.md](CPP_BENCHMARKS.md), section 4).
 * **Held output (model assumption, not changed).** Between two recorded
   output messages the `observed` system under test takes the last command
   as still in effect at the robot, as a sink that keeps its last command

@@ -18,8 +18,10 @@ machine it was measured on.
 | `cpp_ros_recorder_workstation.json` | recorder process on real ROS 2 traffic, 1x to 10x | `c135c1c` |
 | `cpp_core_workstation.json` | ROS-free pipeline, queue, serialization, replay | `20cef29` |
 | `cpp_core_workstation_debug.json` | the same on a Debug build | `7e100e5` |
-| `cpp_soak_workstation.json` | 30 min at 5x, RSS every second | `20cef29` |
-| `cpp_soak_workstation_50db5a1.json` | an earlier 30 min soak, kept for the analysis below | `50db5a1` |
+| `cpp_soak_workstation.json` | 30 min at 5x: RSS, allocator state and queue every second | `2485be4` |
+| `cpp_soak_workstation_20cef29.json` | the same before the chunk-table fix | `20cef29` |
+| `cpp_soak_workstation_50db5a1.json` | an earlier soak whose harness grew the RSS it measured | `50db5a1` |
+| `massif/*.massif` | Valgrind massif heap profiles, 10 min at 5x, before and after the fix | `b21bba0` |
 
 ## 1. Recorder on real ROS 2 traffic
 
@@ -104,32 +106,72 @@ blackboxrs benchmark --only none --soak 1800 --soak-scale 5 --json x.json
 ```
 
 The recorder takes the GO2 + HELIX load at 5x (5,180 msg/s) for 30 minutes
-in one continuous bundle; RSS is sampled every second.
+in one continuous bundle (the case where a bundle grows longest). Every
+second the harness records RSS (split into anonymous and file-backed pages),
+glibc's allocator state (`mallinfo2`: live heap, and free memory the
+allocator keeps) and the queue depth.
 
-| Commit | Messages | Dropped | Peak queue depth | RSS after 3 min warmup | Slope | Evidence |
+| Commit | Messages | Dropped | RSS after 3 min warmup | RSS slope | Live heap slope | Evidence |
 |---|---|---|---|---|---|---|
-| `20cef29` | 9,324,002 | 0 | 57 | 27.43 to 27.95 MB | +1.0 MB/h | verified (3.4 GB) |
-| `50db5a1` | 9,324,002 | 0 | 36 | 27.58 to 28.96 MB | +2.9 MB/h | verified (3.4 GB) |
+| `2485be4` | 9,324,002 | 0 | 27.445 to 27.453 MB | +0.02 MB/h | +0.006 MB/h | verified (3.4 GB) |
+| `20cef29` | 9,324,002 | 0 | 27.43 to 27.95 MB | +1.0 MB/h | not sampled | verified (3.4 GB) |
+| `50db5a1` | 9,324,002 | 0 | 27.58 to 28.96 MB | +2.9 MB/h | not sampled | verified (3.4 GB) |
 
-RSS is not perfectly flat, and the growth was traced rather than rounded
-away:
+At `2485be4` RSS moved twice after warmup, by one 4 KB page each (542 s and
+828 s), and was identical for the last 16 minutes. Live heap stays within a
+67 KB band of churn (per-batch allocations), with live plus free memory
+constant, so the allocator is not growing either.
 
-* At `50db5a1` the soak harness itself kept one JSON object per sample in
-  the process it measured. Storing samples as preallocated structs
-  (`20cef29`) cut the slope from 2.9 to 1.0 MB/h.
-* What is left grows with the records written, not with time: about 0.07
-  bytes per record, +0.6 MB over 9.3 M records. That is consistent with the
-  one piece of state that must grow for a continuous bundle, its
-  `integrity.json` chunk table (48 bytes per 1,024 records, about 9,100
-  entries here, plus vector growth slack). ASSUMPTION: the remainder is that
-  table; it was not isolated with an allocation profiler. At the 1x GO2 rate
-  it would be about 0.16 MB per hour of continuous recording, and it is
-  released when the bundle closes.
-* Queue depth stayed at 0 to 3 in the 1 s samples (57 at the peak between
-  samples), so the pipeline never fell behind.
+### Where the earlier growth came from
 
-The `20cef29` soak ran while other work used the same workstation (the ROS
-benchmark and the HELIX rehearsal); it still dropped nothing.
+1. **The measuring harness (`50db5a1` to `20cef29`).** The soak kept a JSON
+   object per sample inside the process it measured. Samples became plain
+   structs, then (at `2485be4`) a buffer touched up front, because a
+   reserved but untouched buffer still became resident one page per 51
+   samples (80 bytes each). Neither was recorder memory.
+2. **The integrity chunk table (fixed in `b21bba0`).** Massif on the soak
+   workload found exactly one growing allocation site between 74 s and
+   599 s: `std::vector<ChunkEntry>::_M_realloc_insert` called from
+   `EvidenceWriter::handle` on the writer thread, +196,608 bytes (the
+   vector doubling to 4,096 entries of 48 bytes, one entry per 1,024
+   records). Everything below massif's threshold churned (+139 KB / -164 KB
+   across about 500 sites). The instrumented soak showed the same step in
+   glibc's mmap total (+0.191 MB at about 3 M records), and each doubling
+   left its old buffer as free space in the arena. Closing the bundle then
+   built the whole table as a JSON tree (+1.6 MB at close in the profile).
+
+   The table now goes to disk as it is produced: each completed entry is
+   appended, in its final text form, to `integrity.chunks.tmp` in the bundle
+   directory, and `integrity.json` is assembled from it at close. The file is
+   byte-identical to the in-memory form (tested), and the spool file is
+   removed before the bundle becomes final.
+
+| Massif, 10 min at 5x, 3.1 M records | Live heap at 60 s | at 598 s | Growth |
+|---|---|---|---|
+| before (`f280e6e` + sampling) | 18.629 MB | 18.798 MB | +168 KB |
+| after (`b21bba0`) | 18.607 MB | 18.608 MB | +0.6 KB |
+
+### What can still grow
+
+Nothing in the recorder grows with the number of records or with time. What
+grows with events, each bounded:
+
+| State | Bound |
+|---|---|
+| trigger list of an open bundle (goes into its manifest) | about 1 KB per trigger attached (measured, 100,000 `topic_stale` triggers). Triggers fire on edges (a hold asserted, a topic going stale once per episode, a node leaving, a marker); a triggered bundle closes at most 3x `post_trigger_sec` after it opens, a continuous one keeps every trigger of the session |
+| list of finalized bundles | one path per bundle; `max_incidents_per_run` in triggered mode, 1 in continuous |
+| incidents skipped for disk space, by reason | one key per distinct free-MB value below the floor, so at most `hard_disk_floor_mb` keys |
+| loss ledger | 100 ms buckets over the last 10 minutes: at most 6,000 |
+| per-topic and per-node state | the profile's topics; the node names seen on the graph |
+
+The soak ran with other work on the same workstation part of the time; it
+dropped nothing.
+
+A note outside the recorder: `blackboxrs validate` (and the benchmark's
+own final validation) holds the whole `records.jsonl` in memory: a heap
+peak of 1,537 MB for a 1,138 MB bundle in the profile. That is
+the offline validator, not the recorder, and it matters when validating a
+long bundle on the Orin NX (16 GB).
 
 ## 5. Not measured here
 

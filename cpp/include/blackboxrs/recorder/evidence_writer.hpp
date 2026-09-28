@@ -15,10 +15,19 @@
 //     "capturing") and appends records.jsonl, fsyncing at least every
 //     fsync_every and at close;
 //   * streams every byte through SHA-256 and a CRC-32C chunk table
-//     (nothing is re-read at close, so a large bundle never stalls it);
-//   * at close writes integrity.json, then the final manifest (each written
-//     to a temporary file, fsynced and renamed), renames the directory to
-//     <bundle_id> and fsyncs the session directory.
+//     (records.jsonl is never re-read, so a large bundle never stalls it);
+//   * appends each completed chunk-table entry to integrity.chunks.tmp in
+//     the bundle directory rather than keeping it in memory, so the writer's
+//     memory does not grow with the length of a bundle;
+//   * at close writes integrity.json (assembled from that file,
+//     byte-identical to the in-memory form), removes the spool file, writes
+//     the final manifest (each written to a temporary file, fsynced and
+//     renamed), fsyncs the bundle directory, renames it to <bundle_id> and
+//     fsyncs the session directory.
+//
+// Memory per open bundle is constant in the number of records. What does
+// grow is the manifest's trigger list, about 1 KB per trigger attached to
+// the bundle (measured): proportional to trigger events, not to records.
 //
 // A write error (ENOSPC, EFBIG, EIO) puts the bundle in status
 // "write_failed": later records are counted as unwritten, integrity.json says

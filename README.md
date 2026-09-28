@@ -34,7 +34,7 @@ BlackBoxRS sits beside a robot's autonomy stack, never in its control path. It r
 | Nothing it runs can move the robot | the only publishers are `/diagnostics` and `/blackboxrs/...`; motion and control topics are refused before a publisher exists, including through remaps; checked on a live graph (`test_passive_nodes`) |
 | Memory-safe, race-free, UB-free under test | ASan, UBSan and TSan runs of every test in CI; clang-tidy with zero warnings |
 | Failure is never reported as success | a dying pipeline, a stalled writer, a disk below the floor, lost or late messages and tampered records each end in an explicit incomplete status that both replay engines refuse; each case has a test |
-| Memory stays bounded | 30 min at 5x the GO2 rate (9.3 M messages): 0 dropped, RSS 27.4 to 28.0 MB after warmup ([docs/CPP_BENCHMARKS.md](docs/CPP_BENCHMARKS.md)) |
+| Memory stays bounded | 30 min at 5x the GO2 rate (9.3 M messages): 0 dropped, RSS within 8 KB (27.445 to 27.453 MB) after warmup; the one growing allocation a heap profile found was fixed, and what still grows with events is listed with its bound ([docs/CPP_BENCHMARKS.md](docs/CPP_BENCHMARKS.md)) |
 
 It found a real bug on the way: replaying the HELIX rehearsal showed the `fresh_output` invariant (in the Python reference and the port alike) reporting a stale command when a navigation command changed between an arbiter publication and the next tick. The fix, the regression cases and the story are in commit `cb5f7f4` and [docs/REPLAY_LAB.md](docs/REPLAY_LAB.md).
 
