@@ -343,22 +343,30 @@ Json bench_soak(const Profile& profile, double scale, std::chrono::seconds durat
     }
     return 0.0;
   };
-  std::vector<Sample> raw;
-  raw.reserve(static_cast<std::size_t>(duration.count()) + 16);
+  // Sized (not just reserved) up front: value-initialising the buffer
+  // touches its pages now, so filling it later does not add a page to the
+  // measured RSS every 51 samples.
+  std::vector<Sample> raw(static_cast<std::size_t>(duration.count()) + 16);
+  std::size_t n_raw = 0;
   std::atomic<bool> running{true};
   std::jthread sampler([&] {
     const auto t0 = Clock::now();
     while (running.load()) {
       std::this_thread::sleep_for(1s);
       const auto m = rec->metrics();
-      if (raw.size() < raw.capacity()) {
+      if (n_raw < raw.size()) {
         const struct mallinfo2 mi = ::mallinfo2();
         constexpr double kMb = 1024.0 * 1024.0;
-        raw.push_back({std::chrono::duration<double>(Clock::now() - t0).count(),
-                       recorder::current_rss_mb().value_or(0.0), status_mb("RssAnon"),
-                       status_mb("RssFile"), static_cast<double>(mi.uordblks + mi.hblkhd) / kMb,
-                       static_cast<double>(mi.fordblks) / kMb, static_cast<double>(mi.hblkhd) / kMb,
-                       m.ingest.depth, m.writer.records_written, m.dropped_ingest});
+        raw[n_raw++] = {std::chrono::duration<double>(Clock::now() - t0).count(),
+                        recorder::current_rss_mb().value_or(0.0),
+                        status_mb("RssAnon"),
+                        status_mb("RssFile"),
+                        static_cast<double>(mi.uordblks + mi.hblkhd) / kMb,
+                        static_cast<double>(mi.fordblks) / kMb,
+                        static_cast<double>(mi.hblkhd) / kMb,
+                        m.ingest.depth,
+                        m.writer.records_written,
+                        m.dropped_ingest};
       }
     }
   });
@@ -370,6 +378,7 @@ Json bench_soak(const Profile& profile, double scale, std::chrono::seconds durat
   const auto bundles = rec->bundles();
   rec.reset();
   Json samples = Json::array();
+  raw.resize(n_raw);
   for (const Sample& x : raw) {
     samples.push_back({{"t_s", x.t_s},
                        {"rss_mb", x.rss_mb},
