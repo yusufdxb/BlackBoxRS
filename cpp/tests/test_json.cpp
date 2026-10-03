@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <string>
+#include <vector>
 
 #include "blackboxrs/json.hpp"
 
@@ -54,6 +56,99 @@ TEST(Paths, GetSetDelete) {
   Json g = del_path(d, "linear.x");
   EXPECT_FALSE(g["linear"].contains("x"));
   EXPECT_EQ(del_path(d, "nope.x"), d);
+}
+
+TEST(Paths, EmptySegmentsLookUpTheEmptyKeyLikePythonSplit) {
+  // Python: "".split(".") == [""], ".a".split(".") == ["", "a"],
+  // "a.".split(".") == ["a", ""], "a..b".split(".") == ["a", "", "b"].
+  const Json d = Json::parse(
+      R"({"": {"a": 1, "": {"": 2}}, "a": {"": 3, "b": {"c": 4}}, "n": 5, "arr": [{"x": 1}]})");
+  ASSERT_NE(get_path(d, ""), nullptr);
+  EXPECT_EQ(get_path(d, ""), &d[""]);
+  EXPECT_EQ(*get_path(d, ".a"), 1);
+  EXPECT_EQ(*get_path(d, "a."), 3);
+  EXPECT_EQ(*get_path(d, ".."), 2) << "three empty segments";
+  EXPECT_EQ(*get_path(d, "a.b.c"), 4);
+  EXPECT_EQ(get_path(d, "a..b"), nullptr) << "a[''] is a number, not traversed";
+  EXPECT_EQ(get_path(d, "a.b.c."), nullptr) << "trailing dot past a leaf";
+  EXPECT_EQ(get_path(d, "n.x"), nullptr) << "a number is not traversed";
+  EXPECT_EQ(get_path(d, "arr.0"), nullptr) << "an array is not traversed";
+  EXPECT_EQ(get_path(d, "arr.0.x"), nullptr);
+  EXPECT_EQ(get_path(d, "missing"), nullptr);
+  EXPECT_EQ(get_path(d, "a.missing"), nullptr);
+  EXPECT_EQ(get_path(d, "a.b.missing"), nullptr);
+  const Json no_empty = Json::parse(R"({"a": {"b": 1}})");
+  EXPECT_EQ(get_path(no_empty, ""), nullptr);
+  EXPECT_EQ(get_path(no_empty, ".a"), nullptr);
+  EXPECT_EQ(get_path(no_empty, "a."), nullptr);
+  EXPECT_EQ(get_path(no_empty, "a..b"), nullptr);
+  EXPECT_EQ(get_path(Json(5), ""), nullptr) << "a non-object root is never traversed";
+  EXPECT_EQ(get_path(Json::array({1}), "0"), nullptr);
+  EXPECT_EQ(get_path(Json(), "a"), nullptr);
+}
+
+TEST(Paths, GetPathMatchesTheSplitThenWalkReference) {
+  // The lookup walks segments in place; it must find exactly what splitting
+  // the path first and then walking finds.
+  auto reference = [](const Json& data, std::string_view dotted) -> const Json* {
+    std::vector<std::string> parts;
+    std::size_t start = 0;
+    while (true) {
+      const std::size_t dot = dotted.find('.', start);
+      parts.emplace_back(dotted.substr(
+          start, dot == std::string_view::npos ? std::string_view::npos : dot - start));
+      if (dot == std::string_view::npos) {
+        break;
+      }
+      start = dot + 1;
+    }
+    const Json* cur = &data;
+    for (const auto& p : parts) {
+      if (!cur->is_object() || !cur->contains(p)) {
+        return nullptr;
+      }
+      cur = &(*cur)[p];
+    }
+    return cur;
+  };
+  const std::vector<Json> docs{
+      Json::parse(R"({"linear":{"x":0.1,"y":"NaN"},"angular":{"z":null}})"),
+      Json::parse(R"({"":{"":{"":0}},"a":{"":{"b":[1]}},"header":{"stamp":{"sec":1}}})"),
+      Json::parse(R"({"pose":{"pose":{"position":{"x":1,"y":2}}},"twist":{"twist":{}}})"),
+      Json::array({1, 2}),
+      Json("text"),
+      Json(),
+  };
+  const std::vector<std::string> paths{"",
+                                       ".",
+                                       "..",
+                                       "...",
+                                       "a",
+                                       ".a",
+                                       "a.",
+                                       "a..b",
+                                       "a..",
+                                       "linear.x",
+                                       "linear",
+                                       "linear.x.y",
+                                       "linear..x",
+                                       "angular.z",
+                                       "angular.z.w",
+                                       "header",
+                                       "header.stamp",
+                                       "header.stamp.sec",
+                                       "header.stamp.sec.",
+                                       "pose.pose.position.x",
+                                       "pose.pose.position.z",
+                                       "twist.twist",
+                                       "twist.twist.linear.x",
+                                       "0",
+                                       "a..b.0"};
+  for (const Json& d : docs) {
+    for (const auto& p : paths) {
+      EXPECT_EQ(get_path(d, p), reference(d, p)) << "path '" << p << "' in " << d.dump();
+    }
+  }
 }
 
 TEST(Canonical, SortedCompactAndNonFiniteAsStrings) {

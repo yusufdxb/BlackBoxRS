@@ -54,8 +54,16 @@ bool is_strict_int(const Json* v) noexcept {
 }
 
 const Json* get_path(const Json& data, std::string_view dotted) noexcept {
+  // Walks the segments in place (no segment vector): the payload decoders
+  // and publisher-stamp extraction call this for every stored message.
+  // Segments are exactly split_path's, so "", ".a", "a." and "a..b" look up
+  // the empty key like Python's str.split(".") does.
   const Json* cur = &data;
-  for (std::string_view part : split_path(dotted)) {
+  std::size_t start = 0;
+  while (true) {
+    const std::size_t dot = dotted.find('.', start);
+    const std::string_view part =
+        dot == std::string_view::npos ? dotted.substr(start) : dotted.substr(start, dot - start);
     if (!cur->is_object()) {
       return nullptr;
     }
@@ -64,8 +72,11 @@ const Json* get_path(const Json& data, std::string_view dotted) noexcept {
       return nullptr;
     }
     cur = &*it;
+    if (dot == std::string_view::npos) {
+      return cur;
+    }
+    start = dot + 1;
   }
-  return cur;
 }
 
 Json set_path(Json data, std::string_view dotted, Json value) {
