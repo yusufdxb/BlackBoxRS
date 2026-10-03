@@ -5,6 +5,7 @@
 #include <rosidl_typesupport_introspection_cpp/field_types.hpp>
 #include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <new>
@@ -94,6 +95,7 @@ Json field_to_json(const ti::MessageMember& m, const void* msg) {
   }
   const std::size_t n = m.size_function(field);
   Json items = Json::array();
+  items.get_ref<Json::array_t&>().reserve(std::min(n, kMaxList));
   for (std::size_t i = 0; i < n && i < kMaxList; ++i) {
     items.push_back(element_at(m, field, i));
   }
@@ -111,24 +113,50 @@ Json message_to_json(const ti::MessageMembers& mm, const void* msg) {
   return out;
 }
 
-// Dotted path through nested messages to one member.
-bool extract(const ti::MessageMembers& root, const void* msg, const std::string& path, Json& out) {
-  const ti::MessageMembers* mm = &root;
-  const void* cur = msg;
-  std::size_t start = 0;
+// The segments of a dotted path, as Python's str.split(".") gives them.
+std::vector<std::string> split_dotted(const std::string& path) {
   std::vector<std::string> parts;
+  std::size_t start = 0;
   while (true) {
     const auto dot = path.find('.', start);
     parts.push_back(path.substr(start, dot == std::string::npos ? std::string::npos : dot - start));
     if (dot == std::string::npos) {
-      break;
+      return parts;
     }
     start = dot + 1;
   }
-  for (std::size_t k = 0; k < parts.size(); ++k) {
+}
+
+}  // namespace
+
+// One profile field resolved against its type: the member at each segment
+// of the dotted path (every one but the last a nested, non-array message)
+// and the segments themselves as output keys.
+struct IntrospectionDecoder::FieldPlan {
+  std::vector<const ti::MessageMember*> members;
+  std::vector<std::string> keys;
+};
+
+struct IntrospectionDecoder::TopicPlan {
+  bool whole_message = true;         // the profile lists no fields
+  std::vector<FieldPlan> fields;     // resolvable fields, in profile order
+  std::vector<std::string> missing;  // fields the type does not have, in profile order
+};
+
+namespace {
+
+// Resolve a dotted path through nested messages to one member, as Python's
+// getattr chain does: false when a segment names no member, or an earlier
+// segment is a scalar or an array.
+bool resolve(const ti::MessageMembers& root, const std::string& path,
+             std::vector<const ti::MessageMember*>& members, std::vector<std::string>& keys) {
+  keys = split_dotted(path);
+  members.clear();
+  const ti::MessageMembers* mm = &root;
+  for (std::size_t k = 0; k < keys.size(); ++k) {
     const ti::MessageMember* found = nullptr;
     for (std::uint32_t i = 0; i < mm->member_count_; ++i) {
-      if (parts[k] == mm->members_[i].name_) {
+      if (keys[k] == mm->members_[i].name_) {
         found = &mm->members_[i];
         break;
       }
@@ -136,14 +164,13 @@ bool extract(const ti::MessageMembers& root, const void* msg, const std::string&
     if (found == nullptr) {
       return false;
     }
-    if (k + 1 == parts.size()) {
-      out = blackboxrs::set_path(std::move(out), path, field_to_json(*found, cur));
+    members.push_back(found);
+    if (k + 1 == keys.size()) {
       return true;
     }
     if (found->type_id_ != ti::ROS_TYPE_MESSAGE || found->is_array_) {
       return false;  // Python's getattr path cannot go through arrays or scalars either
     }
-    cur = static_cast<const unsigned char*>(cur) + found->offset_;
     mm = members_of(*found);
   }
   return false;
@@ -187,7 +214,6 @@ IntrospectionDecoder::IntrospectionDecoder(const blackboxrs::Profile& profile) {
   std::map<std::string, std::shared_ptr<Type>> by_type;
   for (const auto& t : profile.topics) {
     topic_types_.push_back(t.type);
-    fields_.push_back(t.fields);
     std::shared_ptr<Type> type;
     if (const auto it = by_type.find(t.type); it != by_type.end()) {
       type = it->second;
@@ -199,7 +225,20 @@ IntrospectionDecoder::IntrospectionDecoder(const blackboxrs::Profile& profile) {
         errors_[t.type] = exc.what();
       }
     }
+    TopicPlan plan;
+    plan.whole_message = t.fields.empty();
+    if (type) {
+      for (const auto& f : t.fields) {
+        FieldPlan fp;
+        if (resolve(*type->members, f, fp.members, fp.keys)) {
+          plan.fields.push_back(std::move(fp));
+        } else {
+          plan.missing.push_back(f);
+        }
+      }
+    }
     by_topic_.push_back(type);
+    plans_.push_back(std::move(plan));
   }
 }
 
@@ -228,16 +267,32 @@ blackboxrs::recorder::DecodeResult IntrospectionDecoder::decode(
     r.error = std::string("CDR deserialization failed: ") + exc.what();
     return r;
   }
-  if (fields_[topic].empty()) {
+  const TopicPlan& plan = plans_[topic];
+  if (plan.whole_message) {
     r.data = message_to_json(*t.members, t.buffer);
     return r;
   }
   Json out = Json::object();
-  for (const auto& f : fields_[topic]) {
-    if (!extract(*t.members, t.buffer, f, out)) {
-      r.missing.push_back(f);
+  for (const FieldPlan& f : plan.fields) {
+    // Down to the message holding the leaf member.
+    const void* cur = t.buffer;
+    for (std::size_t k = 0; k + 1 < f.members.size(); ++k) {
+      cur = static_cast<const unsigned char*>(cur) + f.members[k]->offset_;
     }
+    Json value = field_to_json(*f.members.back(), cur);
+    // Stored like blackboxrs::set_path(out, path, value): intermediate
+    // non-objects are replaced by objects.
+    Json* node = &out;
+    for (std::size_t k = 0; k + 1 < f.keys.size(); ++k) {
+      Json& next = (*node)[f.keys[k]];
+      if (!next.is_object()) {
+        next = Json::object();
+      }
+      node = &next;
+    }
+    (*node)[f.keys.back()] = std::move(value);
   }
+  r.missing = plan.missing;
   r.data = std::move(out);
   return r;
 }

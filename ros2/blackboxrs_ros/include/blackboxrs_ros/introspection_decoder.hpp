@@ -10,6 +10,13 @@
 // as "NaN"/"Infinity" strings, sequences longer than 256 kept as
 // {"len", "head", "truncated"}, missing profile fields reported.
 //
+// Profile fields are resolved once per topic, when the decoder is built:
+// each dotted path becomes the chain of introspection members it walks (and
+// the output keys it is stored under), and a path the type does not have is
+// kept for the missing-field report. Whether a path exists depends only on
+// the type, so decoding a message neither splits paths nor searches member
+// names.
+//
 // Deserialization happens on the recorder's pipeline thread, never in the
 // subscription callback. A decoder instance is used by one thread.
 #pragma once
@@ -53,8 +60,10 @@ class IntrospectionDecoder final : public blackboxrs::recorder::MessageDecoder {
 
  private:
   struct Type;
+  struct FieldPlan;
+  struct TopicPlan;
   std::vector<std::shared_ptr<Type>> by_topic_;
-  std::vector<std::vector<std::string>> fields_;
+  std::vector<TopicPlan> plans_;               // per topic, built with by_topic_
   std::map<std::string, std::string> errors_;  // type -> load error
   std::vector<std::string> topic_types_;
 };
