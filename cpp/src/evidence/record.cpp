@@ -147,7 +147,8 @@ std::optional<double> publisher_stamp(Role role, const Json& data) {
 
 Record make_msg_record(std::string topic, Role role, std::string type, Json data, bool stored,
                        MonoTime t_mono, WallTime t_wall, std::optional<RosTime> t_ros,
-                       std::optional<SourceTime> dds_src, std::optional<WallTime> dds_rx) {
+                       std::optional<SourceTime> dds_src, std::optional<WallTime> dds_rx,
+                       TypedView typed_view) {
   Record r;
   r.kind = RecordKind::msg;
   r.topic = std::move(topic);
@@ -175,7 +176,9 @@ Record make_msg_record(std::string topic, Role role, std::string type, Json data
     r.pub_stamp_domain = stamp_source(role)->domain;
   }
   if (stored) {
-    r.typed = decode_payload(role, data);
+    if (typed_view == TypedView::decode) {
+      r.typed = decode_payload(role, data);
+    }
     r.data = std::make_shared<const Json>(std::move(data));
   }
   return r;

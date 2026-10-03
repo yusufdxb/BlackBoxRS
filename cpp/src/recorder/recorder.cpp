@@ -403,8 +403,11 @@ void Recorder::handle_message(MessageArrival& m) {
   // The payload handle is released here, before the record is built.
   m.payload.reset();
   last_msg_mono_ = count_ns(m.t_mono);
+  // A serializing core drops the typed view unread right after ingest, so
+  // it is not built (the trigger checks read the JSON payload).
+  const TypedView typed = core_->serializes() ? TypedView::skip : TypedView::decode;
   core_->ingest(make_msg_record(spec.name, spec.role, spec.type, std::move(data), stored, m.t_mono,
-                                m.t_wall, m.t_ros, m.src, m.rx));
+                                m.t_wall, m.t_ros, m.src, m.rx, typed));
   processed_.fetch_add(1, std::memory_order_relaxed);
 }
 

@@ -73,13 +73,21 @@ struct Record {
 
 using RecordPtr = std::shared_ptr<const Record>;
 
+// Whether make_msg_record builds the record's typed view of a stored
+// payload. `skip` leaves it Opaque, for a caller that never reads it: the
+// recorder, whose FlightCore serializes each record and then drops the
+// typed view (its triggers read the JSON). Replay and everything else
+// decode.
+enum class TypedView : std::uint8_t { decode, skip };
+
 // Message record with the publisher stamp resolved from the role
 // (Python records.make_msg_record / publisher_stamp).
 [[nodiscard]] Record make_msg_record(std::string topic, Role role, std::string type, Json data,
                                      bool stored, MonoTime t_mono, WallTime t_wall,
                                      std::optional<RosTime> t_ros,
                                      std::optional<SourceTime> dds_src,
-                                     std::optional<WallTime> dds_rx);
+                                     std::optional<WallTime> dds_rx,
+                                     TypedView typed_view = TypedView::decode);
 
 [[nodiscard]] Record make_event_record(RecordKind kind, MonoTime t_mono, WallTime t_wall,
                                        OrderedJson fields = OrderedJson::object());

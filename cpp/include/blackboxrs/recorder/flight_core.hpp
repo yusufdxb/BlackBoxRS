@@ -147,6 +147,9 @@ class FlightCore {
   [[nodiscard]] std::size_t ring_records() const noexcept { return ring_.size(); }
   [[nodiscard]] std::int64_t ring_bytes() const noexcept { return ring_bytes_; }
   [[nodiscard]] const Profile& profile() const noexcept { return profile_; }
+  // True when ingest() serializes records and then drops their payload and
+  // typed view (CoreOptions::serialize).
+  [[nodiscard]] bool serializes() const noexcept { return options_.serialize; }
 
  private:
   struct Open {

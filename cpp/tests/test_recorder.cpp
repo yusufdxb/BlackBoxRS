@@ -196,6 +196,53 @@ std::uint64_t accounted(const RecorderMetrics& m) {
   return m.processed + m.dropped_ingest + m.dropped_at_shutdown;
 }
 
+TEST(Recorder, SkippingTheTypedViewChangesNothingThatIsRecorded) {
+  // The recorder builds message records with TypedView::skip because its
+  // serializing core drops the typed view unread. Everything that reaches
+  // the evidence (payload, publisher stamp, serialized line) must be what a
+  // record built with the typed view gives.
+  const std::vector<std::tuple<Role, const char*, Json>> cases{
+      {Role::cmd_vel_source, "geometry_msgs/msg/Twist", twist(0.25)},
+      {Role::helix_hold,
+       "helix_msgs/msg/HelixHold",
+       {{"hold", true}, {"epoch", 1}, {"stamp", 1789.5}, {"fault_id", "F7"}}},
+      {Role::odometry,
+       "nav_msgs/msg/Odometry",
+       {{"header", {{"stamp", {{"sec", 12}, {"nanosec", 500}}}}},
+        {"pose", {{"pose", {{"position", {{"x", 1.0}, {"y", 2.0}}}}}}}}},
+      {Role::sink_trace,
+       "std_msgs/msg/String",
+       {{"data", R"({"t_wall":1789.25,"sink":"robot","out":[0.1,0,0]})"}}},
+      {Role::go2_state, "unitree_go/msg/LowState", {{"tick", 3}, {"stamp", 0}}}};
+  const MonoTime mono = mono_ns(1'000'000);
+  const WallTime wall = wall_ns(1'789'000'000'000'000'000);
+  for (const auto& [role, type, data] : cases) {
+    for (const bool stored : {true, false}) {
+      Record full = make_msg_record("/t", role, type, data, stored, mono, wall, std::nullopt,
+                                    source_ns(1), wall, TypedView::decode);
+      Record lean = make_msg_record("/t", role, type, data, stored, mono, wall, std::nullopt,
+                                    source_ns(1), wall, TypedView::skip);
+      EXPECT_TRUE(std::holds_alternative<OpaquePayload>(lean.typed)) << type;
+      ASSERT_EQ(full.data == nullptr, lean.data == nullptr) << type;
+      if (full.data) {
+        EXPECT_EQ(canonical_json(*lean.data), canonical_json(*full.data)) << type;
+      }
+      EXPECT_EQ(lean.pub_stamp_s, full.pub_stamp_s) << type;
+      EXPECT_EQ(lean.pub_stamp_domain, full.pub_stamp_domain) << type;
+      full.seq = lean.seq = 9;
+      full.serialize();
+      lean.serialize();
+      EXPECT_EQ(lean.line, full.line) << type;
+    }
+  }
+  // The default still builds the typed view (replay and every other caller).
+  const Record dflt =
+      make_msg_record("/t", Role::cmd_vel_source, "geometry_msgs/msg/Twist", twist(0.25), true,
+                      mono, wall, std::nullopt, std::nullopt, std::nullopt);
+  ASSERT_TRUE(std::holds_alternative<VelocityCommand>(dflt.typed));
+  EXPECT_DOUBLE_EQ(std::get<VelocityCommand>(dflt.typed).lx().value, 0.25);
+}
+
 TEST(Recorder, ContinuousCaptureIsVerifiedAndReplayable) {
   testing::TempDir tmp;
   Profile p = parse_profile_text(kProfile);
