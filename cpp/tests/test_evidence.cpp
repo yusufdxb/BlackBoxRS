@@ -264,6 +264,37 @@ TEST(Events, FromRecordKeepsClockDomainsApart) {
   EXPECT_DOUBLE_EQ(v->lx().value, 0.15);
 }
 
+TEST(Events, SetDataFromAMovedPayloadEqualsTheCopy) {
+  // The online monitor moves the decoded payload into its event instead of
+  // copying it; the event must hold the same data and the same typed view.
+  const std::vector<std::pair<Role, const char*>> cases{
+      {Role::cmd_vel_source, R"({"linear":{"x":0.15,"y":"NaN","z":0},"angular":{"z":"fast"}})"},
+      {Role::helix_hold, R"({"hold":true,"epoch":2,"seq":3,"fault_id":"F1","reason":"x"})"},
+      {Role::arbiter_status, R"({"reason":"hold","out":{"linear":{"x":0.0}}})"},
+      {Role::odometry, R"({"pose":{"pose":{"position":{"x":1.5,"y":2}}},"twist":{}})"},
+      {Role::go2_state, R"({"tick":7})"}};
+  for (const auto& [role, text] : cases) {
+    MessageBody copied;
+    MessageBody moved;
+    copied.role = role;
+    moved.role = role;
+    const Json payload = Json::parse(text);
+    copied.set_data(payload);
+    Json owned = payload;
+    moved.set_data(std::move(owned));
+    ASSERT_NE(moved.data, nullptr);
+    EXPECT_EQ(canonical_json(*moved.data), canonical_json(*copied.data)) << text;
+    EXPECT_EQ(moved.typed.index(), copied.typed.index()) << text;
+    if (const auto* v = std::get_if<VelocityCommand>(&moved.typed)) {
+      const auto& c = std::get<VelocityCommand>(copied.typed);
+      for (std::size_t i = 0; i < v->axes.size(); ++i) {
+        EXPECT_EQ(v->axes[i].state, c.axes[i].state);
+      }
+      EXPECT_EQ(v->forwarded, c.forwarded);
+    }
+  }
+}
+
 TEST(Events, ReceiptFallsBackToCallbackWallTime) {
   const Json r = Json::parse(R"({"kind":"msg","topic":"/x","role":"other","type":"a/msg/B",
     "t_mono_ns":10,"t_wall_ns":77,"dds_src_ns":0,"dds_rx_ns":null,"seq":1,"data":null})");

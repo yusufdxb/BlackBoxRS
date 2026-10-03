@@ -138,7 +138,7 @@ class MonitorNode final : public rclcpp::Node {
   void handle_message(std::size_t i, std::shared_ptr<rclcpp::SerializedMessage> msg,
                       const rmw_message_info_t& info) {
     const auto& spec = cfg_.profile.topics[i];
-    const auto r = decoder_.decode(i, SerializedPayload(std::move(msg)));
+    auto r = decoder_.decode(i, SerializedPayload(std::move(msg)));
     blackboxrs::Event e;
     e.t = now_rt();
     e.order = blackboxrs::OrderKey{0, ++seq_, 0};
@@ -153,7 +153,8 @@ class MonitorNode final : public rclcpp::Node {
         info.received_timestamp != 0 ? info.received_timestamp
                                      : blackboxrs::count_ns(blackboxrs::clock_domain::Wall::now()));
     if (r.data) {
-      m.set_data(*r.data);
+      // The decoded tree is not used again here: move it, do not copy it.
+      m.set_data(std::move(*r.data));
     } else {
       ++decode_errors_;
       return;
