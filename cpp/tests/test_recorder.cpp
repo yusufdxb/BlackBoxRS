@@ -1,12 +1,18 @@
 #include <gtest/gtest.h>
 #include <sys/resource.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <csignal>
+#include <mutex>
+#include <set>
+#include <sstream>
 #include <thread>
 
 #include "blackboxrs/evidence/bundle.hpp"
 #include "blackboxrs/evidence/integrity_record.hpp"
+#include "blackboxrs/integrity.hpp"
 #include "blackboxrs/recorder/bounded_queue.hpp"
 #include "blackboxrs/recorder/recorder.hpp"
 #include "test_support.hpp"
@@ -684,6 +690,309 @@ TEST(RecorderDeathTest, WriteFailureIsNeverFinalized) {
         std::_Exit(0);
       },
       ::testing::ExitedWithCode(0), "");
+}
+
+// ---------------------------------------------------------------------------
+// evidence writer: records written together (writev)
+// ---------------------------------------------------------------------------
+
+RecordPtr fixed_record(std::int64_t seq, std::size_t pad) {
+  auto r = std::make_shared<Record>();
+  r->kind = RecordKind::marker;
+  r->seq = seq;
+  r->t_mono = mono_ns(1'000'000 + seq);
+  r->line = R"({"kind":"marker","seq":)" + std::to_string(seq) + R"(,"pad":")" +
+            std::string(pad, 'x') + "\"}";
+  return r;
+}
+
+Trigger fixed_trigger(const std::string& type, std::int64_t seq, std::int64_t wall_s) {
+  Trigger t;
+  t.type = type;
+  t.seq = seq;
+  t.t_mono = mono_ns(1'000'000 + seq);
+  t.t_wall = WallTime{std::chrono::seconds(wall_s)};
+  return t;
+}
+
+WriterOptions writer_options(const fs::path& dir) {
+  WriterOptions o;
+  o.session_dir = dir;
+  o.chunk_records = 7;
+  o.chunk_bytes = 300;  // boundaries by bytes as well as by records
+  return o;
+}
+
+ManifestContext writer_context() {
+  ManifestContext c;
+  c.session = {{"session_id", "test"}};
+  c.profile = Json::object();
+  c.config_sha256 = "test";
+  c.writer_build = {{"implementation", "blackboxrs-cpp"}};
+  return c;
+}
+
+// Holds the writer at its first operation until released, so everything
+// submitted meanwhile is dequeued together.
+struct Gate {
+  std::atomic<bool> open{false};
+  std::function<void()> hook() {
+    return [this] {
+      while (!open.load()) {
+        std::this_thread::sleep_for(1ms);
+      }
+    };
+  }
+};
+
+// One bundle with fixed content: 3 pre-trigger records, the trigger, then
+// `n` appends (pad sizes vary) with a secondary trigger after every 50th.
+// Returns the bundle directory (final or .partial).
+fs::path write_fixed_bundle(WriterOptions o, int n, std::size_t pad_scale = 1) {
+  const fs::path dir = o.session_dir;
+  Gate gate;
+  o.before_op = gate.hook();
+  {
+    EvidenceWriter w(std::move(o), writer_context());
+    auto sink = w.make_sink(nullptr, nullptr);
+    std::vector<RecordPtr> pre = {fixed_record(1, 5), fixed_record(2, 40), fixed_record(3, 0)};
+    (void)sink->open(fixed_trigger("hold", 4, 1'800'000'000), std::move(pre), PreWindow{});
+    std::int64_t seq = 5;
+    for (int i = 1; i <= n; ++i) {
+      sink->append(fixed_record(seq++, pad_scale * static_cast<std::size_t>((i * 37) % 97)));
+      if (i % 50 == 0) {
+        sink->add_trigger(fixed_trigger("note", seq++, 1'800'000'001));
+      }
+    }
+    (void)sink->close("complete", Json::object());
+    gate.open.store(true);
+    w.finish();
+  }
+  const auto dirs = bundles_in(dir);
+  return dirs.size() == 1 ? dirs[0] : fs::path();
+}
+
+// writev that writes at most `limit` bytes of the first iovecs.
+ssize_t short_writev(int fd, const iovec* iov, int cnt, std::size_t limit) {
+  std::vector<iovec> part;
+  for (int i = 0; i < cnt && limit != 0; ++i) {
+    const std::size_t take = std::min(limit, iov[i].iov_len);
+    part.push_back({iov[i].iov_base, take});
+    limit -= take;
+  }
+  return ::writev(fd, part.data(), static_cast<int>(part.size()));
+}
+
+TEST(EvidenceWriter, ShortWritesResumeMidLineAndKeepHashAndChunksExact) {
+  testing::TempDir control_dir;
+  const fs::path control = write_fixed_bundle(writer_options(control_dir.path()), 400);
+  ASSERT_FALSE(control.empty());
+  ASSERT_FALSE(control.string().ends_with(".partial"));
+  ASSERT_EQ(validate_bundle(control).status, ValidationStatus::verified);
+
+  testing::TempDir tmp;
+  WriterOptions o = writer_options(tmp.path());
+  std::atomic<int> calls{0};
+  std::atomic<int> short_writes{0};
+  o.records_writev = [&](int fd, const iovec* iov, int cnt) -> ssize_t {
+    const int k = calls.fetch_add(1);
+    if (k % 5 == 4) {
+      errno = EINTR;  // interrupted before writing anything
+      return -1;
+    }
+    // 1 and 2 bytes stop inside a line or right before its newline; the
+    // others inside or across records.
+    static constexpr std::array<std::size_t, 5> kLimits = {1, 2, 7, 64, 333};
+    std::size_t total = 0;
+    for (int i = 0; i < cnt; ++i) {
+      total += iov[i].iov_len;
+    }
+    const std::size_t limit = kLimits[static_cast<std::size_t>(k) % kLimits.size()];
+    if (limit < total) {
+      short_writes.fetch_add(1);
+    }
+    return short_writev(fd, iov, cnt, limit);
+  };
+  const fs::path b = write_fixed_bundle(std::move(o), 400);
+  ASSERT_FALSE(b.empty());
+  EXPECT_GT(short_writes.load(), 400);
+  EXPECT_EQ(validate_bundle(b).status, ValidationStatus::verified);
+  EXPECT_EQ(testing::read_file(b / "records.jsonl"), testing::read_file(control / "records.jsonl"))
+      << "every byte once, in order";
+  EXPECT_EQ(testing::read_file(b / "integrity.json"),
+            testing::read_file(control / "integrity.json"))
+      << "same SHA-256, counts and chunk table (offsets, lengths, CRCs, seqs)";
+  const BundleRead r = load_bundle(b);
+  EXPECT_EQ(r.manifest["status"], "complete");
+  EXPECT_EQ(r.manifest["writer"]["records_written"], 3 + 1 + 400 + 8);
+  EXPECT_EQ(r.manifest["writer"]["records_unwritten"], 0);
+}
+
+TEST(EvidenceWriter, QueuedAppendsGoOutInBoundedWritevsWithOneSharedNewline) {
+  for (const std::size_t pad_scale : {std::size_t{1}, std::size_t{300}}) {
+    testing::TempDir tmp;
+    WriterOptions o = writer_options(tmp.path());
+    std::mutex mu;
+    std::vector<std::pair<int, std::size_t>> writes;  // iovecs, bytes
+    std::set<const void*> newline_addresses;
+    bool newline_after_every_line = true;
+    o.records_writev = [&](int fd, const iovec* iov, int cnt) -> ssize_t {
+      std::lock_guard lock(mu);
+      std::size_t bytes = 0;
+      for (int i = 0; i < cnt; ++i) {
+        bytes += iov[i].iov_len;
+        if (i % 2 == 1) {
+          newline_after_every_line &=
+              iov[i].iov_len == 1 && *static_cast<const char*>(iov[i].iov_base) == '\n';
+          newline_addresses.insert(iov[i].iov_base);
+        }
+      }
+      writes.emplace_back(cnt, bytes);
+      return ::writev(fd, iov, cnt);
+    };
+    const fs::path b = write_fixed_bundle(std::move(o), 2000, pad_scale);
+    ASSERT_FALSE(b.empty());
+    EXPECT_EQ(validate_bundle(b).status, ValidationStatus::verified);
+    std::size_t records = 0;
+    for (const auto& [cnt, bytes] : writes) {
+      EXPECT_EQ(cnt % 2, 0);
+      EXPECT_LE(cnt, 1024) << "IOV_MAX";
+      EXPECT_TRUE(cnt == 2 || bytes <= std::size_t{1} << 20U) << "byte cap, unless one record";
+      records += static_cast<std::size_t>(cnt / 2);
+    }
+    EXPECT_EQ(records, 3U + 1U + 2000U + 40U) << "no short writes here: one write per line";
+    EXPECT_TRUE(newline_after_every_line);
+    EXPECT_EQ(newline_addresses.size(), 1U) << "the newline is shared, never copied";
+    if (pad_scale == 1) {
+      // 2000 appends and 40 triggers: runs end at each trigger, so about
+      // 1 + 40 + 41 writes, far fewer than one per record.
+      EXPECT_LE(writes.size(), 100U) << "already-queued appends are written together";
+    } else {
+      // About 14 KB per record: the 1 MiB cap splits the runs.
+      EXPECT_GT(writes.size(), 40U);
+    }
+  }
+}
+
+TEST(EvidenceWriter, WriteErrorInsideARunCountsOnlyCompleteRecords) {
+  testing::TempDir control_dir;
+  const fs::path control = write_fixed_bundle(writer_options(control_dir.path()), 300);
+  ASSERT_FALSE(control.empty());
+  const std::string all = testing::read_file(control / "records.jsonl");
+  // Cut inside a line in the middle of the appends.
+  std::size_t cut = all.size() / 2;
+  while (all[cut - 1] == '\n') {
+    ++cut;
+  }
+  const std::size_t complete_bytes = all.rfind('\n', cut - 1) + 1;
+  const auto complete = static_cast<std::uint64_t>(
+      std::count(all.begin(), all.begin() + static_cast<std::ptrdiff_t>(complete_bytes), '\n'));
+  const auto total = static_cast<std::uint64_t>(std::count(all.begin(), all.end(), '\n'));
+
+  testing::TempDir tmp;
+  WriterOptions o = writer_options(tmp.path());
+  std::atomic<std::size_t> on_disk{0};
+  o.records_writev = [&](int fd, const iovec* iov, int cnt) -> ssize_t {
+    const std::size_t room = cut - on_disk.load();
+    if (room == 0) {
+      errno = ENOSPC;
+      return -1;
+    }
+    const ssize_t w = short_writev(fd, iov, cnt, room);
+    if (w > 0) {
+      on_disk.fetch_add(static_cast<std::size_t>(w));
+    }
+    return w;
+  };
+  const fs::path b = write_fixed_bundle(std::move(o), 300);
+  ASSERT_FALSE(b.empty());
+  EXPECT_TRUE(b.string().ends_with(".partial")) << "never finalized";
+  const std::string written = testing::read_file(b / "records.jsonl");
+  EXPECT_EQ(written, all.substr(0, cut)) << "the torn line's bytes stay on disk";
+  const BundleRead r = load_bundle(b);
+  EXPECT_EQ(r.manifest["status"], "write_failed");
+  EXPECT_EQ(r.manifest["writer"]["records_written"], complete);
+  EXPECT_EQ(r.manifest["writer"]["records_unwritten"], total - complete);
+  EXPECT_EQ(r.manifest["writer"]["write_errors"], 1);
+  EXPECT_NE(r.manifest["writer"]["first_write_error"].get<std::string>().find(
+                "write records.jsonl: ENOSPC"),
+            std::string::npos);
+  const auto ir = IntegrityRecord::from_json(Json::parse(testing::read_file(b / "integrity.json")));
+  EXPECT_FALSE(ir.complete);
+  EXPECT_EQ(ir.records, complete);
+  EXPECT_EQ(ir.bytes, complete_bytes);
+  EXPECT_EQ(ir.sha256, sha256_hex(all.substr(0, complete_bytes)))
+      << "only complete records are hashed";
+  std::uint64_t offset = 0;
+  std::uint64_t in_chunks = 0;
+  for (const auto& c : ir.chunks) {
+    EXPECT_EQ(c.offset, offset);
+    EXPECT_EQ(c.crc32c, crc32c(std::string_view(all).substr(c.offset, c.length)));
+    offset += c.length;
+    in_chunks += c.records;
+  }
+  EXPECT_EQ(offset, complete_bytes) << "the chunk table ends at the last complete record";
+  EXPECT_EQ(in_chunks, complete);
+}
+
+TEST(EvidenceWriter, TriggersClosesAndOtherBundlesEndARun) {
+  testing::TempDir tmp;
+  WriterOptions o = writer_options(tmp.path());
+  o.fsync_every = 0ms;  // an fsync after every write
+  Gate gate;
+  o.before_op = gate.hook();
+  std::vector<std::string> expect_a;
+  std::vector<std::string> expect_b;
+  {
+    EvidenceWriter w(std::move(o), writer_context());
+    auto a = w.make_sink(nullptr, nullptr);
+    auto b = w.make_sink(nullptr, nullptr);
+    auto line = [](const RecordPtr& r) { return r->line; };
+    (void)a->open(fixed_trigger("hold", 1, 1'800'000'000), {}, PreWindow{});
+    (void)b->open(fixed_trigger("stale", 1, 1'800'000'000), {}, PreWindow{});
+    std::int64_t sa = 2;
+    std::int64_t sb = 2;
+    for (int i = 0; i < 30; ++i) {
+      for (int k = 0; k < 3; ++k) {
+        const RecordPtr ra = fixed_record(sa++, 10);
+        a->append(ra);
+        expect_a.push_back(line(ra));
+      }
+      const RecordPtr rb = fixed_record(sb++, 20);
+      b->append(rb);
+      expect_b.push_back(line(rb));
+      if (i == 10) {
+        a->add_trigger(fixed_trigger("note", sa++, 1'800'000'001));
+        expect_a.emplace_back("trigger");
+      }
+      if (i == 20) {
+        (void)a->close("complete", Json::object());
+      }
+    }
+    (void)b->close("complete", Json::object());
+    gate.open.store(true);
+    w.finish();
+  }
+  const auto dirs = bundles_in(tmp.path());
+  ASSERT_EQ(dirs.size(), 2U);
+  for (const auto& d : dirs) {
+    EXPECT_EQ(validate_bundle(d).status, ValidationStatus::verified) << d;
+    const bool is_a = d.filename().string().ends_with("_hold");
+    // Appends to A after its close are not written to it.
+    std::vector<std::string> want = is_a ? expect_a : expect_b;
+    if (is_a) {
+      want.resize(21 * 3 + 1);
+    }
+    std::vector<std::string> got;
+    std::istringstream in(testing::read_file(d / "records.jsonl"));
+    std::string l;
+    std::getline(in, l);  // the primary trigger
+    EXPECT_NE(l.find("\"kind\":\"trigger\""), std::string::npos);
+    while (std::getline(in, l)) {
+      got.push_back(l.find("\"kind\":\"trigger\"") != std::string::npos ? "trigger" : l);
+    }
+    EXPECT_EQ(got, want) << d << ": every record in its own bundle, in submission order";
+  }
 }
 
 // ---------------------------------------------------------------------------

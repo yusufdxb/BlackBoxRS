@@ -14,8 +14,16 @@
 //   * creates <session>/<bundle_id>.partial with manifest.json (status
 //     "capturing") and appends records.jsonl, fsyncing at least every
 //     fsync_every and at close;
+//   * writes the records it has already dequeued for the bundle together:
+//     a run of consecutive appends (or an open's pre-trigger records) goes
+//     out in bounded writev calls, each line followed by one shared static
+//     newline, never waiting for more records to fill a batch. Any other
+//     operation (trigger, close, another bundle) ends the run, so it is
+//     written after every record queued before it; a write that stops part
+//     way through a line resumes at the next byte;
 //   * streams every byte through SHA-256 and a CRC-32C chunk table
 //     (records.jsonl is never re-read, so a large bundle never stalls it);
+//     only records that reached the file completely are hashed and counted;
 //   * appends each completed chunk-table entry to integrity.chunks.tmp in
 //     the bundle directory rather than keeping it in memory, so the writer's
 //     memory does not grow with the length of a bundle;
@@ -35,6 +43,9 @@
 // damaged evidence as final.
 #pragma once
 
+#include <sys/types.h>
+#include <sys/uio.h>
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -43,7 +54,11 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <thread>
 #include <variant>
 #include <vector>
@@ -65,6 +80,9 @@ struct WriterOptions {
   // Tests only: called on the writer thread before each operation (to
   // simulate a slow or stuck disk). Empty in production.
   std::function<void()> before_op;
+  // Tests only: stands in for ::writev on records.jsonl (to simulate short
+  // writes, EINTR and write errors). Empty in production.
+  std::function<ssize_t(int fd, const iovec* iov, int iovcnt)> records_writev;
 };
 
 // Everything the manifest states that does not change during a session.
@@ -149,15 +167,30 @@ class EvidenceWriter {
   class Sink;
   struct Bundle;
 
+  // One records.jsonl line (without its newline) and what it accounts as.
+  struct Line {
+    std::string_view text;
+    std::int64_t seq = 0;
+    std::optional<std::int64_t> t_mono;
+  };
+
   // False when the operation could not be handed over (writer stalled or finished).
   bool enqueue(Op op);
   void run(std::stop_token stop);
+  // A dequeued operation, or a run of consecutive appends to one bundle.
+  void process(std::span<Op> ops);
   void handle(Op& op);
+  void append_run(std::span<Op> appends);
+  void write_lines(Bundle& b, std::span<const Line> lines);
+  void account(Bundle& b, const Line& line, std::int64_t now_ns, std::int64_t& max_lag);
+  void spool_chunk(Bundle& b);
+  void fail(Bundle& b, const std::string& what, const std::error_code& ec);
 
   WriterOptions options_;
   ManifestContext context_;
   BoundedQueue<Op> queue_;
   std::map<std::string, std::unique_ptr<Bundle>> open_;  // writer thread only
+  std::vector<Line> lines_;                              // writer thread only (scratch)
   std::atomic<std::uint64_t> records_written_{0};
   std::atomic<std::uint64_t> records_unwritten_{0};
   std::atomic<std::uint64_t> bytes_written_{0};

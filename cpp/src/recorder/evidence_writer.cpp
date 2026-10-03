@@ -1,11 +1,16 @@
 #include "blackboxrs/recorder/evidence_writer.hpp"
 
 #include <fcntl.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
+#include <climits>
 #include <cstring>
 #include <ctime>
+#include <limits>
 #include <system_error>
 #include <vector>
 
@@ -67,6 +72,21 @@ std::error_code write_all(int fd, std::string_view data) {
     data.remove_prefix(static_cast<std::size_t>(n));
   }
   return {};
+}
+
+// records.jsonl writes: one writev covers at most this many iovecs (two per
+// record: its line and the shared newline) and about kMaxWriteBytes; a
+// single longer record is written on its own.
+constexpr std::size_t kMaxIov = std::min<std::size_t>(IOV_MAX, 1024);
+constexpr std::size_t kMaxLinesPerWrite = kMaxIov / 2;
+constexpr std::size_t kMaxWriteBytes = 1U << 20U;
+// The newline after every record, referenced by every writev instead of
+// being copied after each line. writev only reads it.
+constexpr std::string_view kNewline = "\n";
+
+void* iov_base(std::string_view s) {
+  // iovec has one pointer type for reading and writing; writev only reads.
+  return const_cast<char*>(s.data());  // NOLINT(cppcoreguidelines-pro-type-const-cast)
 }
 
 std::error_code fsync_fd(int fd) {
@@ -403,33 +423,22 @@ void EvidenceWriter::run(std::stop_token stop) {
     batch.clear();
     const std::size_t n =
         queue_.pop_batch(batch, 512, Clock::now() + std::chrono::milliseconds(200), stop);
-    for (Op& op : batch) {
-      try {
-        if (options_.before_op) {
-          options_.before_op();
-        }
-        handle(op);
-      } catch (const std::exception& exc) {
-        // A bug or an unexpected library error must not take the evidence
-        // thread down silently: count it against its bundle (whatever the
-        // operation was) so that bundle can only close as write_failed.
-        write_errors_.fetch_add(1);
-        const std::string* id = bundle_of(op);
-        if (std::holds_alternative<OpAppend>(op)) {
-          records_unwritten_.fetch_add(1);
-        }
-        if (id != nullptr) {
-          if (auto it = open_.find(*id); it != open_.end()) {
-            ++it->second->write_errors;
-            if (std::holds_alternative<OpAppend>(op)) {
-              ++it->second->unwritten;
-            }
-            if (it->second->first_error.empty()) {
-              it->second->first_error = std::string("internal: ") + exc.what();
-            }
+    // Consecutive appends to one bundle are written together; any other
+    // operation, or an append to another bundle, ends the run. Only what was
+    // already dequeued is grouped: nothing waits for a batch to fill.
+    for (std::size_t i = 0; i < n;) {
+      std::size_t j = i + 1;
+      if (const auto* a = std::get_if<OpAppend>(&batch[i])) {
+        while (j < n && j - i < kMaxLinesPerWrite) {
+          const auto* next = std::get_if<OpAppend>(&batch[j]);
+          if (next == nullptr || next->bundle_id != a->bundle_id) {
+            break;
           }
+          ++j;
         }
       }
+      process(std::span<Op>(batch).subspan(i, j - i));
+      i = j;
     }
     // Periodic fsync of open bundles even when idle.
     for (auto& [id, b] : open_) {
@@ -465,87 +474,219 @@ void EvidenceWriter::run(std::stop_token stop) {
   }
 }
 
-void EvidenceWriter::handle(Op& op) {
-  auto fail = [this](Bundle& b, const std::string& what, const std::error_code& ec) {
-    ++b.write_errors;
+void EvidenceWriter::process(std::span<Op> ops) {
+  Bundle* bundle = nullptr;
+  std::uint64_t accounted_before = 0;
+  const bool appends = std::holds_alternative<OpAppend>(ops.front());
+  if (const std::string* id = bundle_of(ops.front()); id != nullptr) {
+    if (auto it = open_.find(*id); it != open_.end()) {
+      bundle = it->second.get();
+      accounted_before = bundle->integrity.records + bundle->unwritten;
+    }
+  }
+  try {
+    if (options_.before_op) {
+      for (std::size_t k = 0; k < ops.size(); ++k) {
+        options_.before_op();
+      }
+    }
+    if (appends) {
+      append_run(ops);
+    } else {
+      handle(ops.front());
+    }
+  } catch (const std::exception& exc) {
+    // A bug or an unexpected library error must not take the evidence
+    // thread down silently: count it against its bundle (whatever the
+    // operation was) so that bundle can only close as write_failed. Appends
+    // the run had not accounted for yet are unwritten.
     write_errors_.fetch_add(1);
-    if (b.first_error.empty()) {
-      b.first_error = what + ": " + describe(ec);
+    std::uint64_t lost = 0;
+    if (appends) {
+      const std::uint64_t accounted =
+          bundle != nullptr ? bundle->integrity.records + bundle->unwritten - accounted_before : 0;
+      lost = ops.size() - std::min<std::uint64_t>(accounted, ops.size());
+      records_unwritten_.fetch_add(lost);
     }
-  };
-  // One completed chunk to the on-disk chunk table.
-  auto spool_chunk = [&](Bundle& b) {
-    b.chunk_open = false;
-    if (!b.chunks_fd.valid()) {
-      fail(b, "write integrity chunk table", std::error_code(EBADF, std::generic_category()));
-      return;
+    if (const std::string* id = bundle_of(ops.front()); id != nullptr) {
+      if (auto it = open_.find(*id); it != open_.end()) {
+        ++it->second->write_errors;
+        it->second->unwritten += lost;
+        if (it->second->first_error.empty()) {
+          it->second->first_error = std::string("internal: ") + exc.what();
+        }
+      }
     }
-    std::string entry;
-    if (b.chunks_spooled != 0) {
-      entry = kIntegrityChunksSeparator;
+  }
+}
+
+void EvidenceWriter::fail(Bundle& b, const std::string& what, const std::error_code& ec) {
+  ++b.write_errors;
+  write_errors_.fetch_add(1);
+  if (b.first_error.empty()) {
+    b.first_error = what + ": " + describe(ec);
+  }
+}
+
+// One completed chunk to the on-disk chunk table.
+void EvidenceWriter::spool_chunk(Bundle& b) {
+  b.chunk_open = false;
+  if (!b.chunks_fd.valid()) {
+    fail(b, "write integrity chunk table", std::error_code(EBADF, std::generic_category()));
+    return;
+  }
+  std::string entry;
+  if (b.chunks_spooled != 0) {
+    entry = kIntegrityChunksSeparator;
+  }
+  entry += integrity_chunk_text(b.chunk);
+  if (auto ec = write_all(b.chunks_fd.get(), entry); ec) {
+    fail(b, "write integrity chunk table", ec);
+    return;
+  }
+  ++b.chunks_spooled;
+}
+
+void EvidenceWriter::append_run(std::span<Op> appends) {
+  const std::string& id = std::get<OpAppend>(appends.front()).bundle_id;
+  const auto it = open_.find(id);
+  if (it == open_.end()) {
+    records_unwritten_.fetch_add(appends.size());
+    return;
+  }
+  // The records stay owned by their operations until the run is written.
+  lines_.clear();
+  for (const Op& op : appends) {
+    const Record& r = *std::get<OpAppend>(op).record;
+    lines_.push_back(Line{r.line, r.seq, count_ns(r.t_mono)});
+  }
+  write_lines(*it->second, lines_);
+}
+
+// One record that is completely in records.jsonl: hash, chunk table, counts.
+// Exactly what a write of the line plus its newline accounted for before
+// records were written together, in the same order, so chunk boundaries,
+// hashes and counts do not depend on how the records were grouped.
+void EvidenceWriter::account(Bundle& b, const Line& line, std::int64_t now_ns,
+                             std::int64_t& max_lag) {
+  const std::size_t len = line.text.size() + kNewline.size();
+  b.sha.update(line.text);
+  b.sha.update(kNewline);
+  if (!b.chunk_open) {
+    b.chunk = ChunkEntry{b.integrity.bytes, 0, 0, line.seq, line.seq, 0};
+    b.chunk_open = true;
+  }
+  b.chunk.length += len;
+  b.chunk.crc32c = crc32c_extend(crc32c_extend(b.chunk.crc32c, line.text), kNewline);
+  ++b.chunk.records;
+  b.chunk.last_seq = line.seq;
+  if (b.chunk.records >= options_.chunk_records || b.chunk.length >= options_.chunk_bytes) {
+    spool_chunk(b);
+  }
+  b.integrity.bytes += len;
+  ++b.integrity.records;
+  if (!b.integrity.first_seq) {
+    b.integrity.first_seq = line.seq;
+  }
+  b.integrity.last_seq = line.seq;
+  if (line.t_mono) {
+    if (!b.integrity.first_t_mono_ns) {
+      b.integrity.first_t_mono_ns = line.t_mono;
     }
-    entry += integrity_chunk_text(b.chunk);
-    if (auto ec = write_all(b.chunks_fd.get(), entry); ec) {
-      fail(b, "write integrity chunk table", ec);
-      return;
-    }
-    ++b.chunks_spooled;
-  };
-  auto write_line = [&](Bundle& b, std::string_view line, std::int64_t seq,
-                        std::optional<std::int64_t> t_mono) {
+    b.integrity.last_t_mono_ns = line.t_mono;
+    const std::int64_t lag = now_ns - *line.t_mono;
+    last_lag_ns_.store(lag, std::memory_order_relaxed);
+    max_lag = std::max(max_lag, lag);
+  }
+}
+
+// Append `lines` to records.jsonl in order, in bounded writev calls. A short
+// write resumes at the next unwritten byte, even inside a line. Only lines
+// that reached the file completely are accounted for; after a write error
+// the line it interrupted and every later one are unwritten, as is anything
+// for a bundle that has already failed.
+void EvidenceWriter::write_lines(Bundle& b, std::span<const Line> lines) {
+  std::array<iovec, kMaxIov> iov{};
+  std::size_t next = 0;  // first line not accounted for yet
+  while (next < lines.size()) {
     if (!b.fd.valid() || b.failed()) {
-      ++b.unwritten;
-      records_unwritten_.fetch_add(1);
+      const std::size_t rest = lines.size() - next;
+      b.unwritten += rest;
+      records_unwritten_.fetch_add(rest);
       return;
     }
-    std::string buf;
-    buf.reserve(line.size() + 1);
-    buf.append(line);
-    buf.push_back('\n');
-    if (auto ec = write_all(b.fd.get(), buf); ec) {
+    // The group [next, end): bounded by iovecs and (except for its first
+    // line) bytes.
+    std::size_t end = next;
+    std::size_t group_bytes = 0;
+    int count = 0;
+    while (end < lines.size() && end - next < kMaxLinesPerWrite) {
+      const std::size_t len = lines[end].text.size() + kNewline.size();
+      if (end != next && group_bytes + len > kMaxWriteBytes) {
+        break;
+      }
+      iov[static_cast<std::size_t>(count++)] = {iov_base(lines[end].text), lines[end].text.size()};
+      iov[static_cast<std::size_t>(count++)] = {iov_base(kNewline), kNewline.size()};
+      group_bytes += len;
+      ++end;
+    }
+    std::size_t done = 0;  // bytes of the group in the file
+    std::error_code ec;
+    iovec* cur = iov.data();
+    while (count > 0) {
+      const ssize_t w = options_.records_writev ? options_.records_writev(b.fd.get(), cur, count)
+                                                : ::writev(b.fd.get(), cur, count);
+      if (w < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        ec = std::error_code(errno, std::generic_category());
+        break;
+      }
+      auto left = static_cast<std::size_t>(w);
+      done += left;
+      while (count > 0 && left >= cur->iov_len) {
+        left -= cur->iov_len;
+        ++cur;
+        --count;
+      }
+      if (left != 0) {  // stopped inside an iovec: resume at its next byte
+        cur->iov_base = static_cast<char*>(cur->iov_base) + left;
+        cur->iov_len -= left;
+      }
+    }
+    const std::int64_t now_ns = now_mono_ns();
+    std::int64_t max_lag = std::numeric_limits<std::int64_t>::min();
+    std::size_t complete_bytes = 0;
+    std::size_t k = next;
+    for (; k < end; ++k) {
+      const std::size_t len = lines[k].text.size() + kNewline.size();
+      if (complete_bytes + len > done) {
+        break;
+      }
+      account(b, lines[k], now_ns, max_lag);
+      complete_bytes += len;
+    }
+    records_written_.fetch_add(k - next, std::memory_order_relaxed);
+    bytes_written_.fetch_add(complete_bytes, std::memory_order_relaxed);
+    std::int64_t prev = max_lag_ns_.load(std::memory_order_relaxed);
+    while (max_lag > prev && !max_lag_ns_.compare_exchange_weak(prev, max_lag)) {
+    }
+    next = k;
+    if (ec) {
       fail(b, "write records.jsonl", ec);
-      ++b.unwritten;
-      records_unwritten_.fetch_add(1);
-      return;
+      continue;  // the rest are unwritten (top of the loop)
     }
-    b.sha.update(buf);
-    if (!b.chunk_open) {
-      b.chunk = ChunkEntry{b.integrity.bytes, 0, 0, seq, seq, 0};
-      b.chunk_open = true;
-    }
-    b.chunk.length += buf.size();
-    b.chunk.crc32c = crc32c_extend(b.chunk.crc32c, buf);
-    ++b.chunk.records;
-    b.chunk.last_seq = seq;
-    if (b.chunk.records >= options_.chunk_records || b.chunk.length >= options_.chunk_bytes) {
-      spool_chunk(b);
-    }
-    b.integrity.bytes += buf.size();
-    ++b.integrity.records;
-    if (!b.integrity.first_seq) {
-      b.integrity.first_seq = seq;
-    }
-    b.integrity.last_seq = seq;
-    if (t_mono) {
-      if (!b.integrity.first_t_mono_ns) {
-        b.integrity.first_t_mono_ns = t_mono;
-      }
-      b.integrity.last_t_mono_ns = t_mono;
-      const std::int64_t lag = now_mono_ns() - *t_mono;
-      last_lag_ns_.store(lag, std::memory_order_relaxed);
-      std::int64_t prev = max_lag_ns_.load(std::memory_order_relaxed);
-      while (lag > prev && !max_lag_ns_.compare_exchange_weak(prev, lag)) {
-      }
-    }
-    records_written_.fetch_add(1, std::memory_order_relaxed);
-    bytes_written_.fetch_add(buf.size(), std::memory_order_relaxed);
     if (Clock::now() - b.last_sync >= options_.fsync_every) {
-      if (auto ec = fsync_fd(b.fd.get()); ec) {
-        fail(b, "fsync records.jsonl", ec);
+      if (auto e2 = fsync_fd(b.fd.get()); e2) {
+        fail(b, "fsync records.jsonl", e2);
       }
       b.last_sync = Clock::now();
     }
-  };
+  }
+}
+
+void EvidenceWriter::handle(Op& op) {
   auto manifest = [&](const Bundle& b, const std::string& status, const Json& stats) {
     Json m;
     m["schema"] = kManifestSchema;
@@ -623,11 +764,14 @@ void EvidenceWriter::handle(Op& op) {
         fail(*b, "open integrity chunk table", std::error_code(errno, std::generic_category()));
       }
     }
-    for (const RecordPtr& r : o->pre) {
-      write_line(*b, r->line, r->seq, count_ns(r->t_mono));
-    }
+    // The pre-trigger records, then the trigger, written together.
     const std::string tline = trigger_line(o->trigger);
-    write_line(*b, tline, o->trigger.value("seq", std::int64_t{0}), std::nullopt);
+    lines_.clear();
+    for (const RecordPtr& r : o->pre) {
+      lines_.push_back(Line{r->line, r->seq, count_ns(r->t_mono)});
+    }
+    lines_.push_back(Line{tline, o->trigger.value("seq", std::int64_t{0}), std::nullopt});
+    write_lines(*b, lines_);
     if (b->fd.valid() && !b->failed()) {
       if (auto e3 = fsync_fd(b->fd.get()); e3) {
         fail(*b, "fsync records.jsonl", e3);
@@ -636,13 +780,8 @@ void EvidenceWriter::handle(Op& op) {
     }
     return;
   }
-  if (auto* a = std::get_if<OpAppend>(&op)) {
-    const auto it = open_.find(a->bundle_id);
-    if (it == open_.end()) {
-      records_unwritten_.fetch_add(1);
-      return;
-    }
-    write_line(*it->second, a->record->line, a->record->seq, count_ns(a->record->t_mono));
+  if (std::holds_alternative<OpAppend>(op)) {
+    append_run(std::span<Op>(&op, 1));
     return;
   }
   if (auto* t = std::get_if<OpTrigger>(&op)) {
@@ -651,8 +790,9 @@ void EvidenceWriter::handle(Op& op) {
       return;
     }
     it->second->triggers.push_back(plain(t->trigger));
-    write_line(*it->second, trigger_line(t->trigger), t->trigger.value("seq", std::int64_t{0}),
-               std::nullopt);
+    const std::string tline = trigger_line(t->trigger);
+    const Line line{tline, t->trigger.value("seq", std::int64_t{0}), std::nullopt};
+    write_lines(*it->second, std::span<const Line>(&line, 1));
     return;
   }
   if (auto* c = std::get_if<OpClose>(&op)) {
