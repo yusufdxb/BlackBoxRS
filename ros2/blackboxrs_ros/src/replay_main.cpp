@@ -11,12 +11,13 @@
 // the publish guard, so a remap onto a motion topic fails before it exists.
 
 #include <iostream>
+#include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
-#include <thread>
 
 #include "blackboxrs/evidence/bundle.hpp"
 #include "blackboxrs/replay/engine.hpp"
+#include "blackboxrs/replay/pacing.hpp"
 #include "blackboxrs/replay/render.hpp"
 #include "blackboxrs_ros/guarded_publisher.hpp"
 #include "blackboxrs_ros/runtime.hpp"
@@ -67,10 +68,10 @@ int main(int argc, char** argv) {
     const blackboxrs::Evidence ev = blackboxrs::load_evidence(evidence, false, evidence);
     rp::ReplayOptions opts;
     if (speed > 0) {
-      opts.pacer = [speed](blackboxrs::Nanos step) {
-        std::this_thread::sleep_for(
-            std::chrono::duration<double>(static_cast<double>(step.count()) / 1e9 / speed));
-      };
+      // Sleeps until each step's absolute deadline from one steady origin, so
+      // publishing and sleep overshoot do not accumulate (replay/pacing.hpp).
+      auto pacer = std::make_shared<rp::DeadlinePacer>(speed);
+      opts.pacer = [pacer](blackboxrs::Nanos step) { pacer->pace(step); };
     }
     std::shared_ptr<rclcpp::Node> node;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr timeline_pub;

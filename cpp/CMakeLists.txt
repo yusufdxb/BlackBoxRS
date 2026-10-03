@@ -59,6 +59,7 @@ add_library(blackboxrs_core
   src/replay/liveness.cpp
   src/replay/timeline.cpp
   src/replay/engine.cpp
+  src/replay/pacing.cpp
   src/replay/render.cpp
 )
 add_library(blackboxrs::core ALIAS blackboxrs_core)

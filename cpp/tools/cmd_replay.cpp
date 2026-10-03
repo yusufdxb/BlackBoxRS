@@ -1,13 +1,13 @@
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
-#include <thread>
 
 #include "blackboxrs/evidence/bundle.hpp"
 #include "blackboxrs/integrity.hpp"
 #include "blackboxrs/replay/engine.hpp"
+#include "blackboxrs/replay/pacing.hpp"
 #include "blackboxrs/replay/render.hpp"
 #include "cli_args.hpp"
 #include "commands.hpp"
@@ -138,23 +138,20 @@ int cmd_replay(const Argv& argv, bool inject_mode) {
     }
     const Evidence ev = load_evidence(evidence_path, a.flag("--allow-partial"), evidence_path);
     ReplayOptions opts;
+    std::shared_ptr<DeadlinePacer> pacer;
     if (const auto speed = a.number("--speed")) {
       if (!(*speed > 0)) {
         throw UsageError("--speed must be > 0");
       }
-      const double s = *speed;
-      // Pacing sleeps on the wall clock between virtual steps; it never feeds
-      // back into the replay (tests/test_replay_determinism.cpp).
-      opts.pacer = [s](Nanos step) {
-        if (step.count() > 0) {
-          std::this_thread::sleep_for(
-              std::chrono::duration<double>(static_cast<double>(step.count()) / 1e9 / s));
-        }
-      };
+      // Pacing sleeps on the wall clock until each step's absolute deadline
+      // (replay/pacing.hpp); it never feeds back into the replay
+      // (tests/test_replay_determinism.cpp).
+      pacer = std::make_shared<DeadlinePacer>(*speed);
+      opts.pacer = [pacer](Nanos step) { pacer->pace(step); };
     }
     auto stepping = std::make_shared<bool>(a.flag("--step"));
     if (*stepping) {
-      opts.observer = [stepping](const TimelineEntry& e) {
+      opts.observer = [stepping, pacer](const TimelineEntry& e) {
         if (!*stepping) {
           return;
         }
@@ -163,6 +160,9 @@ int cmd_replay(const Argv& argv, bool inject_mode) {
         std::string line;
         if (!std::getline(std::cin, line) || line == "q" || line == "Q") {
           *stepping = false;
+        }
+        if (pacer) {
+          pacer->rebase();  // the time spent waiting for the user is not caught up
         }
       };
     }

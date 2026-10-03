@@ -1,11 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <limits>
+#include <vector>
 
 #include "blackboxrs/evidence/bundle.hpp"
 #include "blackboxrs/integrity.hpp"
 #include "blackboxrs/replay/engine.hpp"
 #include "blackboxrs/replay/faults.hpp"
+#include "blackboxrs/replay/pacing.hpp"
 #include "blackboxrs/replay/sut.hpp"
 #include "test_support.hpp"
 
@@ -60,6 +65,111 @@ TEST(Replay, PacingNeverChangesTheResult) {
   EXPECT_EQ(canonical_json(unpaced), canonical_json(paced));
   EXPECT_EQ(slept.count(), unpaced["replay"]["window_end_ns"].get<std::int64_t>())
       << "the pacer is told every virtual step, and only that";
+}
+
+// A fake steady clock for DeadlinePacer: the replay's own work and the
+// sleeps' overshoot are simulated by moving `now` explicitly.
+struct FakeWall {
+  using Clock = DeadlinePacer::Clock;
+  Clock::time_point now{std::chrono::seconds(1000)};
+  Nanos overshoot{0};                     // every sleep wakes this late
+  std::vector<Clock::time_point> sleeps;  // the deadlines slept until
+  DeadlinePacer pacer(double speed) {
+    return DeadlinePacer(
+        speed, [this] { return now; },
+        [this](Clock::time_point t) {
+          sleeps.push_back(t);
+          now = std::max(now, t) + overshoot;
+        });
+  }
+};
+
+TEST(DeadlinePacer, DeadlinesAreCumulativeFromOneOriginSoOverheadDoesNotDrift) {
+  using namespace std::chrono_literals;
+  FakeWall w;
+  w.overshoot = 1ms;
+  DeadlinePacer p = w.pacer(2.0);
+  EXPECT_FALSE(p.deadline().has_value());
+  const auto origin = w.now + 300us;  // the schedule starts at the first step
+  for (int k = 1; k <= 100; ++k) {
+    w.now += 300us;  // the replay's processing between steps
+    p.pace(10ms);    // 10 ms virtual at speed 2: 5 ms of wall time
+    EXPECT_EQ(*p.deadline(), origin + k * 5ms);
+  }
+  ASSERT_EQ(w.sleeps.size(), 100U);
+  for (std::size_t k = 0; k < w.sleeps.size(); ++k) {
+    EXPECT_EQ(w.sleeps[k], origin + static_cast<int>(k + 1) * 5ms)
+        << "each deadline is origin + cumulative virtual time / speed";
+  }
+  // Per-step sleeps would end at 100 x (5 + 1 + 0.3) ms = 630 ms; absolute
+  // deadlines end one overshoot after the intended 500 ms.
+  EXPECT_EQ(w.now - origin, 501ms);
+}
+
+TEST(DeadlinePacer, BehindScheduleItDoesNotSleepAndCatchesUp) {
+  using namespace std::chrono_literals;
+  FakeWall w;
+  DeadlinePacer p = w.pacer(1.0);
+  const auto origin = w.now;
+  p.pace(Nanos{0});  // the first step starts the schedule
+  w.now += 25ms;     // a slow stretch: 2.5 steps late
+  p.pace(10ms);
+  p.pace(10ms);
+  EXPECT_TRUE(w.sleeps.empty()) << "late steps return at once";
+  p.pace(10ms);  // deadline 30 ms, now 25 ms
+  ASSERT_EQ(w.sleeps.size(), 1U);
+  EXPECT_EQ(w.sleeps[0], origin + 30ms) << "still measured from the origin, not from the delay";
+}
+
+TEST(DeadlinePacer, TargetsComeFromCumulativeTimeNotRoundedIntervals) {
+  FakeWall w;
+  DeadlinePacer p = w.pacer(3.0);
+  const auto origin = w.now;
+  for (int k = 0; k < 9; ++k) {
+    p.pace(Nanos{1});  // 1/3 ns each: rounding every interval would never advance
+  }
+  EXPECT_EQ(*p.deadline(), origin + Nanos{3});
+  EXPECT_EQ(w.sleeps.back(), origin + Nanos{3});
+}
+
+TEST(DeadlinePacer, ZeroStepsNeverSleepAndRebaseRestartsTheSchedule) {
+  using namespace std::chrono_literals;
+  FakeWall w;
+  DeadlinePacer p = w.pacer(1.0);
+  p.pace(Nanos{0});
+  p.pace(Nanos{0});
+  EXPECT_TRUE(w.sleeps.empty());
+  p.pace(10ms);
+  w.now += 1h;  // an interactive pause (--step) far behind the schedule
+  p.rebase();
+  const auto resumed = w.now;
+  p.pace(10ms);
+  ASSERT_EQ(w.sleeps.size(), 2U);
+  EXPECT_EQ(w.sleeps[1], resumed + 10ms) << "the pause is not caught up";
+}
+
+TEST(DeadlinePacer, RejectsNonPositiveSpeed) {
+  EXPECT_THROW(DeadlinePacer(0.0), std::invalid_argument);
+  EXPECT_THROW(DeadlinePacer(-1.0), std::invalid_argument);
+  EXPECT_THROW(DeadlinePacer(std::numeric_limits<double>::quiet_NaN()), std::invalid_argument);
+}
+
+TEST(Replay, DeadlinePacingNeverChangesTheResult) {
+  ReplayConfig cfg;
+  cfg.faults.push_back(parse_cli_fault("drop:topic=/nav/cmd_vel,from_s=4.0", 0));
+  const Json unpaced = replay(nominal(), cfg);
+  FakeWall w;
+  w.overshoot = std::chrono::microseconds(70);
+  DeadlinePacer pacer = w.pacer(4.0);
+  const auto origin = w.now;
+  ReplayOptions opts;
+  opts.pacer = [&](Nanos step) { pacer.pace(step); };
+  const Json paced = replay(nominal(), cfg, opts);
+  EXPECT_EQ(canonical_json(unpaced), canonical_json(paced)) << "virtual time, order and ticks";
+  const auto window = unpaced["replay"]["window_end_ns"].get<std::int64_t>();
+  EXPECT_EQ(*pacer.deadline(), origin + Nanos{window / 4});
+  ASSERT_FALSE(w.sleeps.empty());
+  EXPECT_EQ(w.sleeps.back(), origin + Nanos{window / 4});
 }
 
 TEST(Replay, ClockNeverMovesBackwards) {
