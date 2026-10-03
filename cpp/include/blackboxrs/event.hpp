@@ -48,8 +48,10 @@ struct MessageBody {
   std::optional<WallTime> rx_wall;    // DDS reception, else callback wall time
   std::optional<double> pub_stamp_s;  // stamp embedded in the message
   std::optional<std::string> pub_stamp_domain;
-  std::shared_ptr<const Json> data;  // null: payload not stored (decimated)
-  TypedPayload typed;                // decode_payload(role, *data); Opaque when no data
+  // null: payload not stored (decimated). From evidence it points into the
+  // event's immutable record and shares its ownership; never mutated.
+  std::shared_ptr<const Json> data;
+  TypedPayload typed;  // decode_payload(role, *data); Opaque when no data
 
   void set_data(Json d) {
     typed = decode_payload(role, d);

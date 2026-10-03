@@ -4,6 +4,9 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <map>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 
 #include "blackboxrs/evidence/bundle.hpp"
@@ -351,6 +354,86 @@ TEST(Faults, DataFaultReDecodesTheTypedView) {
     }
   }
   EXPECT_TRUE(seen);
+}
+
+const Event& first_message_with_data(const std::vector<Event>& events) {
+  for (const Event& e : events) {
+    if (e.is_message() && e.msg().data != nullptr) {
+      return e;
+    }
+  }
+  throw std::logic_error("no message with data");
+}
+
+TEST(Event, PayloadIsAViewIntoTheImmutableRecord) {
+  TopicTable topics;
+  const auto ev = nominal_events(topics);
+  std::size_t with_data = 0;
+  for (const Event& e : ev) {
+    if (!e.is_message() || e.msg().data == nullptr) {
+      continue;
+    }
+    ++with_data;
+    const Json& stored = e.record->at("data");
+    EXPECT_EQ(e.msg().data.get(), &stored) << e.eid << ": no second copy of the payload";
+    const Json copy = stored;
+    EXPECT_EQ(canonical_json(*e.msg().data), canonical_json(copy));
+  }
+  EXPECT_GT(with_data, 100U);
+}
+
+TEST(Event, PayloadViewKeepsItsRecordAliveAndOutlivesTheEvent) {
+  TopicTable topics;
+  std::shared_ptr<const Json> data;
+  std::weak_ptr<const Json> record;
+  std::string expect;
+  {
+    const auto ev = nominal_events(topics);
+    const Event& e = first_message_with_data(ev);
+    data = e.msg().data;
+    record = e.record;
+    expect = canonical_json(*data);
+  }  // every event, and every other owner of the record, is gone
+  ASSERT_FALSE(record.expired()) << "the payload view owns its record";
+  EXPECT_EQ(canonical_json(*data), expect);  // (ASan: no use after free)
+  data.reset();
+  EXPECT_TRUE(record.expired()) << "and nothing else keeps it";
+}
+
+TEST(Event, AFaultReplacesThePayloadAndNeverTheRecordedOne) {
+  TopicTable topics;
+  const auto ev = nominal_events(topics);
+  std::map<std::string, std::string> before;  // eid -> record text
+  for (const Event& e : ev) {
+    before[e.eid] = canonical_json(*e.record);
+  }
+  std::vector<InjectionLog> log;
+  const auto out = apply_faults(
+      ev,
+      {parse_cli_fault("malformed:topic=/nav/cmd_vel,field=linear.x,value=fast,from_s=3.0,to_s=3.2",
+                       0)},
+      topics, log);
+  std::map<std::string, const Event*> original;
+  for (const Event& e : ev) {
+    original[e.eid] = &e;
+  }
+  std::size_t changed = 0;
+  for (const Event& e : out) {
+    if (e.injected.empty()) {
+      continue;
+    }
+    ++changed;
+    const Event& o = *original.at(e.eid);
+    EXPECT_EQ(e.record, o.record) << "provenance: the record as stored";
+    EXPECT_NE(e.msg().data.get(), &e.record->at("data")) << "a new payload, not the record's";
+    EXPECT_EQ(e.msg().data->at("linear").at("x"), "fast");
+    EXPECT_NE(o.msg().data->at("linear").at("x"), "fast") << "the input event is untouched";
+    EXPECT_EQ(o.msg().data.get(), &o.record->at("data"));
+  }
+  EXPECT_GT(changed, 0U);
+  for (const Event& e : ev) {
+    EXPECT_EQ(canonical_json(*e.record), before.at(e.eid)) << e.eid << ": evidence unchanged";
+  }
 }
 
 TEST(Faults, CliSyntaxMatchesPython) {

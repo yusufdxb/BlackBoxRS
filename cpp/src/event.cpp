@@ -112,8 +112,14 @@ Event event_from_record(const Json& r, MonoTime evidence_start) {
     if (const auto it = r.find("pub_stamp_domain"); it != r.end() && it->is_string()) {
       m.pub_stamp_domain = it->get<std::string>();
     }
-    if (const auto it = r.find("data"); it != r.end() && it->is_object()) {
-      m.set_data(*it);
+    // The payload is not copied again: `data` points into the record, which
+    // is immutable and owned by the same pointer (aliasing constructor). A
+    // fault that changes the payload replaces `data` (set_data); the record
+    // keeps what was recorded.
+    const Json& stored = *e.record;
+    if (const auto it = stored.find("data"); it != stored.end() && it->is_object()) {
+      m.typed = decode_payload(m.role, *it);
+      m.data = std::shared_ptr<const Json>(e.record, &*it);
     }
     e.body = std::move(m);
   } else if (kind == "graph") {
