@@ -9,9 +9,7 @@ import pytest
 
 from blackboxrs.core.clock import Clock
 
-pytest.importorskip("mcap")
-
-from blackboxrs.recording.bag_replay import (  # noqa: E402
+from blackboxrs.recording.bag_replay import (
     read_bag_arrivals,
     replay_bag,
 )
@@ -19,6 +17,10 @@ from blackboxrs.recording.bag_replay import (  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 BAG = REPO / "examples" / "bags" / "go2_sim_odom_imu.mcap"
 DROP_TOPIC = "/source/utlidar/robot_odom"
+
+
+def _requires_mcap() -> None:
+    pytest.importorskip("mcap")
 
 
 # -- Virtual clock ---------------------------------------------------------
@@ -57,6 +59,7 @@ def test_clock_virtual_time_assumes_utc_for_naive():
 
 
 def test_read_bag_arrivals_sorted_and_nonempty():
+    _requires_mcap()
     arrivals = read_bag_arrivals(BAG)
     assert arrivals, "vendored bag should contain messages"
     times = [ns for _t, ns in arrivals]
@@ -70,6 +73,7 @@ def test_read_bag_arrivals_sorted_and_nonempty():
 
 def test_replay_without_injection_is_clean(tmp_path):
     """A healthy replay of the real bag raises no dead-topic anomaly."""
+    _requires_mcap()
     result = replay_bag(
         BAG,
         tmp_path / "log.jsonl",
@@ -84,6 +88,7 @@ def test_replay_without_injection_is_clean(tmp_path):
 
 
 def test_injected_dropout_fires_real_detector(tmp_path):
+    _requires_mcap()
     result = replay_bag(
         BAG,
         tmp_path / "log.jsonl",
@@ -106,6 +111,7 @@ def test_injected_dropout_fires_real_detector(tmp_path):
 
 
 def test_dropped_topic_messages_are_truncated(tmp_path):
+    _requires_mcap()
     full = replay_bag(
         BAG, tmp_path / "a.jsonl", session_id="full",
         dead_topic_timeout_sec=3.0,
@@ -244,6 +250,46 @@ def test_read_bag_arrivals_directory_falls_back_to_glob_without_metadata(tmp_pat
     arrivals = read_bag_arrivals(bag_dir)
 
     assert arrivals == [("/a", 10), ("/a", 20)]
+
+
+def test_read_bag_arrivals_rejects_duplicate_metadata_paths(tmp_path):
+    bag_dir = tmp_path / "dup_metadata_bag"
+    bag_dir.mkdir()
+    _write_db3(bag_dir / "bag_0.db3", [("/a", 10)])
+    _write_metadata_yaml(bag_dir, ["bag_0.db3", "bag_0.db3"])
+
+    with pytest.raises(ValueError, match="duplicate"):
+        read_bag_arrivals(bag_dir)
+
+
+def test_read_bag_arrivals_rejects_canonical_duplicate_metadata_paths(tmp_path):
+    bag_dir = tmp_path / "canonical_dup_metadata_bag"
+    bag_dir.mkdir()
+    _write_db3(bag_dir / "bag_0.db3", [("/a", 10)])
+    _write_metadata_yaml(bag_dir, ["bag_0.db3", "./bag_0.db3"])
+
+    with pytest.raises(ValueError, match="duplicate"):
+        read_bag_arrivals(bag_dir)
+
+
+def test_read_bag_arrivals_rejects_metadata_path_traversal(tmp_path):
+    bag_dir = tmp_path / "escape_metadata_bag"
+    bag_dir.mkdir()
+    _write_db3(tmp_path / "outside.db3", [("/a", 10)])
+    _write_metadata_yaml(bag_dir, ["../outside.db3"])
+
+    with pytest.raises(ValueError, match="escapes"):
+        read_bag_arrivals(bag_dir)
+
+
+def test_read_bag_arrivals_rejects_malformed_metadata(tmp_path):
+    bag_dir = tmp_path / "bad_metadata_bag"
+    bag_dir.mkdir()
+    _write_db3(bag_dir / "bag_0.db3", [("/a", 10)])
+    (bag_dir / "metadata.yaml").write_text("[not: valid", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Malformed"):
+        read_bag_arrivals(bag_dir)
 
 
 def test_replay_bag_reads_full_split_directory(tmp_path):

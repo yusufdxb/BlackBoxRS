@@ -1,0 +1,410 @@
+{
+  "build": {
+    "build_type": "RelWithDebInfo",
+    "compiler": "/usr/bin/c++",
+    "rmw_implementation": "rmw_fastrtps_cpp",
+    "ros_distro": "humble"
+  },
+  "capture_backend": "cpp",
+  "capture_quality": {
+    "admitted": 150223,
+    "ambiguous_topic_types": 0,
+    "backend": "cpp",
+    "best_effort_topics": 10,
+    "bytes_captured": 40987616,
+    "bytes_dropped": 0,
+    "capture_ended_monotonic_ns": 8934912658534,
+    "capture_memory_budget_bytes": 33796964,
+    "capture_started_monotonic_ns": 8904563866479,
+    "clean": true,
+    "clock_anomalies": 0,
+    "committed": 150223,
+    "configured_memory_budget_bytes": 134217728,
+    "delivery_scope": "callback_received",
+    "drop_breakdown": [],
+    "dropped": 0,
+    "durable": 150223,
+    "endpoint_query_failures": 0,
+    "graph_coverage_faults": 0,
+    "graph_scope": "configured",
+    "graph_snapshot_failures": 0,
+    "graph_wait_faults": 0,
+    "incompatible_qos_events": 0,
+    "monotonic_end_ns": 8934881493531,
+    "monotonic_start_ns": 8904581800925,
+    "node_coverage_truncated": false,
+    "node_snapshot_failures": 0,
+    "observed_host": "",
+    "peak_queue_depth": 213,
+    "queue_capacity": 4096,
+    "received": 150223,
+    "retained_bytes": 45731528,
+    "retained_events": 150223,
+    "retained_segments": 7,
+    "retention_evicted_bytes": 0,
+    "retention_evicted_events": 0,
+    "retention_evicted_segments": 0,
+    "retention_max_bytes": 2147483648,
+    "retention_max_segments": 256,
+    "rmw_event_callbacks_unavailable": 0,
+    "rmw_messages_lost": 0,
+    "role": "onboard",
+    "runtime_callback_faults": 0,
+    "schema_version": "blackboxrs.capture_quality.v1",
+    "session_id": "1786474796808362802_294649",
+    "storage_errors": 0,
+    "subscription_failures": 0,
+    "topic_coverage_truncated": false
+  },
+  "comparison": {
+    "approximated_count": 0,
+    "backend": "native",
+    "comparable_scope": "full_payload_recording",
+    "content_equivalence_note": "This is the native reference run. Every retained message is the full serialized payload of a benchmark topic.",
+    "content_equivalent_to_native": true,
+    "counter_reconciled": true,
+    "dimensions": {
+      "aggregate_rate_hz": {
+        "backend": 5000.0,
+        "native": 5000.0,
+        "note": null,
+        "status": "reference"
+      },
+      "compression": {
+        "backend": "none",
+        "native": "none",
+        "note": null,
+        "status": "reference"
+      },
+      "discovery_warmup_sec": {
+        "backend": 2.0,
+        "native": 2.0,
+        "note": null,
+        "status": "reference"
+      },
+      "durability_sync_policy": {
+        "backend": "fsync on segment close and on the segment directory",
+        "native": "fsync on segment close and on the segment directory",
+        "note": null,
+        "status": "reference"
+      },
+      "duration_sec": {
+        "backend": 30.0,
+        "native": 30.0,
+        "note": null,
+        "status": "reference"
+      },
+      "ingest_timestamp_clock": {
+        "backend": "CLOCK_MONOTONIC callback timestamp",
+        "native": "CLOCK_MONOTONIC callback timestamp",
+        "note": null,
+        "status": "reference"
+      },
+      "message_deserialization": {
+        "backend": "none (generic serialized)",
+        "native": "none (generic serialized)",
+        "note": null,
+        "status": "reference"
+      },
+      "message_type": {
+        "backend": "std_msgs/msg/ByteMultiArray",
+        "native": "std_msgs/msg/ByteMultiArray",
+        "note": null,
+        "status": "reference"
+      },
+      "payload_bytes": {
+        "backend": 256,
+        "native": 256,
+        "note": null,
+        "status": "reference"
+      },
+      "process_accounting_boundary": {
+        "backend": "native C++ recorder process",
+        "native": "native C++ recorder process",
+        "note": null,
+        "status": "reference"
+      },
+      "publisher": {
+        "backend": "blackbox_capture_bench publisher",
+        "native": "blackbox_capture_bench publisher",
+        "note": "the same publisher binary is launched with the same arguments for every backend",
+        "status": "reference"
+      },
+      "publisher_qos": {
+        "backend": "best_effort/depth 10",
+        "native": "best_effort/depth 10",
+        "note": null,
+        "status": "reference"
+      },
+      "segment_split_bytes": {
+        "backend": 67108864,
+        "native": 67108864,
+        "note": null,
+        "status": "reference"
+      },
+      "segment_split_duration_sec": {
+        "backend": 5.0,
+        "native": 5.0,
+        "note": null,
+        "status": "reference"
+      },
+      "shutdown_signal": {
+        "backend": "SIGINT to the process group",
+        "native": "SIGINT to the process group",
+        "note": null,
+        "status": "reference"
+      },
+      "storage_chunk_size_bytes": {
+        "backend": 1048576,
+        "native": 1048576,
+        "note": null,
+        "status": "reference"
+      },
+      "storage_chunking": {
+        "backend": "enabled, chunk CRC on",
+        "native": "enabled, chunk CRC on",
+        "note": null,
+        "status": "reference"
+      },
+      "storage_plugin": {
+        "backend": "mcap",
+        "native": "mcap",
+        "note": null,
+        "status": "reference"
+      },
+      "subscription_durability": {
+        "backend": "volatile",
+        "native": "volatile",
+        "note": null,
+        "status": "reference"
+      },
+      "subscription_history_depth": {
+        "backend": 1000,
+        "native": 1000,
+        "note": null,
+        "status": "reference"
+      },
+      "subscription_reliability": {
+        "backend": "best_effort",
+        "native": "best_effort",
+        "note": null,
+        "status": "reference"
+      },
+      "topic_discovery_period_ms": {
+        "backend": 100,
+        "native": 100,
+        "note": null,
+        "status": "reference"
+      },
+      "topics": {
+        "backend": 10,
+        "native": 10,
+        "note": null,
+        "status": "reference"
+      },
+      "write_buffering": {
+        "backend": "4096-event ring plus a 16777216 byte payload arena drained by a writer thread",
+        "native": "4096-event ring plus a 16777216 byte payload arena drained by a writer thread",
+        "note": null,
+        "status": "reference"
+      }
+    },
+    "matched_count": 0,
+    "not_applicable_count": 0,
+    "reconciliation_note": "Native aggregate callback counters and the retained workload count were checked against publisher calls where rolling retention and external parameters permitted.",
+    "reference_backend": "native",
+    "unmatched_count": 0
+  },
+  "counters": {
+    "admitted": 150223,
+    "committed": 150223,
+    "dropped": 0,
+    "dropped_bytes": 0,
+    "durable": 150223,
+    "durable_observed_lower_bound": 150223,
+    "negative_ingest_latencies": 0,
+    "publish_calls": 149999,
+    "received": 150223,
+    "sent": 149999,
+    "serialized_committed": 149999,
+    "serialized_committed_bytes": 40799728,
+    "serialized_dropped": 0,
+    "serialized_retained": 149999,
+    "serialized_retained_bytes": 40799728
+  },
+  "drop_breakdown": [],
+  "generated_at": "2026-08-11T19:00:27.847322Z",
+  "git_dirty": false,
+  "git_sha": "ec3a6e7991d7674948fadc0d3200f74acd87feb0",
+  "latency_us": {
+    "ingest": {
+      "negative_count": 0,
+      "p50": 10.02,
+      "p95": 15.2,
+      "p99": 25.370089999999955,
+      "population": 149999,
+      "reason": "publisher batch timestamp to native recorder callback steady timestamp; the current publisher reuses one pre-publish timestamp within each catch-up batch",
+      "sample_cap": 100000,
+      "sample_size": 100000,
+      "valid": true
+    },
+    "trigger_to_flush": {
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "reason": "this workload does not issue and durably acknowledge a trigger",
+      "supported": false
+    },
+    "write": {
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "reason": "the selected recorder does not expose write-service samples",
+      "supported": false
+    }
+  },
+  "lifecycle": {
+    "capture_closed_cleanly": true,
+    "capture_exit_code": 0,
+    "final_status_state": "STOPPED_CLEAN",
+    "forced_shutdown": false,
+    "publisher_exit_code": 0,
+    "shutdown_drain_ms": 163.5735220006609,
+    "startup_latency_ms": 90.14265599944338,
+    "status_source": "capture_log"
+  },
+  "machine": {
+    "architecture": "x86_64",
+    "gpu_recorded": false,
+    "hostname_recorded": false,
+    "logical_cpu_count": 24,
+    "os": "Linux",
+    "os_release": "6.8.0-136-generic"
+  },
+  "measurement_limitations": [
+    "The current load publisher reuses one steady timestamp for every message in a catch-up batch, so ingest latency includes publication-loop delay after that marker.",
+    "Startup latency ends at the backend log liveness marker; complete subscription matching is checked separately before measurement.",
+    "CPU and RSS cover the recorder process only; publisher resource use is not sampled.",
+    "Write-service latency and trigger-to-durable-flush latency are not instrumented."
+  ],
+  "provenance": {
+    "capture_command": [
+      "install/matrix_5x_ec3a6e7/blackbox_capture_cpp/lib/blackbox_capture_cpp/blackbox_capture",
+      "--ros-args",
+      "--params-file",
+      "/tmp/blackboxrs-native-bench-chmgaby5/recorder.yaml"
+    ],
+    "clock_offset": null,
+    "failure_injection": {
+      "expect_storage_fault": false,
+      "fail_after_bytes": -1,
+      "writer_delay_ms": 0
+    },
+    "generated_recorder_params": true,
+    "generated_rosbag2_qos": false,
+    "generated_rosbag2_storage_config": false,
+    "latency_clock_domain": "local_steady",
+    "publisher_command": [
+      "install/matrix_5x_ec3a6e7/blackbox_capture_bench/lib/blackbox_capture_bench/publisher",
+      "--topics",
+      "10",
+      "--aggregate-rate",
+      "5000.0",
+      "--payload-bytes",
+      "256",
+      "--duration-sec",
+      "30.0",
+      "--discovery-warmup-sec",
+      "2.0",
+      "--qos",
+      "best_effort",
+      "--qos-depth",
+      "10",
+      "--topic-prefix",
+      "/blackbox_bench/topic",
+      "--run-id",
+      "native-rosbag2-5x-03-native",
+      "--result-json",
+      "/tmp/blackboxrs-native-bench-chmgaby5/publisher.json",
+      "--burst-every-sec",
+      "0.0",
+      "--burst-duration-ms",
+      "0.0",
+      "--burst-multiplier",
+      "1.0",
+      "--churn-every-sec",
+      "0.0",
+      "--churn-down-ms",
+      "0.0"
+    ],
+    "publisher_marker_semantics": "BBRSBEN1, global publish-call sequence, steady timestamp, and topic index in the first 32 ByteMultiArray payload bytes; one timestamp is currently reused within each catch-up batch",
+    "resource_process_selection": "native recorder descendant of ros2 run wrapper",
+    "work_directory_retained": false
+  },
+  "queue": {
+    "capacity": 4096,
+    "depth": 0,
+    "peak_depth": 213,
+    "peak_utilization": 0.052001953125
+  },
+  "recovery": null,
+  "resources": {
+    "cpu_percent": {
+      "max": 12.996105612976615,
+      "mean": 10.062805670961069,
+      "min": 7.997452715337722,
+      "p50": 9.995646612036975,
+      "p95": 12.54599604945559,
+      "p99": 12.996064703279899
+    },
+    "rss_mb": {
+      "max": 47.6640625,
+      "mean": 47.16948084677419,
+      "min": 45.26953125,
+      "p50": 47.24609375,
+      "p95": 47.6640625,
+      "p99": 47.6640625
+    }
+  },
+  "scenario": {
+    "actual_duration_sec": 30.000034783,
+    "aggregate_rate_hz": 5000.0,
+    "burst_duration_ms": 0.0,
+    "burst_every_sec": 0.0,
+    "burst_multiplier": 1.0,
+    "churn_down_ms": 0.0,
+    "churn_every_sec": 0.0,
+    "duration_sec": 30.0,
+    "expect_storage_fault": false,
+    "fail_after_bytes": -1,
+    "name": "custom",
+    "payload_bytes": 256,
+    "qos": "best_effort",
+    "qos_depth": 10,
+    "run_id": "native-rosbag2-5x-03-native",
+    "shared_steady_clock_domain": true,
+    "topics": 10,
+    "writer_delay_injection_ms": 0
+  },
+  "schema_version": "blackboxrs.capture_benchmark.v1",
+  "storage": {
+    "bytes": 45731528,
+    "bytes_per_second": 1524382.4992467843,
+    "errors": 0,
+    "partial_bytes": 0,
+    "partial_segments": 0,
+    "retained_bytes": 45731528,
+    "retention_evicted_bytes": 0,
+    "retention_evicted_segments": 0,
+    "segments": 7,
+    "sidecars": 7
+  },
+  "validity": {
+    "errors": [],
+    "latency_reason": "publisher batch timestamp to native recorder callback steady timestamp; the current publisher reuses one pre-publish timestamp within each catch-up batch",
+    "publisher_and_capture_workload_matched": true,
+    "publisher_to_callback_latency_valid": true,
+    "valid": true,
+    "warnings": []
+  }
+}

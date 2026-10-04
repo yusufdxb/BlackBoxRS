@@ -76,11 +76,10 @@ def test_runner_unknown_kind_non_zero_exit_code():
     """An unknown kind must NOT produce exit_code == 0."""
     rule = _make_rule_bypass_pydantic("typo_kind")
     report = PreflightRunner([rule]).run()
-    # exit_code checks only 'block'/'warn'; 'error' does not affect it.
-    # But the status should be 'error', not 'pass' or 'skipped'.
     result = report.results[0]
     assert result.status != "pass"
     assert result.status != "skipped"
+    assert report.exit_code == 1
 
 
 # ---------------------------------------------------------------------------

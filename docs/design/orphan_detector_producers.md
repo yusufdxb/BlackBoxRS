@@ -1,15 +1,17 @@
 # Orphan Detector Producers: Design Spec
 
-Status: draft, v0.4.0.dev0 (post observer-mode pivot, 371 tests green).
+Status: superseded implementation design. The producers described here
+now exist and the detectors are wired into the live engine. See
+`docs/ARCHITECTURE.md` for the current runtime contract.
 Owner: Yusuf Guenena.
-Audience: contributors picking up producer work for the three currently
-orphaned detectors.
+Audience: historical reference for the producer work that closed the
+orphan-detector gap.
 
 ## Context
 
 After the observer-mode pivot (commits c7f2bce..84e3210), three detectors
-ship with full unit-test coverage but are intentionally not wired into the
-live engine, because no module currently emits the events they consume:
+shipped with full unit-test coverage but were not wired into the live
+engine because no module emitted the events they consumed:
 
 | Detector                      | Consumed event type        | Source label      |
 |-------------------------------|----------------------------|-------------------|

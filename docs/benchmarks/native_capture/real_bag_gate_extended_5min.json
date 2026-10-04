@@ -1,0 +1,126 @@
+{
+  "bookkeeping_excluded": {
+    "/rosout": 46
+  },
+  "command": "python3 scripts/native_capture_bag_gate.py --bag <rosbag2 dir> --report <report.json>",
+  "description": "Native C++ capture-plane fidelity gate replayed over a real GO2 hardware rosbag2 recording (sqlite3, two splits). Expectations derived from the source inventory; every topic must come back byte-identical with zero drops.",
+  "excluded_topics": [],
+  "mode": "source_bag",
+  "resource_profile": {
+    "buffer.event_capacity": 16384,
+    "buffer.history_seconds": 390.0,
+    "buffer.memory_budget_bytes": 536870912,
+    "buffer.payload_block_count": 16384,
+    "capture.max_payload_bytes": 135168,
+    "source_max_payload_bytes": 131080,
+    "source_payload_bytes": 672237584,
+    "storage.retention_max_bytes": 907405844,
+    "storage.retention_max_segments": 30,
+    "storage.segment_max_bytes": 67108864,
+    "storage.total_max_bytes": 2789326396
+  },
+  "runs": [
+    {
+      "capture": {
+        "backend": "cpp",
+        "clean": true,
+        "committed": 94684,
+        "dropped": 0,
+        "durable": 94684,
+        "final_state": "STOPPED_CLEAN",
+        "received": 94684,
+        "segment_count": 11,
+        "storage_errors": 0
+      },
+      "captured_messages": 94279,
+      "rmw_implementation": "rmw_fastrtps_cpp",
+      "source_messages": 94279,
+      "source_unchanged_after_run": true,
+      "valid": true
+    },
+    {
+      "capture": {
+        "backend": "cpp",
+        "clean": true,
+        "committed": 94681,
+        "dropped": 0,
+        "durable": 94681,
+        "final_state": "STOPPED_CLEAN",
+        "received": 94681,
+        "segment_count": 11,
+        "storage_errors": 0
+      },
+      "captured_messages": 94279,
+      "rmw_implementation": "rmw_cyclonedds_cpp",
+      "source_messages": 94279,
+      "source_unchanged_after_run": true,
+      "valid": true
+    }
+  ],
+  "schema_version": "blackboxrs.native_bag_gate_summary.v1",
+  "source": {
+    "files": [
+      {
+        "bytes": 620826624,
+        "name": "extended_5min_0.db3",
+        "sha256": "ab5e367ad133e5b7b8389c3e99dafcb127abdf254c0699e79d94e4ed138406e1"
+      },
+      {
+        "bytes": 61165568,
+        "name": "extended_5min_1.db3",
+        "sha256": "e2dc8c9cb83662eb0407c85179757758c344ec6a7b4f670ad7d82f35384e6d65"
+      }
+    ],
+    "name": "extended_5min",
+    "storage": "sqlite3",
+    "total_bytes": 681992192
+  },
+  "topics": {
+    "/gnss": {
+      "captured_count": 330,
+      "captured_schema_type": "std_msgs/msg/String",
+      "matching_prefix": 330,
+      "payload_sequence_exact": true,
+      "schema_type": "std_msgs/msg/String",
+      "source_count": 330,
+      "source_payload_sequence_sha256": "eaa8bc365ba25e9b334791f0fdadbfe61ac18f2083de72f0dbc03ddb713bc513"
+    },
+    "/multiplestate": {
+      "captured_count": 328,
+      "captured_schema_type": "std_msgs/msg/String",
+      "matching_prefix": 328,
+      "payload_sequence_exact": true,
+      "schema_type": "std_msgs/msg/String",
+      "source_count": 328,
+      "source_payload_sequence_sha256": "3181a59b0639174c03c8b43da8bd22cff996029f789fbf64bb8271acddb7215a"
+    },
+    "/utlidar/cloud": {
+      "captured_count": 5077,
+      "captured_schema_type": "sensor_msgs/msg/PointCloud2",
+      "matching_prefix": 5077,
+      "payload_sequence_exact": true,
+      "schema_type": "sensor_msgs/msg/PointCloud2",
+      "source_count": 5077,
+      "source_payload_sequence_sha256": "0f432b2f8595ed033a05a264f6ddfae2122247bb091d5c6cd89367074c430a9e"
+    },
+    "/utlidar/imu": {
+      "captured_count": 82367,
+      "captured_schema_type": "sensor_msgs/msg/Imu",
+      "matching_prefix": 82367,
+      "payload_sequence_exact": true,
+      "schema_type": "sensor_msgs/msg/Imu",
+      "source_count": 82367,
+      "source_payload_sequence_sha256": "79d2f30bcba9a95673705ce2fb6276ca82ed6d30cd3c6df464630b04c24012d2"
+    },
+    "/utlidar/robot_pose": {
+      "captured_count": 6177,
+      "captured_schema_type": "geometry_msgs/msg/PoseStamped",
+      "matching_prefix": 6177,
+      "payload_sequence_exact": true,
+      "schema_type": "geometry_msgs/msg/PoseStamped",
+      "source_count": 6177,
+      "source_payload_sequence_sha256": "244d51ee5103da02b2b222cb9145d0c396df3abfd68bbff34867af017d08f9e0"
+    }
+  },
+  "valid": true
+}

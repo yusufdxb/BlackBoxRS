@@ -109,9 +109,11 @@ class PreflightRunner:
                 logger.exception("Check %s raised", rule.rule_id)
                 status, message = "error", f"{type(exc).__name__}: {exc}"
 
-            # If the underlying check failed and the rule says "block",
-            # promote the status accordingly. Skipped/error stay as-is.
+            # Active rules fail closed. A blocking rule whose check cannot
+            # execute must not silently pass the launch gate.
             if status == "fail":
+                status = rule.check.severity_on_fail  # "warn" or "block"
+            elif status == "skipped":
                 status = rule.check.severity_on_fail  # "warn" or "block"
 
             if kind_known:

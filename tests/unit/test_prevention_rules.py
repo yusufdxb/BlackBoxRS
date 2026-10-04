@@ -114,3 +114,39 @@ def test_disabled_rules_are_skipped():
     report = runner.run()
     assert report.results[0].status == "skipped"
     assert "disabled" in report.results[0].message.lower()
+
+
+def test_error_result_exits_nonzero():
+    report = PreflightReport(
+        started_at=_NOW, finished_at=_NOW,
+        results=[
+            PreflightCheckResult(
+                rule_id="r1", name="bad", kind="env_var",
+                status="error", severity_on_fail="block",
+            ),
+        ],
+    )
+    assert report.exit_code == 1
+
+
+def test_active_skipped_blocking_rule_fails_closed(monkeypatch):
+    rule = make_rule(
+        PreflightCheck(
+            name="needs ros",
+            kind="topic_present",
+            params={"topic": "/scan"},
+            severity_on_fail="block",
+        )
+    )
+
+    from blackboxrs.prevention import runner as runner_mod
+
+    monkeypatch.setitem(
+        runner_mod._CHECK_REGISTRY,
+        "topic_present",
+        lambda _check: ("skipped", "rclpy missing"),
+    )
+
+    report = PreflightRunner([rule]).run()
+    assert report.results[0].status == "block"
+    assert report.exit_code == 1

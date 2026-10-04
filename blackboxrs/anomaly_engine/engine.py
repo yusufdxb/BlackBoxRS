@@ -31,18 +31,18 @@ from .detectors import (
 # ProcessSignalsCollector in system_monitor/collectors/process.py).
 # The producer auto-disables in observer mode (it would otherwise sample
 # the observer workstation's processes, not the robot's). The detector
-# itself is NOT gated behind observer_mode — it simply receives no events
+# itself is NOT gated behind observer_mode: it simply receives no events
 # when the producer is off, which is the correct v1 behaviour.
 # See docs/design/orphan_detector_producers.md §3.5.
 #
 # ClockSkewDetector was re-wired now that ClockSkewCollector
 # (blackboxrs/system_monitor/collectors/clock.py) ships as the live
 # producer of `system.clock_skew` events. It is partially DDS-bound
-# (ros:/clock source) and observer-mode-compatible — see §2.5.
+# (ros:/clock source) and observer-mode-compatible (see §2.5).
 #
 # TfTopologyDetector was re-wired in commit 1dcd224 now that
 # TfSnapshotter (commits 0ec7a41, 1481949) ships as the live producer
-# of `ros.tf` events. It is DDS-bound and observer-mode-compatible —
+# of `ros.tf` events. It is DDS-bound and observer-mode-compatible;
 # see §1.5.
 #
 # All three previously-orphaned detectors are now wired. The orphan set
@@ -104,7 +104,7 @@ class AnomalyEngine:
             DeadTopicDetector(self._config.dead_topic),
             # TfTopologyDetector is DDS-bound (consumes `ros.tf` events
             # emitted by TfSnapshotter over the shared EventBus) and is
-            # therefore observer-mode-compatible — no host-bound
+            # therefore observer-mode-compatible: no host-bound
             # resources are read. It runs in both onboard and observer
             # mode with the same detector instance.
             TfTopologyDetector(self._config.tf_topology),
@@ -126,8 +126,8 @@ class AnomalyEngine:
             # ProcessSignalsDetector is wired but dormant: its producer
             # auto-disables in observer mode (psutil would report the
             # observer workstation's processes, not the robot's).
-            # ThresholdDetector checks host CPU/memory — those numbers
-            # describe the observer, not the robot — but it is left
+            # ThresholdDetector checks host CPU/memory: those numbers
+            # describe the observer, not the robot, but it is left
             # wired until a separate host-bound gating pass is added.
             # TfTopologyDetector and ClockSkewDetector are DDS-bound
             # and remain active in both modes.

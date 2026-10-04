@@ -8,6 +8,8 @@ Synopsis::
 
     robot-blackbox incident build [--since 10m | --start ISO --end ISO]
     robot-blackbox incident show <bundle>
+    robot-blackbox incident verify <bundle>
+    robot-blackbox incident replay <bundle>
     robot-blackbox incident list
     robot-blackbox incident attach <bundle> <path> [--copy]
     robot-blackbox preflight [--rules-dir]
@@ -24,14 +26,22 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import click
+import json
 
 from blackboxrs.core.config import BlackBoxConfig
 from blackboxrs.incident.api import build_incident, render_report
-from blackboxrs.incident.bundle import BundleReader
+from blackboxrs.incident.bundle import (
+    BundleReader,
+    inspect_bundle_path,
+    validate_bundle_path,
+)
+from blackboxrs.incident.integrity import format_validation_result
+from blackboxrs.prevention.derivation import (
+    PreventionDerivationError,
+    derive_rule_from_bundle,
+)
 from blackboxrs.prevention.rules import (
-    PreflightCheck,
     load_rules,
-    make_rule,
     save_rule,
 )
 from blackboxrs.prevention.runner import PreflightRunner
@@ -178,8 +188,53 @@ def incident_build(
 @click.argument("bundle", type=click.Path(exists=True, file_okay=False))
 def incident_show(bundle: str) -> None:
     """Render report.md for a bundle to stdout (re-rendered)."""
-    text = render_report(Path(bundle))
+    try:
+        text = render_report(Path(bundle))
+    except ValueError as exc:
+        click.echo(click.style(str(exc), fg="red"))
+        sys.exit(1)
     click.echo(text)
+
+
+@incident_group.command("verify")
+@click.argument("bundle", type=click.Path(exists=True, file_okay=False))
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Emit machine-readable validation result.")
+def incident_verify(bundle: str, as_json: bool) -> None:
+    """Verify bundle finalization, checksums, and schema readability."""
+    result = validate_bundle_path(Path(bundle))
+    if as_json:
+        click.echo(json.dumps(result.model_dump(mode="json"), sort_keys=True))
+    else:
+        click.echo(format_validation_result(result))
+    if result.state == "valid_finalized" and not result.errors:
+        sys.exit(0)
+    if result.state == "legacy" and not result.errors:
+        sys.exit(2)
+    sys.exit(1)
+
+
+@incident_group.command("replay")
+@click.argument("bundle", type=click.Path(exists=True, file_okay=False))
+@click.option("--last", "-n", type=int, default=20, show_default=True,
+              help="Number of bundle evidence events to print.")
+def incident_replay(bundle: str, last: int) -> None:
+    """Replay a finalized bundle's evidence stream for debugging."""
+    path = Path(bundle)
+    result = validate_bundle_path(path, require_finalized=True)
+    if result.errors:
+        click.echo(click.style(format_validation_result(result), fg="red"))
+        sys.exit(1)
+    reader = BundleReader(path)
+    events = list(reader.iter_events())
+    click.echo(
+        click.style(
+            f"Replaying {min(last, len(events))} of {len(events)} bundle event(s)",
+            fg="cyan",
+        )
+    )
+    for ev in events[-last:]:
+        click.echo(f"{ev.timestamp.isoformat()} {ev.source} {ev.event_type}")
 
 
 @incident_group.command("list")
@@ -202,16 +257,18 @@ def incident_list(incidents_dir: str | None) -> None:
         return
 
     for path in bundles:
+        validation = inspect_bundle_path(path)
+        state = validation.state
         try:
             reader = BundleReader(path, strict=False)
             inc = reader.load_incident()
             click.echo(
-                f"{inc.incident_id}  severity={inc.severity}  "
+                f"{inc.incident_id}  state={state}  severity={inc.severity}  "
                 f"window={inc.window_start.isoformat()}.."
                 f"{inc.window_end.isoformat()}  title={inc.title!r}"
             )
         except Exception as exc:
-            click.echo(f"{path.name}  (unreadable: {exc})")
+            click.echo(f"{path.name}  state={state}  (unreadable: {exc})")
 
 
 @incident_group.command("attach")
@@ -221,8 +278,19 @@ def incident_list(incidents_dir: str | None) -> None:
               help="Copy the file into the bundle (default: symlink).")
 def incident_attach(bundle: str, path: str, do_copy: bool) -> None:
     """Attach a file or directory to a bundle (symlink by default)."""
+    bundle_path = Path(bundle)
+    validation = validate_bundle_path(bundle_path)
+    if validation.state == "valid_finalized" and not validation.errors:
+        click.echo(
+            click.style(
+                "Cannot attach to a finalized bundle; attachments must be present "
+                "before manifest finalization.",
+                fg="red",
+            )
+        )
+        sys.exit(1)
     src = Path(path).resolve()
-    dst_dir = Path(bundle) / "attachments"
+    dst_dir = bundle_path / "attachments"
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / src.name
     if dst.exists():
@@ -320,66 +388,17 @@ def prevention_list(rules_dir: str | None) -> None:
 def prevention_adopt(incident_dir: str, rules_dir: str | None) -> None:
     """Adopt the recommended preflight rule from an incident bundle."""
     rdir = Path(rules_dir).expanduser() if rules_dir else _DEFAULT_RULES_DIR
-    reader = BundleReader(Path(incident_dir))
-    incident = reader.load_incident()
-    triggers = reader.load_triggers()
-    if not incident.likely_causes:
-        click.echo(click.style("No likely causes; nothing to adopt.", fg="yellow"))
-        sys.exit(1)
-    top = incident.likely_causes[0]
-    if top.confidence < 0.7:
-        click.echo(click.style(
-            f"Top hypothesis confidence {top.confidence:.2f} below threshold 0.70; "
-            "refuse to auto-adopt.", fg="yellow"))
+    reader = BundleReader(Path(incident_dir), strict=False)
+    try:
+        derivation = derive_rule_from_bundle(reader)
+    except PreventionDerivationError as exc:
+        click.echo(click.style(str(exc), fg="yellow"))
         sys.exit(1)
 
-    cause_lower = top.cause.lower()
-    if "qos mismatch" in cause_lower:
-        topic = next(
-            (t.subject for t in triggers
-             if t.detector_class.endswith("QoSMismatchDetector")),
-            None,
-        )
-        if topic is None:
-            click.echo(click.style("No QoSMismatch trigger; cannot adopt.", fg="red"))
-            sys.exit(1)
-        check = PreflightCheck(
-            name=f"qos match on {topic}",
-            kind="qos_match",
-            params={"topic": topic},
-            severity_on_fail="block",
-        )
-    elif "stopped emitting" in cause_lower:
-        topic = next(
-            (t.subject for t in triggers
-             if t.detector_class.endswith("DeadTopicDetector")),
-            None,
-        )
-        if topic is None:
-            click.echo(click.style("No DeadTopic trigger; cannot adopt.", fg="red"))
-            sys.exit(1)
-        check = PreflightCheck(
-            name=f"topic present: {topic}",
-            kind="topic_present",
-            params={"topic": topic, "min_publishers": 1},
-            severity_on_fail="block",
-        )
-    else:
-        click.echo(click.style(
-            f"No automatic mapping for cause {top.cause!r}; adopt manually.",
-            fg="yellow"))
-        sys.exit(1)
-
-    rule = make_rule(
-        check,
-        rationale=top.cause,
-        source_incident_id=incident.incident_id,
-        source_fingerprint_id=(
-            incident.fingerprint.fingerprint_id if incident.fingerprint else None
-        ),
-    )
-    target = save_rule(rule, rdir)
+    target = save_rule(derivation.rule, rdir)
     click.echo(click.style(f"Adopted: {target}", fg="green"))
+    click.echo(f"  derived: {derivation.reason}")
+    click.echo(f"  trigger: {derivation.source_trigger.trigger_id}")
 
 
 __all__ = [

@@ -16,6 +16,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from blackboxrs.core.schemas import CaptureQuality
+
 
 SCHEMA_VERSION = "1.0"
 
@@ -243,11 +245,11 @@ class PrecursorRef(BaseModel):
 
     evidence_ref: str
     t: datetime
-    kind: str            # raw / derived / trigger / snapshot / external
+    kind: str  # raw / derived / trigger / snapshot / external
     subsystem: str
     summary: str
-    gap_sec: float       # positive = before the trigger; 0 = at trigger
-    relevance: float     # 0..1 contribution this row made to the score
+    gap_sec: float  # positive = before the trigger; 0 = at trigger
+    relevance: float  # 0..1 contribution this row made to the score
 
 
 class RecurrenceContext(BaseModel):
@@ -330,6 +332,7 @@ class Incident(BaseModel):
     triggers: list[str] = Field(default_factory=list)
     fingerprint: FailureFingerprint | None = None
     likely_causes: list[LikelyCauseHypothesis] = Field(default_factory=list)
+    capture_quality: CaptureQuality | None = None
     linked_prevention_rules: list[str] = Field(default_factory=list)
     notes: str | None = None
 

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blackboxrs.dev/schema/native_capture_long_run.v1.json",
+  "title": "BlackBoxRS native capture long-run result",
+  "type": "object",
+  "required": ["schema_version", "benchmark", "stability", "samples"],
+  "properties": {
+    "schema_version": {"const": "blackboxrs.capture_long_run.v1"},
+    "benchmark": {"type": "object"},
+    "stability": {
+      "type": "object",
+      "required": [
+        "requested_duration_sec",
+        "sample_period_sec",
+        "sample_count",
+        "rss_slope_mb_per_hour",
+        "trend"
+      ]
+    },
+    "samples": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false
+}

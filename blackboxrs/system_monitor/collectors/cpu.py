@@ -17,7 +17,7 @@ try:
     _HAS_PSUTIL = True
 except ImportError:  # pragma: no cover
     _HAS_PSUTIL = False
-    logger.warning("psutil not installed — CpuCollector will return empty results")
+    logger.warning("psutil not installed: CpuCollector will return empty results")
 
 
 class CpuCollector:
@@ -29,12 +29,12 @@ class CpuCollector:
         Returns:
             A dictionary with the following keys:
 
-            - ``cpu_percent`` — overall CPU utilization as a percentage (0–100).
-            - ``cpu_count`` — number of logical CPUs.
-            - ``per_cpu_percent`` — list of per-core utilization percentages.
-            - ``load_avg_1m`` — 1-minute load average.
-            - ``load_avg_5m`` — 5-minute load average.
-            - ``load_avg_15m`` — 15-minute load average.
+            - ``cpu_percent``: overall CPU utilization as a percentage (0–100).
+            - ``cpu_count``: number of logical CPUs.
+            - ``per_cpu_percent``: list of per-core utilization percentages.
+            - ``load_avg_1m``: 1-minute load average.
+            - ``load_avg_5m``: 5-minute load average.
+            - ``load_avg_15m``: 15-minute load average.
 
             Returns an empty dict if *psutil* is not available.
         """

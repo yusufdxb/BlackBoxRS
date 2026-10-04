@@ -22,10 +22,10 @@ class ThermalCollector:
 
         Each entry is a dictionary with:
 
-        - ``zone`` — the zone directory name (e.g. ``"thermal_zone0"``).
-        - ``type`` — the zone type string reported by the kernel
+        - ``zone``: the zone directory name (e.g. ``"thermal_zone0"``).
+        - ``type``: the zone type string reported by the kernel
           (e.g. ``"x86_pkg_temp"``).
-        - ``temp_c`` — temperature in degrees Celsius.
+        - ``temp_c``: temperature in degrees Celsius.
 
         Returns:
             A list of dicts.  Zones that cannot be read are silently skipped.

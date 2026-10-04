@@ -6,8 +6,10 @@ a real incident bundle captured off a robot you can already reach with
 
 The two assumptions are:
 
-1. You already have a ROS 2 installation on the laptop (Humble, Iron,
-   or Jazzy are tested). `source /opt/ros/<distro>/setup.bash` works.
+1. You already have a ROS 2 installation on the laptop. Humble is the
+   verified end-to-end path in CI. Other ROS 2 distributions may work
+   when `rclpy` is ABI-compatible, but they are not claimed as verified
+   here. `source /opt/ros/<distro>/setup.bash` works.
 2. The robot is reachable over DDS from this laptop, i.e.
    `ros2 topic list` returns the robot's topics. If it does not, see
    *DDS reachability* at the bottom.
@@ -97,10 +99,12 @@ In a second terminal, after the failure:
 
 ```bash
 robot-blackbox incident build --since 5m
+robot-blackbox incident verify ~/.blackboxrs/incidents/inc_*
 ```
 
 This slices the local JSONL log (everything the laptop captured) into a
-bundle at `~/.blackboxrs/incidents/inc_<timestamp>_<id>/`.
+bundle at `~/.blackboxrs/incidents/inc_<timestamp>_<id>/`, then verifies
+the finalized manifest and checksums.
 
 Render the report:
 
@@ -121,6 +125,12 @@ The header now distinguishes observer from observed:
 The rest of the bundle is identical to an onboard bundle and is
 portable: send it over Slack and any teammate can re-render the report
 with `robot-blackbox incident show <bundle-dir>`.
+
+`incident verify` exits 0 for finalized, checksum-valid bundles. It exits
+2 for readable legacy bundles without `manifest.json`, and 1 for
+incomplete, corrupted, or unsupported bundles. The checksum manifest
+detects local partial writes and accidental modification; it is not an
+authentication or tamper-proofing mechanism.
 
 ---
 
@@ -149,7 +159,7 @@ to the captured failure shows up again.
 
 ## What each detector measures in observer mode
 
-Live in v0.4.0.dev0:
+Live in the current engine:
 
 | Detector | Source | Works remotely? |
 |---|---|---|
@@ -157,15 +167,9 @@ Live in v0.4.0.dev0:
 | `dead_topic` | last-message timestamp per topic | yes |
 | `qos_mismatch` | rclpy `get_publishers_info_by_topic` | yes |
 | `threshold` (cpu / mem) | local psutil | only when system-monitor is enabled; describes the observer host. Disabled by default in observer mode. |
-
-Scaffolded but **not wired into the live engine** (their producers
-haven't shipped yet):
-
-| Detector | Planned producer | Status |
-|---|---|---|
-| `tf_topology` | `ros_monitor.tf_monitor` subscriber on `/tf` and `/tf_static` | implemented + unit-tested; engine wiring restored when producer ships |
-| `clock_skew` | `system_monitor.clock_skew_collector` (system clock + `/clock` topic sampling) | implemented + unit-tested; engine wiring restored when producer ships |
-| `process_signals` | `system_monitor.process_collector` (psutil per-pid walk) | implemented + unit-tested; engine wiring restored when producer ships. In observer mode this stays off permanently. |
+| `tf_topology` | `/tf` and `/tf_static` snapshots | yes; DDS-bound |
+| `clock_skew` | system clock, NTP/chrony, and ROS `/clock` sampling | partly. `/clock` is robot-relative over DDS; host/NTP checks describe the observer. |
+| `process_signals` | local psutil per-pid walk | onboard only. In observer mode the producer is disabled because it would sample the laptop, not the robot. |
 
 You can confirm what's actually wired today by running
 `robot-blackbox start --foreground` and watching the

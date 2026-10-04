@@ -148,6 +148,24 @@ _CROSS_SUBSYSTEM_FACTOR = 0.55
 # a long string of weak precursors could push confidence past evidence.
 _PRECURSOR_BONUS_CAP = 0.30
 
+# Hard cap on how much *coincidental* precursor evidence may contribute.
+# A precursor that names a topic which is NOT the trigger's subject is
+# unrelated churn until something proves otherwise: on a real robot the
+# graph is constantly changing (nodes starting, publisher counts moving)
+# and without this cap those events saturate _PRECURSOR_BONUS_CAP for
+# EVERY hypothesis, which flattens the ranking and buries specific
+# failures under generic ones.
+#
+# Found on real quadruped hardware: a killed node's
+# dead_topic ranked #567 of 567 behind frequency dips on healthy topics,
+# all tied at 0.88, because each had absorbed the full 0.30 from
+# unrelated graph deltas. One of them cited the victim node *starting up*
+# as a precursor for an unrelated frequency dip 8 s later.
+#
+# Precursors that carry no topic at all (resource excursions, for
+# example) are NOT penalised: they are legitimately cross-domain.
+_UNRELATED_PRECURSOR_CAP = 0.05
+
 # Temporal-proximity window. Precursors older than this against the
 # trigger are ignored. The function inside the window is a linear
 # decay from 1.0 at the trigger time to 0.0 at the window edge.
@@ -287,7 +305,8 @@ def _score_precursors(
 
     trigger_sub = _trigger_subsystem(trigger)
 
-    contributions: list[tuple[float, PrecursorRef, str]] = []
+    # (relevance, ref, reasoning_line, is_unrelated)
+    contributions: list[tuple[float, PrecursorRef, str, bool]] = []
 
     for ev in timeline:
         if ev.t >= trigger.t:
@@ -312,9 +331,15 @@ def _score_precursors(
         # Topic-match boost: a graph_delta or silence_interval whose
         # data.topic matches the trigger subject is much more relevant.
         topic_boost = 1.0
-        if kind in ("graph_delta", "silence_interval") and \
-                _topics_match(trigger.subject, ev.data):
+        names_a_topic = isinstance(ev.data.get("topic"), str)
+        same_topic = _topics_match(trigger.subject, ev.data)
+        if kind in ("graph_delta", "silence_interval") and same_topic:
             topic_boost = 1.5
+
+        # An event that names a DIFFERENT topic than the trigger subject
+        # is coincidental churn, not evidence. It still contributes, but
+        # only up to _UNRELATED_PRECURSOR_CAP in aggregate.
+        is_unrelated = names_a_topic and not same_topic
 
         relevance = peak * prox * align * topic_boost
         if relevance <= 0:
@@ -336,7 +361,7 @@ def _score_precursors(
             f"subsystem={ev.subsystem}, "
             f"relevance={relevance:.2f})"
         )
-        contributions.append((relevance, ref, line))
+        contributions.append((relevance, ref, line, is_unrelated))
 
     if not contributions:
         return 0.0, [], []
@@ -345,13 +370,23 @@ def _score_precursors(
     # independent precursors should matter more than one, but only up
     # to the cap (otherwise a noisy bundle inflates the score).
     contributions.sort(key=lambda c: c[1].t)  # earliest precursor first
-    total_relevance = sum(c[0] for c in contributions)
+    related_total = sum(c[0] for c in contributions if not c[3])
+    unrelated_raw = sum(c[0] for c in contributions if c[3])
+    unrelated_total = min(_UNRELATED_PRECURSOR_CAP, unrelated_raw)
+    total_relevance = related_total + unrelated_total
     bonus = min(_PRECURSOR_BONUS_CAP, total_relevance)
 
     chain = [c[1] for c in contributions]
     reasoning = [
         f"precursor: {c[2]}" for c in contributions
     ]
+    if unrelated_raw > unrelated_total:
+        reasoning.append(
+            f"precursors naming an unrelated topic contributed only "
+            f"{unrelated_total:.2f} of a raw {unrelated_raw:.2f} "
+            f"(capped at {_UNRELATED_PRECURSOR_CAP:.2f}); coincidental "
+            f"graph churn is not treated as causal evidence."
+        )
     if total_relevance > _PRECURSOR_BONUS_CAP:
         reasoning.append(
             f"precursor contribution capped at {_PRECURSOR_BONUS_CAP:.2f} "

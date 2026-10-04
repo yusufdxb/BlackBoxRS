@@ -4,11 +4,11 @@ Samples all configured time sources once per tick and emits a single
 ``system.clock_skew`` event for the :class:`ClockSkewDetector` to
 evaluate.  Sources sampled on each tick:
 
-- ``system``       — ``time.time()`` on the host running this process.
-- ``ntp:<peer>``   — offset reported by ``chronyc -c tracking`` (preferred)
+- ``system``      : ``time.time()`` on the host running this process.
+- ``ntp:<peer>``  : offset reported by ``chronyc -c tracking`` (preferred)
                      or ``ntpq -p`` (fallback).  Skipped cleanly if neither
                      binary is present on the path.
-- ``ros:/clock``   — latest stamp from the ROS ``/clock`` topic, included
+- ``ros:/clock``  : latest stamp from the ROS ``/clock`` topic, included
                      only when ``include_ros_clock`` is enabled or ``"auto"``
                      and ``rclpy`` is importable and an active subscription
                      has received at least one message.
@@ -69,8 +69,8 @@ def parse_chronyc_tracking(output: str) -> list[tuple[str, float]] | None:
         output: Raw stdout from ``chronyc -c tracking``.
 
     Returns:
-        A list of ``(name, epoch_sec)`` tuples — typically one entry for
-        the selected NTP peer — or ``None`` if the output could not be
+        A list of ``(name, epoch_sec)`` tuples: typically one entry for
+        the selected NTP peer, or ``None`` if the output could not be
         parsed.
     """
     results: list[tuple[str, float]] = []
@@ -176,7 +176,7 @@ def _read_ntp_sources(ntp_tool: str) -> list[tuple[str, float]]:
         if not shutil.which("chronyc"):
             if not _CHRONYC_WARNED:
                 logger.warning(
-                    "chronyc not found on PATH — NTP source skipped. "
+                    "chronyc not found on PATH: NTP source skipped. "
                     "Install chrony or switch ntp_tool to 'ntpq'."
                 )
                 _CHRONYC_WARNED = True
@@ -199,7 +199,7 @@ def _read_ntp_sources(ntp_tool: str) -> list[tuple[str, float]]:
         if not shutil.which("ntpq"):
             if not _NTPQ_WARNED:
                 logger.warning(
-                    "ntpq not found on PATH — NTP source skipped. "
+                    "ntpq not found on PATH: NTP source skipped. "
                     "Install ntp or chrony."
                 )
                 _NTPQ_WARNED = True
@@ -330,7 +330,7 @@ class ClockSkewCollector:
         except ImportError:
             if not _ROS_IMPORT_WARNED:
                 logger.debug(
-                    "rclpy/rosgraph_msgs not importable — ros:/clock source disabled"
+                    "rclpy/rosgraph_msgs not importable: ros:/clock source disabled"
                 )
                 _ROS_IMPORT_WARNED = True
         except Exception:
@@ -419,7 +419,7 @@ class ClockSkewCollector:
 
         if len(sources) < 2:
             logger.debug(
-                "ClockSkewCollector: only %d source(s) — skipping snapshot "
+                "ClockSkewCollector: only %d source(s): skipping snapshot "
                 "(need ≥2 to compare)",
                 len(sources),
             )
@@ -428,7 +428,7 @@ class ClockSkewCollector:
         if window_sec > self._window_budget_sec:
             logger.warning(
                 "ClockSkewCollector: collection window %.1f ms exceeds budget "
-                "%.1f ms — dropping snapshot to avoid stale skew arithmetic.",
+                "%.1f ms: dropping snapshot to avoid stale skew arithmetic.",
                 window_sec * 1000,
                 self._window_budget_sec * 1000,
             )

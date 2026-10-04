@@ -2,7 +2,8 @@
 
 Learns the expected publication rate for each topic from the first N
 samples and then fires when the observed rate drops below a configurable
-tolerance percentage of the learned baseline.
+tolerance percentage of the learned baseline. A separate recovery threshold
+prevents repeated triggers while a noisy rate remains near the entry boundary.
 """
 
 from __future__ import annotations
@@ -27,20 +28,21 @@ class FrequencyDetector(BaseDetector):
 
     1. **Learning** -- collects the first ``_LEARNING_SAMPLES`` frequency
        readings and averages them to establish a baseline.
-    2. **Monitoring** -- compares every subsequent reading against
-       ``baseline * (1 - tolerance_percent / 100)``.  If the observed
-       frequency falls below the floor, an anomaly event is emitted.
+    2. **Monitoring** -- compares subsequent readings against separate
+       entry and recovery floors derived from the baseline.
 
-    Hysteresis: an anomaly is only emitted after
+    An anomaly is only emitted after
     ``min_consecutive_samples`` consecutive violating samples for the
-    same topic.  A healthy sample resets the counter to zero.
+    same topic. The topic then remains latched and emits nothing further
+    until its rate reaches the stricter recovery floor. Readings between
+    the entry and recovery floors do not re-arm the detector.
 
     Only ``ros_monitor`` events with ``event_type == "ros.frequency"``
     are inspected.
 
     Args:
-        config: A :class:`FrequencyConfig` holding ``tolerance_percent``
-            and ``min_consecutive_samples``.
+        config: A :class:`FrequencyConfig` holding the entry tolerance,
+            recovery tolerance, and required consecutive samples.
     """
 
     #: Fingerprint-stable identity. Two frequency-drop incidents on the
@@ -51,11 +53,12 @@ class FrequencyDetector(BaseDetector):
 
     def __init__(self, config: FrequencyConfig) -> None:
         self._tolerance_pct = config.tolerance_percent
+        self._recovery_tolerance_pct = config.recovery_tolerance_percent
         self._min_consecutive = config.min_consecutive_samples
         self._samples: dict[str, list[float]] = defaultdict(list)
         self._baselines: dict[str, float] = {}
-        # Per-topic violation counter.
         self._violation_counts: dict[str, int] = {}
+        self._alerted_topics: set[str] = set()
 
     @property
     def name(self) -> str:
@@ -72,9 +75,10 @@ class FrequencyDetector(BaseDetector):
             event: The incoming pipeline event.
 
         Returns:
-            An anomaly event if the frequency dropped below the
-            tolerance floor for ``min_consecutive_samples`` consecutive
-            samples, else ``None``.
+            One anomaly event when the frequency first remains below the
+            entry floor for ``min_consecutive_samples`` consecutive samples.
+            The topic must recover above the exit floor before another event
+            can be emitted.
         """
         if event.source != "ros_monitor" or event.event_type != "ros.frequency":
             return None
@@ -102,29 +106,38 @@ class FrequencyDetector(BaseDetector):
 
         # -- Monitoring phase -------------------------------------------------
         baseline = self._baselines[topic]
-        floor = baseline * (1 - self._tolerance_pct / 100.0)
+        entry_floor = baseline * (1 - self._tolerance_pct / 100.0)
+        recovery_floor = baseline * (1 - self._recovery_tolerance_pct / 100.0)
 
-        if frequency_hz >= floor:
-            # Healthy sample: reset violation counter for this topic.
+        if topic in self._alerted_topics:
+            if frequency_hz >= recovery_floor:
+                self._alerted_topics.remove(topic)
+                self._violation_counts[topic] = 0
+            return None
+
+        if frequency_hz >= entry_floor:
             self._violation_counts[topic] = 0
             return None
 
-        # Violating sample: increment counter.
         count = self._violation_counts.get(topic, 0) + 1
         self._violation_counts[topic] = count
 
         if count < self._min_consecutive:
             return None
 
+        self._alerted_topics.add(topic)
+        self._violation_counts[topic] = 0
+
         anomaly = AnomalyData(
             detector=self.name,
             metric=f"frequency:{topic}",
             value=frequency_hz,
-            threshold=floor,
+            threshold=entry_floor,
             message=(
                 f"Topic {topic} frequency dropped to {frequency_hz:.2f} Hz, "
-                f"below floor of {floor:.2f} Hz "
-                f"(baseline {baseline:.2f} Hz, tolerance {self._tolerance_pct}%)"
+                f"below entry floor of {entry_floor:.2f} Hz "
+                f"(baseline {baseline:.2f} Hz, "
+                f"recovery floor {recovery_floor:.2f} Hz)"
             ),
         )
 
@@ -132,7 +145,7 @@ class FrequencyDetector(BaseDetector):
             "Frequency anomaly on %s: %.2f Hz < %.2f Hz floor",
             topic,
             frequency_hz,
-            floor,
+            entry_floor,
         )
 
         # Surface signature-field values into ``data`` so they round-trip

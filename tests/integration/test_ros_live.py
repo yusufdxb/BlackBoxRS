@@ -1,4 +1,4 @@
-"""Live rclpy integration test — skipped when ROS 2 is unavailable.
+"""Live rclpy integration test: skipped when ROS 2 is unavailable.
 
 Boots a real ``rclpy`` publisher on a unique ROS_DOMAIN_ID and verifies
 that ``RosMonitor`` actually observes the topic on the ROS 2 graph,
@@ -22,11 +22,11 @@ from queue import Empty
 import pytest
 
 rclpy = pytest.importorskip(
-    "rclpy", reason="rclpy not installed — skipping live ROS 2 integration"
+    "rclpy", reason="rclpy not installed: skipping live ROS 2 integration"
 )
 pytest.importorskip(
     "std_msgs.msg",
-    reason="std_msgs not installed — skipping live ROS 2 integration",
+    reason="std_msgs not installed: skipping live ROS 2 integration",
 )
 
 from std_msgs.msg import String  # noqa: E402
@@ -54,7 +54,7 @@ def _pick_test_domain_id() -> str:
     return str(rng.randint(50, 200))
 
 
-# One domain per pytest session — stable across tests so every
+# One domain per pytest session: stable across tests so every
 # component booted inside the session sees the same graph.
 _TEST_DOMAIN_ID = _pick_test_domain_id()
 
@@ -67,7 +67,7 @@ def _isolated_ros_domain(monkeypatch: pytest.MonkeyPatch):
 
 
 def _shutdown_rclpy() -> None:
-    """Best-effort rclpy shutdown — safe to call when not initialised."""
+    """Best-effort rclpy shutdown: safe to call when not initialised."""
     try:
         if rclpy.ok():
             rclpy.shutdown()
@@ -138,12 +138,12 @@ def test_ros_monitor_observes_live_publisher():
                 break
 
         assert topology_event is not None, (
-            "RosMonitor never emitted a ros.topology event — graph "
+            "RosMonitor never emitted a ros.topology event: graph "
             "discovery broken against a live rclpy context"
         )
         assert frequency_event is not None, (
             f"RosMonitor did not emit ros.frequency for {topic!r} "
-            "within 8s — live discovery / subscription path regressed"
+            "within 8s: live discovery / subscription path regressed"
         )
         hz = frequency_event.data.get("frequency_hz")
         assert isinstance(hz, (int, float)) and hz > 0.0, (
@@ -174,7 +174,7 @@ def test_ros_monitor_respects_topic_filters():
         enabled=True,
         poll_interval_sec=0.5,
         track_latency=False,
-        # Only accept topics under this namespace — the publisher below
+        # Only accept topics under this namespace: the publisher below
         # uses a different namespace and should be ignored.
         topic_filters=["/blackbox_allowed/*"],
     )

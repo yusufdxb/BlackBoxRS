@@ -13,7 +13,7 @@ from typing import Iterable
 from blackboxrs.core.config import BlackBoxConfig
 
 from .builder import IncidentBuilder
-from .bundle import BundleReader
+from .bundle import BundleReader, validate_bundle_path
 from .report import render
 
 
@@ -41,4 +41,19 @@ def load_bundle(bundle_dir: Path | str) -> BundleReader:
 
 def render_report(bundle_dir: Path | str) -> str:
     """Render an incident bundle's ``report.md`` content."""
-    return render(BundleReader(Path(bundle_dir)))
+    path = Path(bundle_dir)
+    result = validate_bundle_path(path)
+    if result.errors:
+        details = "; ".join(
+            f"{issue.code}:{issue.path or '-'}:{issue.message}"
+            for issue in result.errors
+        )
+        raise ValueError(f"Invalid incident bundle {path}: {details}")
+    text = render(BundleReader(path))
+    if result.state == "legacy":
+        warning = (
+            "> **Integrity warning:** this legacy bundle has no `manifest.json`; "
+            "file checksums were not verified.\n\n"
+        )
+        return warning + text
+    return text
