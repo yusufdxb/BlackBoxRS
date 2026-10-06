@@ -22,6 +22,8 @@ machine it was measured on.
 | `cpp_soak_workstation_20cef29.json` | the same before the chunk-table fix | `20cef29` |
 | `cpp_soak_workstation_50db5a1.json` | an earlier soak whose harness grew the RSS it measured | `50db5a1` |
 | `massif/*.massif` | Valgrind massif heap profiles, 10 min at 5x, before and after the fix | `b21bba0` |
+| `cpp_core_orin_nx_h0.json` | gate H0 on the GO2 payload Orin NX: ROS-free pipeline, queue, serialization, replay (30 s, synthetic go2_helix 1x load) | `ee2f7dd` |
+| `cpp_verify_orin_nx_h0.json` | gate H0 on the Orin NX: `verify --repeat 10`, 30/30 deterministic, every result digest identical to the x86_64 run at the same commit | `ee2f7dd` |
 
 ## 1. Recorder on real ROS 2 traffic
 
@@ -175,12 +177,17 @@ long bundle on the Orin NX (16 GB).
 
 ## 5. Not measured here
 
-* Anything on the Orin NX: CPU, RSS, fsync latency on the payload disk,
-  thermal behaviour. Gate H1.
+* The recorder on live robot traffic on the Orin NX: CPU, RSS, fsync
+  latency on the payload disk, thermal behaviour. Gate H1. Gate H0 has run
+  there (2026-10-06, `ee2f7dd`: release build with 0 warnings, 197/197 core
+  tests, the two H0 files above); at the synthetic 1x go2_helix load the
+  recording pipeline used 3.9 % of one core including the load generator,
+  with 0 drops. That is not a live DDS measurement.
 * Whether Cyclone DDS on the robot supplies source timestamps (the recorder
   handles their absence; the clock monitor then has less to judge).
 * Latency under real-time scheduling. The runtime makes no real-time claim.
 * A soak longer than 30 minutes, or on real robot traffic.
 * An aarch64 soak. CI builds and tests on aarch64 and checks that every
-  golden replay is byte-identical to x86_64 (30/30 at `1140d01`), but it
-  runs no benchmark there.
+  golden replay is byte-identical to x86_64 (30/30 at `1140d01`, and on
+  the Orin NX itself at `ee2f7dd`); the only aarch64 benchmark is the 30 s
+  H0 run above.
