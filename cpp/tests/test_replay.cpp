@@ -152,9 +152,11 @@ TEST(DeadlinePacer, ZeroStepsNeverSleepAndRebaseRestartsTheSchedule) {
 }
 
 TEST(DeadlinePacer, RejectsNonPositiveSpeed) {
-  EXPECT_THROW(DeadlinePacer(0.0), std::invalid_argument);
-  EXPECT_THROW(DeadlinePacer(-1.0), std::invalid_argument);
-  EXPECT_THROW(DeadlinePacer(std::numeric_limits<double>::quiet_NaN()), std::invalid_argument);
+  // Braces, not parentheses: clang parses DeadlinePacer(std::numeric_limits<
+  // double>::quiet_NaN()) as a declaration (most vexing parse).
+  EXPECT_THROW(DeadlinePacer{0.0}, std::invalid_argument);
+  EXPECT_THROW(DeadlinePacer{-1.0}, std::invalid_argument);
+  EXPECT_THROW(DeadlinePacer{std::numeric_limits<double>::quiet_NaN()}, std::invalid_argument);
 }
 
 TEST(Replay, DeadlinePacingNeverChangesTheResult) {
